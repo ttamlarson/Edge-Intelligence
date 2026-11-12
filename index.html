@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090d16">
+  <meta name="description" content="AI-powered prediction market research and opportunity discovery.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <title>EDGE — Prediction Market Intelligence</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">E</span><span>EDGE<small>MARKET INTELLIGENCE</small></span></a>
+      <div class="side-label">WORKSPACE</div>
+      <nav>
+        <button class="nav-item active" data-page="overview"><span>◫</span> Overview</button>
+        <button class="nav-item" data-page="discover"><span>⌕</span> Discover markets</button>
+        <button class="nav-item" data-page="analyzer"><span>✳</span> AI analyzer <i class="new-dot"></i></button>
+        <button class="nav-item" data-page="opportunities"><span>↗</span> Opportunities</button>
+        <button class="nav-item" data-page="watchlist"><span>☆</span> Watchlist</button>
+        <button class="nav-item" data-page="paper"><span>▤</span> Paper trading</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="connection"><span class="status-dot"></span><span id="connectionText">Demo data mode</span></div>
+        <button class="nav-item" data-page="settings"><span>⚙</span> Settings & integrations</button>
+        <div class="user-chip"><div class="avatar">E</div><div>Personal workspace<small>Local profile</small></div></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-brand" data-page="overview">EDGE</button>
+        <div class="breadcrumb">Workspace <span>/</span> <b id="pageCrumb">Overview</b></div>
+        <div class="top-actions"><span class="live-indicator"><i></i> MARKET INTELLIGENCE</span><button class="icon-btn" id="refreshBtn" title="Refresh">↻</button></div>
+      </header>
+
+      <section class="page active" id="page-overview">
+        <div class="welcome-row"><div><div class="eyebrow">THURSDAY, NOVEMBER 12, 2026</div><h1>Find your <em>edge.</em></h1><p class="muted">Research markets, challenge the consensus and find mispriced probabilities.</p></div><button class="primary-btn" data-goto="analyzer">✳ Analyze a market</button></div>
+        <div class="notice"><span>ⓘ</span><div><b>Research mode</b><p>EDGE provides analytical estimates, not guaranteed outcomes. No real-money orders are placed.</p></div><button class="dismiss" aria-label="Dismiss" id="dismissNotice">×</button></div>
+        <div class="section-heading"><div><h2>Market overview</h2><p>Cross-platform snapshot</p></div><button class="text-btn" data-goto="discover">Explore markets →</button></div>
+        <div class="metric-grid">
+          <article class="metric-card"><span>MARKETS TRACKED</span><strong id="metricMarkets">—</strong><small>Across connected venues</small></article>
+          <article class="metric-card"><span>OPPORTUNITIES FOUND</span><strong id="metricOpps">—</strong><small>Based on configured filters</small></article>
+          <article class="metric-card"><span>WATCHLIST</span><strong id="metricWatch">0</strong><small>Your saved markets</small></article>
+          <article class="metric-card"><span>PAPER P&L</span><strong id="metricPnl">$0.00</strong><small>Simulated performance</small></article>
+        </div>
+        <div class="content-grid">
+          <div class="panel wide-panel"><div class="panel-head"><div><h3>Opportunity radar</h3><p>Markets with a potential gap between price and estimated probability</p></div><span class="tag">MODEL ESTIMATES</span></div><div id="radarList" class="market-list"></div></div>
+          <div class="panel"><div class="panel-head"><div><h3>Connected venues</h3><p>Data integration status</p></div></div><div id="venueList" class="venue-list"></div><button class="secondary-btn full" data-goto="settings">Configure integrations</button></div>
+        </div>
+        <div class="disclaimer">Market probabilities and AI estimates are uncertain. Historical performance does not predict future results. Always verify market rules, resolution criteria, liquidity, fees and jurisdictional availability.</div>
+      </section>
+
+      <section class="page" id="page-discover">
+        <div class="page-title"><div class="eyebrow">CROSS-PLATFORM INTELLIGENCE</div><h1>Discover markets</h1><p class="muted">Search available venues in one normalized view.</p></div>
+        <div class="filter-bar"><input id="marketSearch" placeholder="Search markets, events or keywords…"><select id="venueFilter"><option value="all">All platforms</option><option>polymarket</option><option>kalshi</option><option>manifold</option><option>predictit</option><option>opinion</option><option>predictfun</option></select><button class="primary-btn" id="searchBtn">Search</button></div>
+        <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>PLATFORM</th><th>YES PRICE</th><th>VOLUME</th><th></th></tr></thead><tbody id="marketRows"><tr><td colspan="5" class="empty">Connect a market data provider in Settings or use demo mode.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="page" id="page-analyzer">
+        <div class="page-title"><div class="eyebrow">AI-POWERED RESEARCH</div><h1>Market analyzer</h1><p class="muted">Turn a market question into a structured probability and risk assessment.</p></div>
+        <div class="analyzer-layout">
+          <div class="panel analyzer-input">
+            <div class="panel-head"><div><h3>Analyze a market</h3><p>Paste a market URL, enter the question or upload a screenshot.</p></div><span class="spark">✳</span></div>
+            <label>MARKET URL <input id="marketUrl" placeholder="https://polymarket.com/event/…"></label>
+            <div class="or-divider"><span>OR ENTER MARKET DETAILS</span></div>
+            <label>MARKET QUESTION <textarea id="marketQuestion" rows="3" placeholder="e.g. Will the RBA cut interest rates at its next meeting?"></textarea></label>
+            <div class="two-inputs"><label>YES PRICE (%)<input id="yesPrice" type="number" min="0" max="100" placeholder="e.g. 42"></label><label>PLATFORM<select id="analysisPlatform"><option>Unknown / screenshot</option><option>Polymarket</option><option>Kalshi</option><option>Manifold</option><option>Other</option></select></label></div>
+            <label class="upload-zone" for="screenshotInput"><span>＋</span><b>Upload market screenshot</b><small>PNG, JPG or WEBP · image is sent only when you run analysis</small><input id="screenshotInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <div id="fileName" class="file-name"></div>
+            <button class="primary-btn full" id="analyzeBtn">✳ Run AI analysis</button>
+            <small class="muted tiny">Analysis requires a configured secure backend and AI provider key. Demo mode will show a sample report.</small>
+          </div>
+          <div class="panel analyzer-guide"><div class="spark large">✳</div><h3>What EDGE evaluates</h3><div class="guide-item"><b>01 / Probability estimate</b><p>Independent estimated probability, with assumptions and uncertainty.</p></div><div class="guide-item"><b>02 / Market edge</b><p>Estimated probability compared with the quoted price, before fees.</p></div><div class="guide-item"><b>03 / Evidence & catalysts</b><p>Supporting facts, counterarguments and upcoming events to verify.</p></div><div class="guide-item"><b>04 / Risk & invalidation</b><p>Liquidity, resolution wording, time horizon and what would change the view.</p></div></div>
+        </div>
+        <div id="analysisResult" class="panel result-panel hidden"></div>
+      </section>
+
+      <section class="page" id="page-opportunities">
+        <div class="page-title"><div class="eyebrow">SIGNAL DISCOVERY</div><h1>Opportunities</h1><p class="muted">Ranked candidates for deeper research — not automatic betting signals.</p></div>
+        <div class="notice"><span>ⓘ</span><div><b>How ranking works</b><p>Opportunity score is a screening heuristic, not a probability of profit. It is only meaningful when market data, model assumptions and liquidity are verified.</p></div></div>
+        <div id="opportunityList" class="opportunity-list"></div>
+      </section>
+
+      <section class="page" id="page-watchlist">
+        <div class="page-title"><div class="eyebrow">SAVED RESEARCH</div><h1>Watchlist</h1><p class="muted">Keep an eye on markets you want to revisit.</p></div>
+        <div id="watchlistRows" class="market-list"></div>
+      </section>
+
+      <section class="page" id="page-paper">
+        <div class="page-title"><div class="eyebrow">RISK-FREE SIMULATION</div><h1>Paper trading</h1><p class="muted">Test a thesis with virtual funds. No wallet or exchange connection.</p></div>
+        <div class="metric-grid"><article class="metric-card"><span>VIRTUAL BALANCE</span><strong id="paperBalance">$10,000.00</strong><small>Starting bankroll</small></article><article class="metric-card"><span>OPEN POSITIONS</span><strong id="paperPositions">0</strong><small>Simulated positions</small></article><article class="metric-card"><span>REALIZED P&L</span><strong id="paperRealized">$0.00</strong><small>Closed positions</small></article><article class="metric-card"><span>RETURN</span><strong id="paperReturn">0.00%</strong><small>Since simulation start</small></article></div>
+        <div class="panel"><div class="panel-head"><div><h3>New simulated position</h3><p>Use a market you have researched.</p></div></div><div class="paper-form"><label>MARKET QUESTION<input id="paperQuestion" placeholder="Market question"></label><label>OUTCOME<select id="paperSide"><option>YES</option><option>NO</option></select></label><label>ENTRY PRICE (%)<input id="paperPrice" type="number" min="1" max="99" placeholder="50"></label><label>STAKE ($)<input id="paperStake" type="number" min="1" placeholder="100"></label><button class="primary-btn" id="paperAdd">Add simulated position</button></div></div>
+        <div class="panel"><div class="panel-head"><h3>Positions</h3><button class="text-btn" id="resetPaper">Reset simulation</button></div><div id="positionList" class="market-list"></div></div>
+      </section>
+
+      <section class="page" id="page-settings">
+        <div class="page-title"><div class="eyebrow">CONFIGURATION</div><h1>Settings & integrations</h1><p class="muted">Connect data providers through a secure backend. Never paste secret keys into this page.</p></div>
+        <div class="panel settings-panel"><div class="panel-head"><div><h3>Backend connection</h3><p>Cloudflare Worker URL for secure market and AI requests.</p></div></div><label>API BACKEND URL<input id="backendUrl" placeholder="https://your-worker.your-subdomain.workers.dev"></label><button class="primary-btn" id="saveSettings">Save connection</button><button class="text-btn" id="testConnection">Test connection</button><div id="settingsStatus" class="muted tiny"></div></div>
+        <div class="panel settings-panel"><div class="panel-head"><div><h3>Supported integrations</h3><p>Coverage depends on provider access, plan and venue terms.</p></div><span class="tag">ADAPTER-BASED</span></div><div class="integration-grid" id="integrationGrid"></div></div>
+        <div class="panel settings-panel"><h3>Privacy & safety</h3><ul class="safety-list"><li>Secret API keys belong in Worker environment variables, never browser code.</li><li>Screenshot uploads are sent to your configured backend only when you request analysis.</li><li>Watchlists and paper-trading records are stored locally in this browser by default.</li><li>No wallet connection, real-money order placement or copy trading is enabled.</li><li>Check Australian legal availability and each platform's own terms before using any venue.</li></ul></div>
+      </section>
+      <footer>EDGE INTELLIGENCE <span>Independent research · Simulated trading only</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

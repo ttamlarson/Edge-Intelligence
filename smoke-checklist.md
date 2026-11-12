@@ -1,0 +1,14 @@
+# EDGE expanded MVP smoke test
+- [ ] GitHub Pages loads and installs as PWA on iPhone.
+- [ ] Backend health indicates market data, AI and KV bindings.
+- [ ] Market search shows source platform, prices and rules where available.
+- [ ] Deep research returns a probability range, YES/NO case, limitations and citations.
+- [ ] AI analyzer uses the same evidence research path.
+- [ ] Manual scanner returns provider arbitrage candidates and marks depth/size flags.
+- [ ] Scheduled cron runs every 15 minutes after Worker deployment.
+- [ ] Webhook alerts only send on first qualifying signal or ROI change >= 1.5 points.
+- [ ] Backtest returns historical candle count, buy/hold movement and drawdown.
+- [ ] Forecasts persist in local browser storage.
+- [ ] Manual resolution calculates Brier score correctly.
+- [ ] No secret appears in frontend bundle, repository or browser localStorage.
+- [ ] CORS is restricted and authentication/rate limiting added before public production.

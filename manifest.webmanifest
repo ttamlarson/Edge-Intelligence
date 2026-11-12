@@ -1,0 +1,17 @@
+{
+  "name": "EDGE \u2014 Prediction Market Intelligence",
+  "short_name": "EDGE",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "description": "AI-powered prediction market research and opportunity discovery.",
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
