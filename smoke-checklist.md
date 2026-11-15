@@ -1,36 +1,42 @@
 # EDGE deployment smoke checklist
 
-## Automated checks (run locally)
-- [x] `npm test` passes all 49 deterministic mocked adapter, domain, Worker, interface and service-worker tests (2026-11-15).
-- [x] `npm run check` passes syntax checks for browser, Worker, domain/source adapter and Pages build modules (2026-11-15).
-- [x] `npm run build:pages` emits only the public static application assets (2026-11-15).
-- [x] Local HTTPS-equivalent `localhost` secure context fetched both manifest PNG icons and fired `beforeinstallprompt`.
-- [x] Local desktop and mobile navigation smoke tests; no horizontal overflow; offline shell reload passed.
+## Automated CI validation
+- [x] GitHub Actions `npm test` passed all 59 deterministic tests on commit `9f3729722f3583bae5a9baf5d14fff0fc044122e` (2026-11-15).
+- [x] GitHub Actions `npm run check` passed JavaScript syntax checks on the same commit.
+- [x] GitHub Actions `npm run build:pages` completed successfully on the same commit.
+- [x] CI verified `dist/autonomous-engine.js` exists in the static build.
+- [ ] Re-run CI after the PWA offline-cache and project-path fixes in this branch; do not treat earlier green CI as validation of later commits.
+- [ ] Download and inspect the CI static-site artifact after it is produced.
 
 ## ASX autonomous paper desk
 - [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
-- [ ] Confirm stale, malformed, duplicate and non-AUD bars cannot create candidates.
-- [ ] Confirm paper positions enforce the AUD 500 start, AUD 200 max allocation, AUD 100 cash reserve, two-position cap and 1% risk budget.
-- [ ] Confirm manual paper exits calculate brokerage/GST/slippage estimates and update the local closed-trade ledger.
-- [ ] Confirm no broker API, credentials or real-money order route exists.
+- [x] Automated tests reject malformed OHLC, duplicate sessions, missing provenance, non-AUD and stale daily bars.
+- [x] Automated tests cover paper exits, exit-cost estimates, mark-to-market, portfolio cash reserve, position caps and simulation-only restrictions.
+- [ ] Complete a browser-level import/open/mark/close walkthrough with authorised market data.
+- [x] Automated tests confirm there is no broker order execution path in the ASX paper engine.
 
-## Required after account configuration, before deployment is considered verified
-- [ ] Confirm Pages serves the site over HTTPS and applies `_headers` security headers.
-- [ ] Complete standalone install on supported desktop/mobile browsers; only installability event/icons were verified locally, not the OS/browser install dialog.
-- [ ] Verify service-worker update activation and page reload on a clean HTTPS browser profile. A waiting update prompt was observed locally but selecting Update did not complete activation in this test session.
-- [ ] Confirm the existing `edge-intelligence-v1`, `edge-forecasts-v1` and `edge-alert-rules-v1` browser storage remains unchanged after the frontend update.
-- [ ] Confirm Cloudflare Access policies permit intended users only and reject missing, expired, wrong-audience and wrong-issuer JWTs.
-- [ ] Confirm exact CORS origins, credentialed preflight behavior, rate-limit bindings and request limits in deployed Worker.
-- [ ] Call authenticated `/api/health`; treat it as configuration status, not a provider integration test.
-- [ ] Test Prediction.com with the configured account entitlement, and Manifold search/pagination. Record venue, quote type, currency, jurisdiction, source timestamp and retrieval timestamp.
-- [ ] Test actual RBA cash-rate and RSS response parsing via the deployed Worker. Compare results with the linked official source.
+## Static app and PWA
+- [x] Static Pages build copies all required application assets, including `autonomous-engine.js`.
+- [x] Service-worker shell now includes `autonomous-engine.js` for offline ASX paper-desk module loading.
+- [x] Service-worker cache version incremented to invalidate the previous shell.
+- [x] Manifest identity, start URL and scope are relative to support a project Pages path such as `/Edge-Intelligence/`.
+- [ ] Verify Pages serves the site over HTTPS and applies the intended security headers.
+- [ ] Complete standalone install on supported desktop/mobile browsers.
+- [ ] Verify service-worker update activation and offline reload on a clean HTTPS browser profile.
+- [ ] Confirm existing `edge-intelligence-v1`, `edge-forecasts-v1` and `edge-alert-rules-v1` browser storage remains unchanged after deployment.
+
+## Integrations requiring backend account configuration
+- [ ] Configure Worker bindings, Cloudflare Access, exact CORS origins and secrets.
+- [ ] Call authenticated `/api/health`; treat it as configuration status, not proof that external providers work.
+- [ ] Test Prediction.com with configured account entitlement, and Manifold search/pagination. Record venue, quote type, currency, jurisdiction, source timestamp and retrieval timestamp.
+- [ ] Test actual RBA cash-rate and RSS parsing through the deployed Worker and compare against official sources.
 - [ ] Obtain/configure ABS API key and verify a selected official dataflow and observation periods.
-- [ ] Do not enable BOM records until distribution rights are confirmed; if approved, verify timestamps, source links and required attribution.
+- [ ] Do not enable BOM records until distribution rights are confirmed.
 - [ ] Keep AEC results empty until registered feed access and HTTPS ingestion are deployed and verified.
-- [ ] Confirm ASX remains absent until a data licence is established; confirm FEX remains non-integrated until an event API/product and access are verified.
-- [ ] Confirm analyzer/research citations link to HTTPS sources and distinguish model estimate from user-supplied market price.
-- [ ] Confirm scanner results say provider ROI estimate, research-only, simulated candidate and not executable.
-- [ ] Confirm paper settlement changes virtual AUD units only; no payment, order or wallet request exists.
-- [ ] Confirm user A cannot read/overwrite user B's alert thresholds.
+- [ ] Keep ASX market data absent until a suitable data licence is established; FEX remains non-integrated until product/API access is verified.
+- [ ] Confirm user alert thresholds are isolated by authenticated user.
 - [ ] Confirm no provider secret appears in static output, browser storage, logs or error responses.
-- [ ] If publishing on GitHub Pages, configure equivalent response headers separately; this repository has no GitHub Pages workflow.
+
+## Release boundary
+- This branch is research and paper simulation only. It does not connect to a broker, submit orders, or enable real-money trading.
+- GitHub Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
