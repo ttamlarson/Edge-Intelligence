@@ -1,139 +1,472 @@
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type,Authorization"
+import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } from "./domain.js";
+import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
+
+const PRED_BASE = "https://prediction.com/api/v2";
+const MAX_JSON_BYTES = 64 * 1024;
+const MAX_ANALYZE_BYTES = 7 * 1024 * 1024;
+const SECURITY_HEADERS = {
+  "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  "Strict-Transport-Security": "max-age=31536000"
 };
-const json = (data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...CORS,"Content-Type":"application/json","Cache-Control":"no-store"}});
-const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
-const PRED_BASE="https://prediction.com/api/v2";
-async function pred(env,path){
- if(!env.PREDICTION_HUNT_API_KEY)return {error:"PREDICTION_HUNT_API_KEY is not configured."};
- const r=await fetch(PRED_BASE+path,{headers:{"X-API-Key":env.PREDICTION_HUNT_API_KEY,"Accept":"application/json"}});
- const data=await r.json().catch(()=>({}));
- if(!r.ok)throw new Error(data.error?.message||data.message||`Prediction data provider returned ${r.status}`);
- return data;
+let accessKeysCache = null;
+let accessKeysCacheAt = 0;
+let accessKeysPending = null;
+
+class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+const isoNow = () => new Date().toISOString();
+
+function configuredOrigins(env) {
+  return String(env.FRONTEND_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean).map(value => {
+    try { const url = new URL(value); return url.origin === value && (url.protocol === "https:" || ["localhost", "127.0.0.1"].includes(url.hostname)) ? value : null; }
+    catch { return null; }
+  }).filter(Boolean);
 }
-function normMarket(m){
- const p=m.price||{};
- const mid=num(p.yes_bid)!=null&&num(p.yes_ask)!=null?(Number(p.yes_bid)+Number(p.yes_ask))/2:num(p.last_price);
- return {id:String(m.id),market_id:String(m.market_id),platform:m.platform,title:m.event_title?`${m.event_title} — ${m.title}`:m.title,category:m.category,status:m.status,price:mid,bid:num(p.yes_bid),ask:num(p.yes_ask),spread:num(p.yes_bid)!=null&&num(p.yes_ask)!=null?Number(p.yes_ask)-Number(p.yes_bid):null,volume:num(p.volume),liquidity:num(p.liquidity),expiration_date:m.expiration_date,url:m.source_url,rules:m.rules||null};
+function corsHeaders(origin, env) {
+  if (!origin || !configuredOrigins(env).includes(origin)) return {};
+  return {
+    "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "600", "Vary": "Origin"
+  };
 }
-function scoreCandidate(o,minRoi=2,minSize=10){
- const roi=num(o.roi_pct),size=num(o.max_wager_usd);
- const legs=Array.isArray(o.legs)?o.legs:[];
- const deep=legs.length===2&&legs.every(l=>num(l.liquidity_usd)>0);
- const executable=size!==null&&size>=minSize;
- const net=roi!==null&&roi>=minRoi;
- return {...o,screen_status:net&&executable&&deep?"QUALIFIES":"REVIEW",quality_flags:{net_roi:net,minimum_size:executable,both_legs_have_depth:deep},score:clamp((roi||0)*2+(deep?20:0)+(executable?15:0),0,100)};
+function json(data, status = 200, origin = null, env = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin, env) } });
 }
-async function scan(env,settings={}){
- const minRoi=clamp(num(settings.minRoi)??3,0,100),minSize=clamp(num(settings.minSize)??25,0,10000000);
- const data=await pred(env,`/arb?min_roi=${encodeURIComponent(minRoi)}&limit=100`);
- const raw=data.opportunities||[];
- const opportunities=raw.map(o=>scoreCandidate(o,minRoi,minSize)).sort((a,b)=>(b.score||0)-(a.score||0));
- const snapshot={as_of:data.as_of||new Date().toISOString(),delay_seconds:data.delay_seconds??null,count:opportunities.length,opportunities};
- if(env.EDGE_KV)await env.EDGE_KV.put("latest-scan",JSON.stringify(snapshot),{expirationTtl:86400});
- return snapshot;
+function decodeBase64Url(part) {
+  const value = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
+  return Uint8Array.from(atob(value), c => c.charCodeAt(0));
 }
-async function alertNew(env,scanData){
- if(!env.EDGE_KV||!env.ALERT_WEBHOOK_URL)return;
- const qualifying=scanData.opportunities.filter(o=>o.screen_status==="QUALIFIES");
- const previous=JSON.parse(await env.EDGE_KV.get("alert-state")||"{}");
- const next={};
- for(const o of qualifying){
-  const key=String(o.group_id||o.group_title||o.legs?.map(l=>l.market_id).join("-"));
-  const roi=num(o.roi_pct)||0, old=previous[key];
-  const changed=!old||Math.abs(roi-old.roi)>=1.5;
-  if(changed){
-   const lines=[`EDGE signal: ${o.group_title||"Cross-platform market"}`,`Net ROI estimate: ${roi.toFixed(2)}%`,`Max executable wager: $${num(o.max_wager_usd)||0}`,`Check each market's resolution wording, fees and depth before acting.`,...(o.legs||[]).map(l=>`${l.platform} ${l.side}: ${l.price} · ${l.source_url||""}`)];
-   await fetch(env.ALERT_WEBHOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:lines.join("\n"),text:lines.join("\n")})}).catch(()=>null);
+function decodeJwtPart(part) { return JSON.parse(new TextDecoder().decode(decodeBase64Url(part))); }
+
+async function fetchAccessKeys(teamDomain) {
+  if (accessKeysCache && Date.now() - accessKeysCacheAt < 10 * 60 * 1000) return accessKeysCache;
+  if (accessKeysPending) return accessKeysPending;
+  accessKeysPending = (async () => {
+    const response = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new HttpError(503, "Authentication service temporarily unavailable.");
+    const body = await response.json();
+    if (!Array.isArray(body?.keys) || !body.keys.length) throw new HttpError(503, "Authentication service temporarily unavailable.");
+    accessKeysCache = body.keys; accessKeysCacheAt = Date.now(); return accessKeysCache;
+  })();
+  try { return await accessKeysPending; } finally { accessKeysPending = null; }
+}
+
+async function authenticate(request, env, ctx) {
+  if (ctx?.access) {
+    const identity = await ctx.access.getIdentity();
+    const subject = identity?.id || identity?.sub;
+    if (subject) return { sub: String(subject) };
   }
-  next[key]={roi,seenAt:Date.now()};
- }
- await env.EDGE_KV.put("alert-state",JSON.stringify(next),{expirationTtl:60*60*24*30});
+  const teamDomain = String(env.CF_ACCESS_TEAM_DOMAIN || "").trim().toLowerCase();
+  const audience = String(env.CF_ACCESS_AUD || "").trim();
+  if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(teamDomain) || !audience) throw new HttpError(503, "Cloudflare Access authentication is not configured.");
+  const token = request.headers.get("CF-Access-Jwt-Assertion") || "";
+  if (!token || token.length > 16_384) throw new HttpError(401, "Authentication required.");
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new HttpError(401, "Authentication required.");
+  try {
+    const header = decodeJwtPart(parts[0]);
+    const claims = decodeJwtPart(parts[1]);
+    const now = Date.now() / 1000;
+    const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (header.alg !== "RS256" || typeof header.kid !== "string" || !header.kid || header.kid.length > 256 || claims.iss !== `https://${teamDomain}` || !aud.includes(audience) || typeof claims.sub !== "string" || !claims.sub || claims.sub.length > 256 || !Number.isFinite(claims.exp) || claims.exp <= now || (claims.nbf != null && (!Number.isFinite(claims.nbf) || claims.nbf > now + 60))) throw new HttpError(401, "Authentication required.");
+    const jwk = (await fetchAccessKeys(teamDomain)).find(key => key.kid === header.kid && key.kty === "RSA" && key.use !== "enc");
+    if (!jwk) throw new HttpError(401, "Authentication required.");
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const verified = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, decodeBase64Url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+    if (!verified) throw new HttpError(401, "Authentication required.");
+    return { sub: claims.sub };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(401, "Authentication required.");
+  }
 }
-function extractResponseText(resp){
- if(resp.output_text)return resp.output_text;
- const out=[];
- for(const item of resp.output||[])for(const c of item.content||[])if(c.type==="output_text"||c.type==="text")out.push(c.text);
- return out.join("\n");
+
+async function routeLimit(binding, userId, route) {
+  if (!binding || typeof binding.limit !== "function") throw new HttpError(503, "Route rate limiting is not configured.");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}:${route}`));
+  const key = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  const result = await binding.limit({ key });
+  if (!result?.success) throw new HttpError(429, "Rate limit exceeded. Try again shortly.");
 }
-function extractCitations(resp){
- const cites=[];
- for(const item of resp.output||[])for(const c of item.content||[])for(const a of c.annotations||[])if(a.type==="url_citation"&&a.url_citation)cites.push({url:a.url_citation.url,title:a.url_citation.title||a.url_citation.url});
- const seen=new Set();return cites.filter(c=>c.url&&!seen.has(c.url)&&seen.add(c.url));
+
+async function readJson(request, maxBytes = MAX_JSON_BYTES) {
+  if (!(request.headers.get("Content-Type") || "").toLowerCase().startsWith("application/json")) throw new HttpError(415, "Content-Type must be application/json.");
+  const length = Number(request.headers.get("Content-Length"));
+  if (Number.isFinite(length) && length > maxBytes) throw new HttpError(413, "Request body is too large.");
+  if (!request.body) return {};
+  const reader = request.body.getReader(); const chunks = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) { await reader.cancel(); throw new HttpError(413, "Request body is too large."); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const body = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(body));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Expected an object.");
+    return parsed;
+  } catch { throw new HttpError(400, "Request body must be a JSON object."); }
 }
-async function research(env,input){
- if(!env.OPENAI_API_KEY)return {error:"OPENAI_API_KEY is not configured."};
- const prompt=`Research this prediction-market question using live web search. Exact question: ${input.question}\nResolution rules: ${input.rules||"Not supplied; flag this as a major limitation."}\nCurrent YES market price: ${input.marketPrice==null?"Not supplied":input.marketPrice+"%"}\n\nUse primary sources first, cite URLs, and distinguish confirmed facts from claims. Search current facts. Find relevant base rates if credible comparable data exists. Steelman YES and NO cases. Identify timeline/catalysts and what evidence would change the view. Never invent facts or sources. If evidence is insufficient, say so and return no point estimate. Give a defensible probability range and confidence rather than false precision. Do not treat the market quote as independent evidence. Calculate edge_points only if there is a defensible midpoint estimate and market price; edge is midpoint minus market price in percentage points before fees. Explicitly discuss fees, spread, depth, slippage, settlement wording, and jurisdiction as limitations.\n\nReturn JSON with keys: question, summary, probability_range (string or null), probability (number or null), market_price (number or null), edge_points (number or null), confidence, yes_case (array), no_case (array), base_rates_and_assumptions (array), invalidation (array), limitations (array).`;
- const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Authorization":`Bearer ${env.OPENAI_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({model:env.OPENAI_MODEL||"gpt-6-astra",tools:[{type:"web_search",search_context_size:"high"}],tool_choice:"auto",input:prompt,text:{format:{type:"json_object"}}})});
- const data=await response.json();if(!response.ok)throw new Error(data.error?.message||`OpenAI returned ${response.status}`);
- const text=extractResponseText(data);let report;try{report=JSON.parse(text)}catch{throw new Error("Could not parse the structured research report.")}
- return {report,citations:extractCitations(data),created_at:new Date().toISOString(),model:env.OPENAI_MODEL||"gpt-6-astra"};
+
+async function userKey(prefix, subject) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(subject));
+  const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${prefix}:${hex}`;
 }
-async function backtest(env,input){
- const platform=String(input.platform||"").toLowerCase(),marketId=String(input.marketId||"");
- if(!/^[a-z0-9_-]{1,80}$/i.test(platform)||!/^[a-z0-9_.-]{1,120}$/i.test(marketId))throw new Error("Invalid platform or market ID.");
- const days=clamp(num(input.days)||30,1,90),interval=["1m","5m","15m","1h","1d"].includes(input.interval)?input.interval:"1h";
- const to=new Date(),from=new Date(to.getTime()-days*86400000);
- const qs=new URLSearchParams({platform,market_id:marketId,from:from.toISOString(),to:to.toISOString(),interval});
- const data=await pred(env,`/prices/history?${qs}`);
- const candles=(data.candles||[]).filter(c=>num(c.close)!==null);
- if(candles.length<2)return {result:{candles:candles.length,warning:"Not enough historical candles for replay.",from:from.toISOString(),to:to.toISOString()}};
- const first=Number(candles[0].close),last=Number(candles[candles.length-1].close);
- let peak=first,maxDd=0;
- for(const c of candles){const v=Number(c.close);peak=Math.max(peak,v);maxDd=Math.max(maxDd,(peak-v)/peak*100)}
- return {result:{candles:candles.length,first,last,buyHoldPct:(last/first-1)*100,maxDrawdownPct:maxDd,from:candles[0].timestamp,to:candles[candles.length-1].timestamp,method:"Buy-and-hold mark-to-market replay using historical close prices. It does not model fills, fees, spread, slippage, or resolution payouts.",warning:"This is descriptive historical price replay, not a validated predictive strategy or a resolved-contract backtest."}};
+
+async function providerJson(url, init = {}, maxBytes = 4 * 1024 * 1024) {
+  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+  if (response.url && new URL(response.url).hostname !== new URL(url).hostname) throw new HttpError(502, "Upstream redirected to an unexpected host.");
+  const length = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(length) && length > maxBytes) throw new HttpError(502, "Upstream response exceeded the size limit.");
+  const text = await readLimitedText(response, maxBytes, () => new HttpError(502, "Upstream response exceeded the size limit."));
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw new HttpError(502, "Upstream returned invalid JSON."); }
+  if (!response.ok) throw new HttpError(502, `Upstream request failed with HTTP ${response.status}.`);
+  return payload;
 }
+
+async function readLimitedText(response, maxBytes, makeTooLarge) {
+  if (!response.body) return "";
+  const reader = response.body.getReader(); const chunks = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) { await reader.cancel(); throw makeTooLarge(); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(size); let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
+async function prediction(env, path) {
+  if (!env.PREDICTION_HUNT_API_KEY) throw new HttpError(503, "Prediction.com API key is not configured.");
+  const data = await providerJson(`${PRED_BASE}${path}`, { headers: { "X-API-Key": env.PREDICTION_HUNT_API_KEY, Accept: "application/json" } });
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new HttpError(502, "Prediction.com response shape was invalid.");
+  return data;
+}
+
+function normalizePredictionMarket(market, sourceAsOf, retrievedAt) {
+  return publicMarket(normalizeMarket(market, { source: "Prediction.com API", sourceAsOf, retrievedAt }));
+}
+
+function publicMarket(market) {
+  const settlement = typeof market.settlement === "string" ? market.settlement.slice(0, 20_000) : market.settlement && typeof market.settlement === "object" ? Object.fromEntries(Object.entries(market.settlement).slice(0, 10).map(([key, value]) => [String(key).slice(0, 80), typeof value === "string" ? value.slice(0, 5000) : null])) : null;
+  return { id: market.id, marketId: market.marketId, title: market.title.slice(0, 1000), venue: market.venue, source: market.source, quoteType: market.quoteType, jurisdiction: market.jurisdiction, currency: market.currency, probability: market.probability, volume: market.volume, liquidity: market.liquidity, observedAt: market.observedAt, retrievedAt: market.retrievedAt, freshness: market.freshness, fee: market.fee, settlement, url: market.url };
+}
+
+function normalizeManifoldMarket(market, retrievedAt) {
+  if (!market || typeof market.id !== "string" || typeof market.question !== "string" || !Number.isFinite(Number(market.probability))) throw new HttpError(502, "Manifold response contained a malformed market.");
+  return publicMarket(normalizeMarket({
+    id: market.id, market_id: market.id, title: market.question, platform: "manifold", probability: market.probability,
+    volume: market.volume, currency: "MANA", status: market.isResolved ? "resolved" : "active",
+    closeTime: market.closeTime, source_url: market.url || (market.creatorUsername && market.slug ? `https://manifold.markets/${encodeURIComponent(market.creatorUsername)}/${encodeURIComponent(market.slug)}` : null),
+    rules: { primary: market.description || "See the Manifold market description." }
+  }, { source: "Manifold public API", retrievedAt }));
+}
+
+function screenOpportunity(opportunity, minRoi, minSize) {
+  if (!opportunity || typeof opportunity !== "object" || Array.isArray(opportunity)) throw new HttpError(502, "Arbitrage response contained a malformed opportunity.");
+  const roi = finiteNumber(opportunity.roi_pct);
+  const maxWager = finiteNumber(opportunity.max_wager_usd);
+  const legs = Array.isArray(opportunity.legs) ? opportunity.legs : [];
+  const hasTwoLegs = legs.length === 2;
+  const knownDepth = hasTwoLegs && legs.every(leg => finiteNumber(leg.liquidity_usd) > 0);
+  const allFeesKnown = hasTwoLegs && legs.every(leg => finiteNumber(leg.fee_usd) !== null || finiteNumber(leg.fee_pct) !== null);
+  const sizePass = maxWager !== null && maxWager >= minSize;
+  const roiPass = roi !== null && roi >= minRoi;
+  const safeLegs = legs.slice(0, 2).map(leg => ({
+    platform: typeof leg.platform === "string" ? leg.platform.slice(0, 80) : "unknown",
+    market_id: typeof leg.market_id === "string" ? leg.market_id.slice(0, 160) : null,
+    side: typeof leg.side === "string" ? leg.side.slice(0, 20) : null,
+    price: finiteNumber(leg.price), liquidity_usd: finiteNumber(leg.liquidity_usd), fee_usd: finiteNumber(leg.fee_usd), fee_pct: finiteNumber(leg.fee_pct)
+  }));
+  return {
+    group_id: typeof opportunity.group_id === "string" ? opportunity.group_id.slice(0, 160) : null,
+    group_title: typeof opportunity.group_title === "string" ? opportunity.group_title.slice(0, 1000) : "Cross-venue candidate",
+    roi_pct: roi,
+    max_wager_usd: maxWager,
+    legs: safeLegs,
+    observationType: "simulated_cross_venue_candidate",
+    currency: "USD",
+    roi_basis: "provider-reported estimate; EDGE has not independently recalculated fees, spreads, fills or slippage",
+    executable: false,
+    screen_status: "RESEARCH_ONLY",
+    quality_flags: { roi_threshold: roiPass, minimum_size: sizePass, both_legs_have_liquidity_reported: knownDepth, both_leg_fee_fields_present: allFeesKnown, fee_schedule_verified: false, bid_ask_spread_verified: false, executable_quotes_verified: false, executable: false },
+    score: clamp((roi || 0) * 2 + (knownDepth ? 20 : 0) + (sizePass ? 15 : 0), 0, 100),
+    limitations: ["Research candidate only; no order is placed.", "Confirm venue access and Australian legal eligibility.", "Verify currency, executable prices, complete fees, depth, slippage and resolution rules before treating as actionable."]
+  };
+}
+
+async function scan(env, settings = {}) {
+  const minRoi = clamp(finiteNumber(settings.minRoi) ?? 3, 0, 100);
+  const minSize = clamp(finiteNumber(settings.minSize) ?? 25, 0, 10_000_000);
+  const data = await prediction(env, `/arb?min_roi=${encodeURIComponent(minRoi)}&limit=100`);
+  if (!Array.isArray(data.opportunities)) throw new HttpError(502, "Prediction.com arbitrage response did not contain an opportunities array.");
+  if (data.opportunities.length > 500) throw new HttpError(502, "Prediction.com returned too many arbitrage candidates.");
+  const opportunities = data.opportunities.map(o => screenOpportunity(o, minRoi, minSize)).sort((a, b) => b.score - a.score);
+  const snapshot = { as_of: typeof data.as_of === "string" ? data.as_of : null, retrieved_at: isoNow(), delay_seconds: finiteNumber(data.delay_seconds), count: opportunities.length, opportunities, observationType: "simulated_cross_venue_candidates" };
+  if (env.EDGE_KV) await env.EDGE_KV.put("latest-scan", JSON.stringify(snapshot), { expirationTtl: 86_400 });
+  return snapshot;
+}
+
+async function alertNew(env, scanData) {
+  if (!env.EDGE_KV || !env.ALERT_WEBHOOK_URL) return;
+  const previous = JSON.parse(await env.EDGE_KV.get("alert-state") || "{}"); const next = {};
+  for (const opportunity of scanData.opportunities) {
+    const key = String(opportunity.group_id || opportunity.group_title || opportunity.legs?.map(leg => leg.market_id).join("-") || "unknown");
+    const roi = finiteNumber(opportunity.roi_pct) || 0; const old = previous[key];
+    if (!old || Math.abs(roi - old.roi) >= 1.5) {
+      const lines = [`EDGE simulated research signal: ${opportunity.group_title || "Cross-venue candidate"}`, `Provider ROI estimate: ${roi.toFixed(2)}% (reported in provider-defined USD terms)`, "Not executable. Confirm fees, spread, depth, jurisdiction and settlement terms independently."];
+      await fetch(env.ALERT_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: lines.join("\n"), text: lines.join("\n") }), signal: AbortSignal.timeout(5000) }).catch(() => null);
+    }
+    next[key] = { roi, seenAt: Date.now() };
+  }
+  await env.EDGE_KV.put("alert-state", JSON.stringify(next), { expirationTtl: 2_592_000 });
+}
+
+function responseText(response) {
+  if (typeof response?.output_text === "string") return response.output_text;
+  return (response?.output || []).flatMap(item => item.content || []).filter(content => ["output_text", "text"].includes(content.type)).map(content => content.text).join("\n");
+}
+function citations(response) {
+  const values = (response?.output || []).flatMap(item => item.content || []).flatMap(content => content.annotations || [])
+    .filter(annotation => annotation.type === "url_citation" && typeof annotation.url_citation?.url === "string" && URL.canParse(annotation.url_citation.url) && new URL(annotation.url_citation.url).protocol === "https:")
+    .map(annotation => ({ url: annotation.url_citation.url, title: annotation.url_citation.title || annotation.url_citation.url }));
+  return [...new Map(values.map(item => [item.url, item])).values()];
+}
+function validateResearchInput(input) {
+  const question = String(input.question || "").trim();
+  const rules = String(input.rules || "").trim();
+  const url = input.url == null ? "" : String(input.url).trim();
+  const venue = input.platform == null ? "" : String(input.platform).trim();
+  const marketPrice = input.marketPrice == null || input.marketPrice === "" ? null : finiteNumber(input.marketPrice);
+  if (!question && !url && !input.image) throw new HttpError(400, "Question, HTTPS market URL, or image is required.");
+  if (question.length > 4000 || rules.length > 10_000 || url.length > 2048 || venue.length > 100) throw new HttpError(413, "Research input exceeds the supported length.");
+  if (url && (!/^https:\/\//i.test(url) || !URL.canParse(url))) throw new HttpError(400, "Market URL must be a valid HTTPS URL.");
+  if (marketPrice !== null && (marketPrice < 0 || marketPrice > 100)) throw new HttpError(400, "Market probability must be between 0 and 100 percent.");
+  return { question: question || "Read the supplied market screenshot and identify the market question and resolution wording.", rules, url, venue, marketPrice, image: input.image || null };
+}
+async function research(env, input) {
+  const validated = validateResearchInput(input);
+  if (!env.OPENAI_API_KEY) throw new HttpError(503, "OpenAI API key is not configured.");
+  const prompt = `Research this prediction-market question with Australian context first. Question: ${validated.question}\nUser-supplied venue label (unverified): ${validated.venue || "Not supplied"}\nMarket URL supplied by user (treat it as a search hint; do not assume it is accessible in Australia): ${validated.url || "Not supplied"}\nResolution rules: ${validated.rules || "Not supplied; flag this as a major limitation."}\nObserved market YES quote: ${validated.marketPrice == null ? "Not supplied" : `${validated.marketPrice}%`}.\n\nPrioritise primary Australian sources where relevant: RBA, ABS, AEC, BOM, ASX (only public/licensed data), Australian and state governments, and Australian courts. Cite source URLs and publication dates. Use international sources only when relevant and label them secondary. Distinguish observed facts, source data, market quote and model inference. Search current facts and base rates. Identify Australian local date/time and timezone for catalysts. Never invent facts, sources, market access or Australian legal eligibility. If evidence is insufficient, return no point estimate. Give a probability range and confidence, not false precision. Do not treat the market quote as independent evidence. Discuss fees, spread, depth, slippage, resolution wording, freshness, jurisdiction, licensing and Australian regulation. No trade recommendation or order placement.\n\nReturn JSON keys: question, summary, probability_range, probability, market_price, edge_points, confidence, yes_case, no_case, base_rates_and_assumptions, invalidation, limitations.`;
+  const content = [{ type: "input_text", text: prompt }];
+  if (validated.image) {
+    if (typeof validated.image !== "string" || validated.image.length > 6_800_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(validated.image)) throw new HttpError(400, "Screenshot must be a PNG, JPEG or WEBP image smaller than 5 MB.");
+    content.push({ type: "input_image", image_url: validated.image });
+  }
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST", headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
+  });
+  if (response.url && new URL(response.url).hostname !== "api.openai.com") throw new HttpError(502, "AI provider redirected to an unexpected host.");
+  const text = await readLimitedText(response, 1_000_000, () => new HttpError(502, "OpenAI response exceeded the size limit.")); let data;
+  try { data = JSON.parse(text); } catch { throw new HttpError(502, "OpenAI returned an invalid response."); }
+  if (!response.ok) throw new HttpError(502, `OpenAI request failed with HTTP ${response.status}.`);
+  let report;
+  try { report = JSON.parse(responseText(data)); } catch { throw new HttpError(502, "Could not parse the structured research report."); }
+  if (!report || typeof report !== "object" || typeof report.summary !== "string") throw new HttpError(502, "Research response did not match the expected schema.");
+  if (report.summary.length > 20_000) throw new HttpError(502, "Research response summary exceeded the size limit.");
+  for (const field of ["yes_case", "no_case", "base_rates_and_assumptions", "invalidation", "limitations"]) if (!Array.isArray(report[field]) || report[field].length > 50 || report[field].some(value => typeof value !== "string" || value.length > 4000)) throw new HttpError(502, "Research response contained an invalid evidence list.");
+  for (const field of ["probability", "market_price", "edge_points"]) if (report[field] !== null && report[field] !== undefined && finiteNumber(report[field]) === null) throw new HttpError(502, "Research response contained an invalid probability or edge value.");
+  for (const field of ["probability", "market_price", "edge_points"]) if (report[field] != null) report[field] = finiteNumber(report[field]);
+  if (report.probability != null && (report.probability < 0 || report.probability > 100) || report.market_price != null && (report.market_price < 0 || report.market_price > 100)) throw new HttpError(502, "Research response probability was outside the 0–100 range.");
+  report.market_price = validated.marketPrice;
+  report.edge_points = validated.marketPrice === null || report.probability === null || report.probability === undefined ? null : report.probability - validated.marketPrice;
+  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6-astra", classification: "model_generated_research_probability" };
+}
+
+async function backtest(env, input) {
+  const platform = String(input.platform || "").toLowerCase(); const marketId = String(input.marketId || "");
+  if (!/^[a-z0-9_-]{1,80}$/i.test(platform) || !/^[a-z0-9_.-]{1,120}$/.test(marketId)) throw new HttpError(400, "Invalid platform or market ID.");
+  const daysInput = finiteNumber(input.days); const days = clamp(daysInput ?? 30, 1, 90);
+  const interval = ["1m", "5m", "15m", "1h", "1d"].includes(input.interval) ? input.interval : "1h";
+  const to = new Date(); const from = new Date(to.getTime() - days * 86_400_000);
+  const query = new URLSearchParams({ platform, market_id: marketId, from: from.toISOString(), to: to.toISOString(), interval });
+  const data = await prediction(env, `/prices/history?${query}`);
+  if (!Array.isArray(data.candles)) throw new HttpError(502, "Price history response did not contain a candle array.");
+  const result = calculateBacktest(data.candles);
+  return { result: { ...result, from: result.from || from.toISOString(), to: result.to || to.toISOString(), method: "Descriptive price replay using provider historical closes. It does not model fills, fees, spread, slippage, resolution payouts or a validated predictive strategy.", warning: "Historical performance does not predict future outcomes.", source: "Prediction.com API", currency: null, priceUnit: "provider-normalized probability points; verify source units" } };
+}
+
+function parseLimit(value, fallback, max) {
+  const n = finiteNumber(value);
+  if (n === null) return fallback;
+  return clamp(Math.trunc(n), 1, max);
+}
+
+async function marketSearch(request, env) {
+  const url = new URL(request.url); const q = (url.searchParams.get("q") || "").trim();
+  if (q.length > 200) throw new HttpError(400, "Search query exceeds 200 characters.");
+  const requestedPlatform = (url.searchParams.get("platform") || "").toLowerCase();
+  const limit = parseLimit(url.searchParams.get("limit"), 40, 100);
+  const retrievedAt = isoNow();
+  if (requestedPlatform === "manifold") {
+    const cursor = url.searchParams.get("cursor") || "";
+    if (cursor && !/^\d{1,16}$/.test(cursor)) throw new HttpError(400, "Invalid Manifold pagination cursor.");
+    const query = new URLSearchParams({ term: q, sort: "newest", filter: "open", contractType: "BINARY", limit: String(limit) });
+    if (cursor) query.set("beforeTime", cursor);
+    const list = await providerJson(`https://api.manifold.markets/v0/search-markets?${query}`, { headers: { Accept: "application/json" } });
+    if (!Array.isArray(list)) throw new HttpError(502, "Manifold response did not contain a market array.");
+    const markets = list.map(item => normalizeManifoldMarket(item, retrievedAt));
+    const lastTime = list.at(-1)?.createdTime;
+    return { markets, next_cursor: list.length === limit && Number.isFinite(lastTime) ? String(lastTime) : null, total_count: null, as_of: null, retrieved_at: retrievedAt, source: "Manifold public API", marketClass: "play_money" };
+  }
+  const allowedPlatforms = new Set(["", "polymarket", "polymarket_us", "kalshi", "predictit", "prophetx", "opinion", "predictfun", "novig"]);
+  if (!allowedPlatforms.has(requestedPlatform)) throw new HttpError(400, "Unsupported Prediction.com venue filter.");
+  const params = new URLSearchParams();
+  for (const name of ["platform", "category", "status", "cursor"]) if (url.searchParams.has(name)) params.set(name, url.searchParams.get(name));
+  if (q) params.set("q", q);
+  params.set("limit", String(limit)); params.set("include", "rules");
+  const data = await prediction(env, `/markets?${params}`);
+  if (!Array.isArray(data.markets)) throw new HttpError(502, "Prediction.com response did not contain a market array.");
+  return { markets: data.markets.map(market => normalizePredictionMarket(market, data.as_of, retrievedAt)), next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : null, total_count: finiteNumber(data.total_count), as_of: typeof data.as_of === "string" ? data.as_of : null, retrieved_at: retrievedAt, source: "Prediction.com API", jurisdiction: "unverified" };
+}
+
+async function handle(request, env, ctx) {
+  const requestUrl = new URL(request.url); const origin = request.headers.get("Origin");
+  if (origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
+  if (request.method === "OPTIONS") {
+    const requestedHeaders = (request.headers.get("Access-Control-Request-Headers") || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
+    if (requestedHeaders.some(header => header !== "content-type")) return json({ error: "Requested headers are not allowed." }, 403, origin, env);
+    return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin, env) } });
+  }
+  if (!requestUrl.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404, origin, env);
+  const principal = await authenticate(request, env, ctx);
+  const reply = (data, status = 200) => json(data, status, origin, env);
+
+  if (requestUrl.pathname === "/api/health" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "health");
+    return reply({ status: "worker_responding", providers: { marketData: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: "licensed integration not configured", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; execution requires provider secret and KV", realMoneyTrading: false, retrieved_at: isoNow() });
+  }
+  if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
+    return reply(await marketSearch(request, env));
+  }
+  if (requestUrl.pathname === "/api/au/sources" && request.method === "GET") { await routeLimit(env.DATA_LIMITER, principal.sub, "au-sources"); return reply({ status: "source_registry", sources: sourceMetadata, retrieved_at: isoNow() }); }
+  if (requestUrl.pathname === "/api/au/indicators" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "abs");
+    const flow = requestUrl.searchParams.get("flow") || "CPI_H";
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(flow)) throw new HttpError(400, "Invalid ABS dataflow identifier.");
+    return reply(await fetchAbsIndicators({ flow, format: "json", env }));
+  }
+  if (requestUrl.pathname === "/api/au/rba/cash-rate" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "rba-cash-rate");
+    return reply(await fetchRbaCashRate());
+  }
+  if (requestUrl.pathname === "/api/au/rba/releases" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "rba-releases");
+    return reply(await fetchRbaReleases());
+  }
+  if (requestUrl.pathname === "/api/au/aec/results" && request.method === "GET") { await routeLimit(env.DATA_LIMITER, principal.sub, "aec-results"); return reply(await fetchAecResults({ env })); }
+  if (requestUrl.pathname === "/api/au/bom/observations" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "bom-observations");
+    const city = (requestUrl.searchParams.get("city") || "perth").toLowerCase();
+    if (!new Set(["perth", "sydney"]).has(city)) throw new HttpError(400, "Unsupported BOM station.");
+    return reply(await fetchBomObservations({ city, env }));
+  }
+  if (requestUrl.pathname === "/api/au/dashboard" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "au-dashboard");
+    const city = requestUrl.searchParams.get("city") || "perth";
+    const flow = requestUrl.searchParams.get("flow") || "CPI_H";
+    if (!new Set(["perth", "sydney"]).has(city.toLowerCase()) || !/^[A-Za-z0-9_-]{1,40}$/.test(flow)) throw new HttpError(400, "Invalid Australian dashboard city or ABS dataflow.");
+    const [abs, cashRate, releases, weather, aec] = await Promise.allSettled([
+      fetchAbsIndicators({ flow, env }), fetchRbaCashRate(), fetchRbaReleases(), fetchBomObservations({ city, env }), fetchAecResults({ env })
+    ]);
+    const adapt = result => result.status === "fulfilled" ? result.value : { status: "unavailable", message: "Source request failed. Retry later.", records: [] };
+    return reply({ retrieved_at: isoNow(), abs_dataflow: flow, australian_local_time_zone: city.toLowerCase() === "sydney" ? "Australia/Sydney" : "Australia/Perth", sections: { abs: adapt(abs), rbaCashRate: adapt(cashRate), rbaReleases: adapt(releases), bom: adapt(weather), aec: adapt(aec), asx: sourceMetadata.find(source => source.id === "asx"), fex: sourceMetadata.find(source => source.id === "fex") } });
+  }
+  if (requestUrl.pathname === "/api/scan" && request.method === "POST") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "scan");
+    const body = await readJson(request); const rules = validateAlertRules({ minRoi: body.minRoi ?? 3, minSize: body.minSize ?? 25 });
+    if (!rules) throw new HttpError(400, "Scan thresholds are outside supported bounds.");
+    return reply(await scan(env, rules));
+  }
+  if (requestUrl.pathname === "/api/opportunities" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "opportunities");
+    const cached = env.EDGE_KV ? await env.EDGE_KV.get("latest-scan") : null;
+    if (cached) { try { return reply(JSON.parse(cached)); } catch { throw new HttpError(502, "Stored scan snapshot is invalid."); } }
+    return reply(await scan(env, {}));
+  }
+  if (requestUrl.pathname === "/api/research" && request.method === "POST") {
+    await routeLimit(env.AI_LIMITER, principal.sub, "research");
+    return reply(await research(env, await readJson(request)));
+  }
+  if (requestUrl.pathname === "/api/analyze" && request.method === "POST") {
+    await routeLimit(env.AI_LIMITER, principal.sub, "analyze");
+    const body = await readJson(request, MAX_ANALYZE_BYTES); const result = await research(env, body);
+    const report = result.report;
+    return reply({ analysis: { title: report.question, summary: report.summary, marketProbability: report.market_price, modelProbability: report.probability, edge: report.edge_points, confidence: report.confidence, risk: (Array.isArray(report.limitations) ? report.limitations : []).join(" · "), evidence: [...(Array.isArray(report.yes_case) ? report.yes_case : []), ...(Array.isArray(report.base_rates_and_assumptions) ? report.base_rates_and_assumptions : [])], risks: Array.isArray(report.no_case) ? report.no_case : [], invalidation: Array.isArray(report.invalidation) ? report.invalidation : [], classification: "model_generated_research_probability" }, citations: result.citations });
+  }
+  if (requestUrl.pathname === "/api/backtest" && request.method === "POST") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "backtest");
+    return reply(await backtest(env, await readJson(request)));
+  }
+  if (requestUrl.pathname === "/api/alert-rules" && (request.method === "GET" || request.method === "POST")) {
+    if (!env.EDGE_KV) throw new HttpError(503, "EDGE_KV binding is required for user alert rules.");
+    const key = await userKey("user-alert-rules", principal.sub);
+    if (request.method === "GET") {
+      await routeLimit(env.DATA_LIMITER, principal.sub, "alert-rules-read");
+      let stored;
+      try { stored = JSON.parse(await env.EDGE_KV.get(key) || '{"minRoi":3,"minSize":25}'); } catch { throw new HttpError(502, "Stored alert rules are invalid."); }
+      const rules = validateAlertRules(stored);
+      if (!rules) throw new HttpError(502, "Stored alert rules are invalid.");
+      return reply(rules);
+    }
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "alert-rules");
+    const body = await readJson(request);
+    const validatedRules = validateAlertRules(body);
+    if (!validatedRules) throw new HttpError(400, "Alert thresholds are outside supported bounds.");
+    const rules = { ...validatedRules, updatedAt: isoNow() };
+    await env.EDGE_KV.put(key, JSON.stringify(rules)); return reply({ saved: true, rules });
+  }
+  if (requestUrl.pathname === "/api/alerts" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "alerts");
+    const value = env.EDGE_KV ? await env.EDGE_KV.get("latest-scan") : null;
+    if (!value) return reply({ opportunities: [], observationType: "simulated_cross_venue_candidates" });
+    let snapshot;
+    try { snapshot = JSON.parse(value); } catch { throw new HttpError(502, "Stored alert snapshot is invalid."); }
+    const rulesKey = await userKey("user-alert-rules", principal.sub);
+    let rules = { minRoi: 3, minSize: 25 };
+    try { rules = validateAlertRules(JSON.parse(await env.EDGE_KV?.get(rulesKey) || "{}")) || rules; } catch { throw new HttpError(502, "Stored alert rules are invalid."); }
+    const opportunities = Array.isArray(snapshot.opportunities) ? snapshot.opportunities.filter(item => finiteNumber(item.roi_pct) >= rules.minRoi && finiteNumber(item.max_wager_usd) >= rules.minSize) : [];
+    return reply({ ...snapshot, opportunities, appliedUserRules: rules, observationType: "simulated_cross_venue_candidates" });
+  }
+  return reply({ error: "Not found" }, 404);
+}
+
 export default {
- async fetch(request,env){
-  const url=new URL(request.url);if(request.method==="OPTIONS")return new Response(null,{headers:CORS});
-  try{
-   if(url.pathname==="/api/health")return json({status:"healthy",providers:{marketData:!!env.PREDICTION_HUNT_API_KEY,ai:!!env.OPENAI_API_KEY,storage:!!env.EDGE_KV,alerts:!!env.ALERT_WEBHOOK_URL},scanner:"15-minute cron"});
-   if(url.pathname==="/api/markets"&&request.method==="GET"){
-    const q=new URLSearchParams();for(const k of ["q","platform","category","status","cursor"])if(url.searchParams.has(k))q.set(k,url.searchParams.get(k));
-    q.set("limit",String(clamp(num(url.searchParams.get("limit"))||50,1,200)));q.set("include","rules");
-    const requestedPlatform=url.searchParams.get("platform");
-    if(requestedPlatform==="manifold"){
-     const limit=clamp(num(url.searchParams.get("limit"))||50,1,200);
-     const mu=new URL("https://api.manifold.markets/v0/markets");mu.searchParams.set("limit",String(limit));
-     const raw=await fetch(mu,{headers:{"Accept":"application/json"}});
-     if(!raw.ok)throw new Error(`Manifold API returned ${raw.status}`);
-     const list=await raw.json(),term=(url.searchParams.get("q")||"").toLowerCase();
-     const markets=(Array.isArray(list)?list:[]).filter(m=>!term||String(m.question||"").toLowerCase().includes(term)).map(m=>({id:String(m.id),market_id:String(m.id),platform:"manifold",title:m.question,category:m.groupSlugs?.[0]||"community",status:m.isResolved?"closed":"active",price:num(m.probability)==null?null:Number(m.probability)*100,bid:null,ask:null,spread:null,volume:num(m.volume),liquidity:null,expiration_date:m.closeTime?new Date(m.closeTime).toISOString():null,url:m.url||`https://manifold.markets/${m.creatorUsername}/${m.slug}`,rules:{primary:m.description||"See Manifold market description."}}));
-     return json({markets,next_cursor:null,total_count:markets.length,as_of:new Date().toISOString(),source:"Manifold public API"});
+  async fetch(request, env, ctx) {
+    try { return await handle(request, env, ctx); }
+    catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      const message = error instanceof HttpError ? error.message : "Request could not be completed.";
+      const origin = request.headers.get("Origin");
+      return json({ error: message }, status, origin, env);
     }
-    const d=await pred(env,`/markets?${q}`);
-    const normalized=(d.markets||[]).map(normMarket);
-    if(!requestedPlatform&&url.searchParams.get("include_manifold")==="true"){
-     try{
-      const mu=await fetch("https://api.manifold.markets/v0/markets?limit=100",{headers:{"Accept":"application/json"}});
-      if(mu.ok){const ml=await mu.json();for(const m of (Array.isArray(ml)?ml:[])){normalized.push({id:String(m.id),market_id:String(m.id),platform:"manifold",title:m.question,category:m.groupSlugs?.[0]||"community",status:m.isResolved?"closed":"active",price:num(m.probability)==null?null:Number(m.probability)*100,bid:null,ask:null,spread:null,volume:num(m.volume),liquidity:null,expiration_date:m.closeTime?new Date(m.closeTime).toISOString():null,url:m.url||null,rules:{primary:m.description||"See Manifold market description."}})}}
-     }catch{}
-    }
-    return json({markets:normalized,next_cursor:d.next_cursor||null,total_count:d.total_count,as_of:d.as_of});
-   }
-   if(url.pathname==="/api/scan"&&request.method==="POST"){const body=await request.json();return json(await scan(env,body))}
-   if(url.pathname==="/api/opportunities"&&request.method==="GET"){const cached=env.EDGE_KV?await env.EDGE_KV.get("latest-scan"):null;return cached?json(JSON.parse(cached)):json(await scan(env,{}))}
-   if(url.pathname==="/api/research"&&request.method==="POST"){const body=await request.json();if(!body.question)return json({error:"Question is required."},400);return json(await research(env,body))}
-   if(url.pathname==="/api/analyze"&&request.method==="POST"){
-    const body=await request.json();if(!body.question&&!body.url)return json({error:"Question or URL required."},400);
-    const r=await research(env,{question:body.question||body.url,rules:body.rules||"",marketPrice:body.marketPrice});
-    return json({analysis:{title:r.report.question,summary:r.report.summary,marketProbability:r.report.market_price,modelProbability:r.report.probability,edge:r.report.edge_points,confidence:r.report.confidence,risk:(r.report.limitations||[]).join(" · "),evidence:[...(r.report.yes_case||[]),...(r.report.base_rates_and_assumptions||[])],risks:r.report.no_case||[],invalidation:r.report.invalidation||[]},citations:r.citations});
-   }
-   if(url.pathname==="/api/backtest"&&request.method==="POST")return json(await backtest(env,await request.json()));
-   if(url.pathname==="/api/alert-rules"&&request.method==="POST"){
-    if(!env.EDGE_KV)return json({error:"EDGE_KV binding is required for server-side alert rules."},503);
-    const b=await request.json(),rules={minRoi:clamp(num(b.minRoi)||3,0,100),minSize:clamp(num(b.minSize)||25,0,10000000)};
-    await env.EDGE_KV.put("alert-rules",JSON.stringify(rules));return json({saved:true,rules});
-   }
-   if(url.pathname==="/api/alerts"&&request.method==="GET"){const v=env.EDGE_KV?await env.EDGE_KV.get("latest-scan"):null;return json(v?JSON.parse(v):{opportunities:[]})}
-   return json({error:"Not found"},404);
-  }catch(e){return json({error:e.message||"Unexpected server error"},500)}
- },
- async scheduled(event,env,ctx){
-  if(!env.PREDICTION_HUNT_API_KEY)return;
-  ctx.waitUntil((async()=>{const rules=env.EDGE_KV?JSON.parse(await env.EDGE_KV.get("alert-rules")||'{"minRoi":3,"minSize":25}'):{minRoi:3,minSize:25};const result=await scan(env,rules);await alertNew(env,result)})());
- }
+  },
+  async scheduled(_event, env, ctx) {
+    if (!env.PREDICTION_HUNT_API_KEY) return;
+    ctx.waitUntil((async () => {
+      const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
+      const result = await scan(env, rules); await alertNew(env, result);
+    })());
+  }
 };
+
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart };

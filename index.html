@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#090d16">
-  <meta name="description" content="AI-powered prediction market research and opportunity discovery.">
+  <meta name="description" content="Australian-first market research and official economic indicators. Research and simulations only; no trading.">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
-  <title>EDGE — Prediction Market Intelligence</title>
+  <title>EDGE | Australian Market Intelligence</title>
 </head>
 <body>
   <div class="app-shell">
@@ -16,6 +16,12 @@
       <a class="brand" href="#"><span class="brand-mark">E</span><span>EDGE<small>MARKET INTELLIGENCE</small></span></a>
       <div class="side-label">WORKSPACE</div>
       <nav>
+        <button class="nav-item" data-page="australia"><span>AU</span> Australia dashboard</button>
+        <button class="nav-item" data-page="research">AI research</button>
+        <button class="nav-item" data-page="backtest">Backtesting</button>
+        <button class="nav-item" data-page="forecasts">Forecast tracking</button>
+        <button class="nav-item" data-page="alerts">Alerts</button>
+        <button class="nav-item" data-page="api-health">API health</button>
         <button class="nav-item active" data-page="overview"><span>◫</span> Overview</button>
         <button class="nav-item" data-page="discover"><span>⌕</span> Discover markets</button>
         <button class="nav-item" data-page="analyzer"><span>✳</span> AI analyzer <i class="new-dot"></i></button>
@@ -38,26 +44,26 @@
       </header>
 
       <section class="page active" id="page-overview">
-        <div class="welcome-row"><div><div class="eyebrow">THURSDAY, NOVEMBER 12, 2026</div><h1>Find your <em>edge.</em></h1><p class="muted">Research markets, challenge the consensus and find mispriced probabilities.</p></div><button class="primary-btn" data-goto="analyzer">✳ Analyze a market</button></div>
+        <div class="welcome-row"><div><div class="eyebrow" id="localDateBanner">AUSTRALIAN MARKET INTELLIGENCE</div><h1>Find your <em>edge.</em></h1><p class="muted">Research markets, challenge the consensus and find mispriced probabilities.</p></div><button class="primary-btn" data-goto="analyzer">✳ Analyze a market</button></div>
         <div class="notice"><span>ⓘ</span><div><b>Research mode</b><p>EDGE provides analytical estimates, not guaranteed outcomes. No real-money orders are placed.</p></div><button class="dismiss" aria-label="Dismiss" id="dismissNotice">×</button></div>
-        <div class="section-heading"><div><h2>Market overview</h2><p>Cross-platform snapshot</p></div><button class="text-btn" data-goto="discover">Explore markets →</button></div>
+        <div class="section-heading"><div><h2>Australian market overview</h2><p>Australian sources first; international markets are secondary and may not be available in Australia.</p></div><button class="text-btn" data-goto="discover">Explore markets →</button></div>
         <div class="metric-grid">
           <article class="metric-card"><span>MARKETS TRACKED</span><strong id="metricMarkets">—</strong><small>Across connected venues</small></article>
-          <article class="metric-card"><span>OPPORTUNITIES FOUND</span><strong id="metricOpps">—</strong><small>Based on configured filters</small></article>
+          <article class="metric-card"><span>DEMO EDGE ILLUSTRATIONS</span><strong id="metricOpps">—</strong><small>Simulated examples, not live opportunities</small></article>
           <article class="metric-card"><span>WATCHLIST</span><strong id="metricWatch">0</strong><small>Your saved markets</small></article>
           <article class="metric-card"><span>PAPER P&L</span><strong id="metricPnl">$0.00</strong><small>Simulated performance</small></article>
         </div>
         <div class="content-grid">
           <div class="panel wide-panel"><div class="panel-head"><div><h3>Opportunity radar</h3><p>Markets with a potential gap between price and estimated probability</p></div><span class="tag">MODEL ESTIMATES</span></div><div id="radarList" class="market-list"></div></div>
-          <div class="panel"><div class="panel-head"><div><h3>Connected venues</h3><p>Data integration status</p></div></div><div id="venueList" class="venue-list"></div><button class="secondary-btn full" data-goto="settings">Configure integrations</button></div>
+          <div class="panel"><div class="panel-head"><div><h3>Venue access checks</h3><p>Provider or venue availability is not implied by a label.</p></div></div><div id="venueList" class="venue-list"></div><button class="secondary-btn full" data-goto="settings">Configure integrations</button></div>
         </div>
         <div class="disclaimer">Market probabilities and AI estimates are uncertain. Historical performance does not predict future results. Always verify market rules, resolution criteria, liquidity, fees and jurisdictional availability.</div>
       </section>
 
       <section class="page" id="page-discover">
-        <div class="page-title"><div class="eyebrow">CROSS-PLATFORM INTELLIGENCE</div><h1>Discover markets</h1><p class="muted">Search available venues in one normalized view.</p></div>
-        <div class="filter-bar"><input id="marketSearch" placeholder="Search markets, events or keywords…"><select id="venueFilter"><option value="all">All platforms</option><option>polymarket</option><option>kalshi</option><option>manifold</option><option>predictit</option><option>opinion</option><option>predictfun</option></select><button class="primary-btn" id="searchBtn">Search</button></div>
-        <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>PLATFORM</th><th>YES PRICE</th><th>VOLUME</th><th></th></tr></thead><tbody id="marketRows"><tr><td colspan="5" class="empty">Connect a market data provider in Settings or use demo mode.</td></tr></tbody></table></div>
+        <div class="page-title"><div class="eyebrow">AUSTRALIA FIRST - INTERNATIONAL SECONDARY</div><h1>Discover markets</h1><p class="muted">No Australian event-market integration is verified. Use the Australia dashboard for Australian official sources. International venues are optional and their access and Australian eligibility are unverified.</p></div>
+        <div class="filter-bar"><input id="marketSearch" placeholder="Search markets, events or keywords…"><select id="venueFilter"><option value="all">International / other venues (optional, access unverified)</option><option value="manifold">Manifold (play-money, not AUD)</option><optgroup label="International / other venues - Australian eligibility unverified"><option value="polymarket">Polymarket</option><option value="kalshi">Kalshi</option><option value="predictit">PredictIt</option><option value="opinion">Opinion</option><option value="predictfun">Predict.fun</option><option value="novig">Novig</option><option value="prophetx">ProphetX</option></optgroup></select><button class="primary-btn" id="searchBtn">Search</button></div>
+        <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>VENUE / JURISDICTION</th><th>YES QUOTE</th><th>VOLUME (NATIVE CURRENCY)</th><th></th></tr></thead><tbody id="marketRows"><tr><td colspan="5" class="empty">Configure a secure backend. Data availability and access remain unverified until tested.</td></tr></tbody></table></div><button class="secondary-btn" id="marketNext" hidden>Load next page</button>
       </section>
 
       <section class="page" id="page-analyzer">
@@ -91,12 +97,37 @@
       </section>
 
       <section class="page" id="page-paper">
-        <div class="page-title"><div class="eyebrow">RISK-FREE SIMULATION</div><h1>Paper trading</h1><p class="muted">Test a thesis with virtual funds. No wallet or exchange connection.</p></div>
+        <div class="page-title"><div class="eyebrow">SIMULATION ONLY · NO EXECUTION</div><h1>Paper trading</h1><p class="muted">Test a thesis using virtual AUD units. Outcome resolution is manual and simulated; no wallet, deposit or exchange connection exists.</p></div>
         <div class="metric-grid"><article class="metric-card"><span>VIRTUAL BALANCE</span><strong id="paperBalance">$10,000.00</strong><small>Starting bankroll</small></article><article class="metric-card"><span>OPEN POSITIONS</span><strong id="paperPositions">0</strong><small>Simulated positions</small></article><article class="metric-card"><span>REALIZED P&L</span><strong id="paperRealized">$0.00</strong><small>Closed positions</small></article><article class="metric-card"><span>RETURN</span><strong id="paperReturn">0.00%</strong><small>Since simulation start</small></article></div>
-        <div class="panel"><div class="panel-head"><div><h3>New simulated position</h3><p>Use a market you have researched.</p></div></div><div class="paper-form"><label>MARKET QUESTION<input id="paperQuestion" placeholder="Market question"></label><label>OUTCOME<select id="paperSide"><option>YES</option><option>NO</option></select></label><label>ENTRY PRICE (%)<input id="paperPrice" type="number" min="1" max="99" placeholder="50"></label><label>STAKE ($)<input id="paperStake" type="number" min="1" placeholder="100"></label><button class="primary-btn" id="paperAdd">Add simulated position</button></div></div>
+        <div class="panel"><div class="panel-head"><div><h3>New simulated position</h3><p>Use a market you have researched. Enter the YES price; the selected NO side uses its complement.</p></div></div><div class="paper-form"><label>MARKET QUESTION<input id="paperQuestion" placeholder="Market question"></label><label>OUTCOME<select id="paperSide"><option>YES</option><option>NO</option></select></label><label>ENTRY YES PRICE (%)<input id="paperPrice" type="number" min="1" max="99" placeholder="50"></label><label>VIRTUAL STAKE (AUD UNITS)<input id="paperStake" type="number" min="1" placeholder="100"></label><button class="primary-btn" id="paperAdd">Add simulated position</button></div></div>
         <div class="panel"><div class="panel-head"><h3>Positions</h3><button class="text-btn" id="resetPaper">Reset simulation</button></div><div id="positionList" class="market-list"></div></div>
       </section>
 
+      <section class="page" id="page-australia">
+        <div class="page-title"><div class="eyebrow">OFFICIAL AUSTRALIAN SOURCES</div><h1>Australian Market Intelligence</h1><p class="muted">Historical facts and current observations from official sources, kept separate from model estimates.</p></div>
+        <div class="filter-bar"><label>Display timezone <select id="auTimezone"><option value="Australia/Perth">Perth - AWST</option><option value="Australia/Sydney">Sydney - AEST/AEDT</option><option value="Australia/Melbourne">Melbourne - AEST/AEDT</option><option value="Australia/Brisbane">Brisbane - AEST</option><option value="Australia/Adelaide">Adelaide - ACST/ACDT</option><option value="Australia/Darwin">Darwin - ACST</option><option value="Australia/Hobart">Hobart - AEST/AEDT</option><option value="Australia/Canberra">Canberra - AEST/AEDT</option></select></label><label>BOM observations station <select id="auCity"><option value="perth">Perth</option><option value="sydney">Sydney</option></select></label><label>ABS dataflow ID <input id="absFlow" value="CPI_H" maxlength="40" aria-label="ABS Indicator API dataflow identifier"></label><button class="primary-btn" id="loadAustralia">Refresh official sources</button></div>
+        <div id="australiaStatus" class="notice"><div>Live source status has not been checked this session.</div></div><div id="australiaCards" class="content-grid"><div class="panel"><h3>RBA</h3><p>Official cash-rate target and monetary policy releases.</p></div><div class="panel"><h3>ABS</h3><p>Indicator API requires an ABS key configured as a Worker secret.</p></div><div class="panel"><h3>AEC</h3><p>Registered FTP media feed requires a separate authenticated ingestion service.</p></div><div class="panel"><h3>Bureau of Meteorology</h3><p>Observation products depend on applicable product terms and licensing.</p></div><div class="panel"><h3>ASX</h3><p>Separate licensed integration; no ASX data displayed.</p></div><div class="panel"><h3>FEX Global</h3><p>Not integrated: no verified active event product/API and access.</p></div></div>
+      </section>
+      <section class="page" id="page-research">
+        <div class="page-title"><div class="eyebrow">SOURCED INVESTIGATION</div><h1>AI Research</h1><p class="muted">Research probabilities are model-generated estimates, distinct from observed venue prices.</p></div>
+        <div class="panel settings-panel"><label>RESEARCH QUESTION<input id="researchQuestion" placeholder="Will the RBA change the cash rate at its next meeting?"></label><label>RESOLUTION RULES<textarea id="researchRules" rows="3" placeholder="Define the source and cutoff date that resolve this question."></textarea></label><label>OBSERVED MARKET PRICE (%)<input id="researchPrice" type="number" min="0" max="100"></label><button class="primary-btn" id="researchBtn">Research with live sources</button><p class="muted tiny">Requires Worker authentication and OpenAI configuration. Returned citations must be checked.</p></div><div id="researchResult" class="panel result-panel hidden"></div>
+      </section>
+      <section class="page" id="page-backtest">
+        <div class="page-title"><div class="eyebrow">HISTORICAL PRICE REPLAY</div><h1>Backtesting</h1><p class="muted">Descriptive price replay only. It does not simulate fills or prove a predictive strategy.</p></div>
+        <div class="panel settings-panel"><label>VENUE ID<input id="btPlatform" value="manifold" placeholder="Provider venue identifier"></label><label>MARKET ID<input id="btMarketId" placeholder="Market identifier"></label><div class="two-inputs"><label>DAYS (1?90)<input id="btDays" type="number" min="1" max="90" value="30"></label><label>INTERVAL<select id="btInterval"><option>1h</option><option>15m</option><option>1d</option></select></label></div><button class="primary-btn" id="backtestBtn">Run replay</button></div><div id="backtestResult" class="panel result-panel hidden"></div>
+      </section>
+      <section class="page" id="page-forecasts">
+        <div class="page-title"><div class="eyebrow">PERSONAL CALIBRATION</div><h1>Forecast tracking</h1><p class="muted">Save research forecasts and resolve them against independently verified outcomes.</p></div>
+        <div class="panel settings-panel"><label>QUESTION<input id="forecastQuestion" placeholder="Forecast question"></label><div class="two-inputs"><label>PROBABILITY (%)<input id="forecastProbability" type="number" min="0" max="100"></label><label>HORIZON / RESOLUTION DATE<input id="forecastHorizon" placeholder="e.g. 2027-02-03 AEST"></label></div><button class="primary-btn" id="saveForecast">Save forecast</button></div><div class="panel"><h3>Calibration</h3><p id="calibrationStats" class="muted"></p><div id="forecastLedger" class="market-list"></div></div>
+      </section>
+      <section class="page" id="page-alerts">
+        <div class="page-title"><div class="eyebrow">RESEARCH NOTIFICATIONS</div><h1>Alert configuration</h1><p class="muted">Scans show provider-reported estimates in USD terms. EDGE does not recalculate net returns or verify executable liquidity. No orders are placed.</p></div>
+        <div class="panel settings-panel"><div class="two-inputs"><label>MINIMUM PROVIDER-REPORTED ROI (%)<input id="alertMinRoi" type="number" min="0" max="100"></label><label>MINIMUM PROVIDER SIZE (USD)<input id="alertMinSize" type="number" min="0"></label></div><button class="primary-btn" id="saveAlertRules">Save alert rules</button> <button class="secondary-btn" id="runScan">Run scan now</button><p id="alertStatus" class="muted tiny">Saved thresholds are per authenticated user; scheduled webhook scans use deployment-level rules and do not send personalized alerts.</p></div><div id="alertFeed" class="market-list"></div>
+      </section>
+      <section class="page" id="page-api-health">
+        <div class="page-title"><div class="eyebrow">BACKEND DIAGNOSTICS</div><h1>API health</h1><p class="muted">A successful authenticated response confirms the Worker responded, not that each provider integration is enabled.</p></div>
+        <div class="panel settings-panel"><button class="primary-btn" id="refreshHealth">Check API health</button><div id="apiHealthResult" class="market-list">Not checked this session.</div></div>
+      </section>
       <section class="page" id="page-settings">
         <div class="page-title"><div class="eyebrow">CONFIGURATION</div><h1>Settings & integrations</h1><p class="muted">Connect data providers through a secure backend. Never paste secret keys into this page.</p></div>
         <div class="panel settings-panel"><div class="panel-head"><div><h3>Backend connection</h3><p>Cloudflare Worker URL for secure market and AI requests.</p></div></div><label>API BACKEND URL<input id="backendUrl" placeholder="https://your-worker.your-subdomain.workers.dev"></label><button class="primary-btn" id="saveSettings">Save connection</button><button class="text-btn" id="testConnection">Test connection</button><div id="settingsStatus" class="muted tiny"></div></div>
@@ -107,6 +138,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

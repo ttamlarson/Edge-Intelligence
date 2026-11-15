@@ -1,0 +1,10 @@
+{
+  "name": "edge-intelligence",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check app.js && node --check index.js && node --check domain.js && node --check au-sources.js && node --check scripts/build-pages.js",
+    "build:pages": "node scripts/build-pages.js"
+  }
+}
