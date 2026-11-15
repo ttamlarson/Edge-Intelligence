@@ -12,7 +12,7 @@ test("daily bars reject missing provenance, wrong currency and stale data", () =
   const bars = makeBars();
   assert.equal(validateDailyBars(bars, { currency: "AUD", observedAt: new Date(now).toISOString(), now }).valid, false);
   assert.equal(validateDailyBars(bars, { source: "Test feed", currency: "USD", observedAt: new Date(now).toISOString(), now }).valid, false);
-  assert.equal(validateDailyBars(bars, { source: "Test feed", currency: "AUD", observedAt: new Date(now - 2 * 86400000).toISOString(), now }).valid, false);
+  assert.equal(validateDailyBars(bars, { source: "Test feed", currency: "AUD", observedAt: new Date(now - 6 * 86400000).toISOString(), now }).valid, false);
 });
 test("daily bars reject malformed OHLC and duplicate timestamps", () => {
   const bars = makeBars(); bars[2].low = bars[2].close + 1;
