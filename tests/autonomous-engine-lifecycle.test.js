@@ -12,9 +12,11 @@ test("CSV parser rejects malformed OHLC and duplicate sessions",()=>{
 test("paper exit returns proceeds net of estimated fees and records P&L",()=>{
  const portfolio={...createPaperPortfolio(),cashAud:394.4,positions:[{id:"p1",symbol:"BHP",shares:10,entryPrice:10,stopPrice:9,targetPrice:12,entryCostsAud:5.6,debitAud:105.6,status:"OPEN_PAPER"}]};
  const result=closePaperPosition(portfolio,"p1",11,{closedAt:"2026-11-15T00:00:00.000Z"});
- assert.equal(result.accepted,true);assert.equal(result.trade.status,"CLOSED_PAPER");assert.equal(result.portfolio.cashAud,498.3);assert.equal(result.trade.profitLossAud,3.9);assert.equal(result.portfolio.closedTrades.length,1);
+ assert.equal(result.accepted,true);assert.equal(result.trade.status,"CLOSED_PAPER");
+ // Default exit cost is AUD 5 minimum commission + GST + 10 bps slippage = AUD 5.61.
+ assert.equal(result.portfolio.cashAud,498.79);assert.equal(result.trade.profitLossAud,-1.21);assert.equal(result.portfolio.closedTrades.length,1);
 });
 test("paper marks include estimated exit costs and do not mutate position",()=>{
  const position={id:"p1",symbol:"BHP",shares:10,entryPrice:10,stopPrice:9,targetPrice:12,entryCostsAud:5.6,debitAud:105.6,status:"OPEN_PAPER"};
- const mark=markPaperPosition(position,11);assert.equal(mark.unrealizedProfitLossAud,3.9);assert.equal(position.lastMarkPrice,undefined);
+ const mark=markPaperPosition(position,11);assert.equal(mark.unrealizedProfitLossAud,-1.21);assert.equal(position.lastMarkPrice,undefined);
 });
