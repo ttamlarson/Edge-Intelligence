@@ -4,6 +4,34 @@ compatibility_date = "2026-11-01"
 
 [vars]
 OPENAI_MODEL = "gpt-6-astra"
+FRONTEND_ORIGINS = "https://REPLACE_WITH_YOUR_PAGES_DOMAIN"
+CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
+CF_ACCESS_AUD = "REPLACE_WITH_ACCESS_APPLICATION_AUD"
+BOM_DATA_LICENSED = "false"
+# Optional AEC bridge URL and exact hostname; configure only for an operator-controlled HTTPS service.
+# AEC_INGESTION_URL = "https://aec-bridge.example.au/v1/results"
+# AEC_INGESTION_HOST = "aec-bridge.example.au"
+
+[[ratelimits]]
+name = "DATA_LIMITER"
+namespace_id = "3101"
+[ratelimits.simple]
+limit = 60
+period = 60
+
+[[ratelimits]]
+name = "AI_LIMITER"
+namespace_id = "3102"
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[[ratelimits]]
+name = "WRITE_LIMITER"
+namespace_id = "3103"
+[ratelimits.simple]
+limit = 20
+period = 60
 
 [[kv_namespaces]]
 binding = "EDGE_KV"
@@ -12,6 +40,43 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 [triggers]
 crons = ["*/15 * * * *"]
 
+# Staging uses isolated KV and rate-limit namespaces. Replace all placeholders before `--env staging`.
+[env.staging]
+name = "edge-intelligence-api-staging"
+workers_dev = true
+
+[env.staging.vars]
+OPENAI_MODEL = "gpt-6-astra"
+FRONTEND_ORIGINS = "https://REPLACE_WITH_YOUR_STAGING_PAGES_DOMAIN"
+CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
+CF_ACCESS_AUD = "REPLACE_WITH_STAGING_ACCESS_APPLICATION_AUD"
+BOM_DATA_LICENSED = "false"
+
+[[env.staging.ratelimits]]
+name = "DATA_LIMITER"
+namespace_id = "4101"
+[env.staging.ratelimits.simple]
+limit = 60
+period = 60
+
+[[env.staging.ratelimits]]
+name = "AI_LIMITER"
+namespace_id = "4102"
+[env.staging.ratelimits.simple]
+limit = 10
+period = 60
+
+[[env.staging.ratelimits]]
+name = "WRITE_LIMITER"
+namespace_id = "4103"
+[env.staging.ratelimits.simple]
+limit = 20
+period = 60
+
+[[env.staging.kv_namespaces]]
+binding = "EDGE_KV"
+id = "REPLACE_WITH_YOUR_STAGING_KV_NAMESPACE_ID"
+
 # Before deploying:
 # 1. Run: wrangler kv namespace create EDGE_KV
 # 2. Replace the placeholder id above with the returned namespace ID.
@@ -19,3 +84,4 @@ crons = ["*/15 * * * *"]
 #    wrangler secret put PREDICTION_HUNT_API_KEY
 #    wrangler secret put OPENAI_API_KEY
 #    wrangler secret put ALERT_WEBHOOK_URL  (optional)
+#    wrangler secret put AEC_INGESTION_TOKEN  (optional; after the bridge is configured)
