@@ -1,11 +1,12 @@
 const CACHE_PREFIX = "edge-shell-v";
-const CACHE_NAME = `${CACHE_PREFIX}8`;
+const CACHE_NAME = `${CACHE_PREFIX}9`;
 const SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./domain.js",
+  "./autonomous-engine.js",
   "./manifest.webmanifest",
   "./icon.svg",
   "./icon-192.png",

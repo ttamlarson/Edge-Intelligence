@@ -1,8 +1,9 @@
 {
-  "name": "EDGE \u2014 Australian Market Intelligence",
+  "name": "EDGE — Australian Market Intelligence",
   "short_name": "EDGE",
-  "id": "/",
+  "id": "./",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#090d16",
   "theme_color": "#090d16",
