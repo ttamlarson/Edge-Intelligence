@@ -10,11 +10,11 @@ Updated for the autonomous ASX trading foundation. “Complete” describes code
 | $500 portfolio risk configuration | Complete | 1% equity risk budget, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions, whole-share sizing. |
 | ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. |
 | Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp within 36 hours, 51 valid daily OHLC bars. |
-| Simulation-only position opening | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; rejects executable/non-paper candidates. |
+| Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; validates candidate and calculates estimated exit costs and realized P&L. |
 | Licensed ASX daily data integration | Not implemented | No ASX feed or licence configured. No live scan can run. |
-| Automated scheduled ASX scanning | Not implemented | Requires verified source integration and scheduler. |
+| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV and screens each ticker locally. Scheduled live scanning still not implemented. |
 | Broker read-only account/portfolio adapter | Not implemented | IBKR account and API permissions not configured or verified. |
-| Complete mark-to-market, exits and immutable trade ledger | Not implemented | Current module only opens paper positions; full lifecycle still required. |
+| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; no broker reconciliation or immutable server audit. |
 | Out-of-sample backtest and walk-forward validation | Not implemented | Existing replay is descriptive only; no profitability claim. |
 | Live order execution | Disabled by design | No order routes, credentials or broker integration. Do not enable in this phase. |
 

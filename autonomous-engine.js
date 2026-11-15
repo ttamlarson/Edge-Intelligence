@@ -84,3 +84,62 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   const position = { id: String(id || crypto.randomUUID()), symbol: candidate.symbol, shares: candidate.shares, entryPrice: candidate.entryReference, stopPrice: candidate.stopPrice, targetPrice: candidate.targetPrice, entryCostsAud: candidate.estimatedEntryCostsAud, debitAud: round2(debit), openedAt, status: "OPEN_PAPER" };
   return { accepted: true, portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position] }, position };
 }
+
+export function parseAsxDailyCsv(csvText) {
+  if (typeof csvText !== "string" || csvText.length > 5_000_000) return { valid: false, reason: "CSV must be text under 5 MB." };
+  const rows = []; let row = [], field = "", quoted = false;
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+    if (quoted) { if (ch === '"' && csvText[i + 1] === '"') { field += '"'; i++; } else if (ch === '"') quoted = false; else field += ch; }
+    else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(field.trim()); field = ""; }
+    else if (ch === "\n") { row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row); row = []; field = ""; }
+    else if (ch !== "\r") field += ch;
+  }
+  if (quoted) return { valid: false, reason: "CSV contains an unterminated quoted field." };
+  row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row);
+  if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
+  const headers = rows.shift().map(x => x.toLowerCase().replace(/[ _-]/g, ""));
+  const index = (...names) => headers.findIndex(h => names.includes(h));
+  const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close","adjclose") };
+  if (Object.values(cols).some(v => v < 0)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
+  const grouped = {};
+  for (const cells of rows) {
+    const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
+    const dateRaw = String(cells[cols.date] || "").trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? Date.parse(dateRaw + "T00:00:00Z") : Date.parse(dateRaw);
+    const bar = { timestamp: Number.isFinite(date) ? new Date(date).toISOString() : null, open: num(cells[cols.open]), high: num(cells[cols.high]), low: num(cells[cols.low]), close: num(cells[cols.close]) };
+    if (!/^[A-Z0-9.]{2,12}$/.test(symbol) || !bar.timestamp || [bar.open,bar.high,bar.low,bar.close].some(v => v === null || v <= 0) || bar.high < Math.max(bar.open,bar.close) || bar.low > Math.min(bar.open,bar.close) || bar.low > bar.high) return { valid: false, reason: "A row has an invalid ticker, date or OHLC value." };
+    (grouped[symbol] ||= []).push(bar);
+  }
+  const symbols = Object.keys(grouped);
+  if (!symbols.length) return { valid: false, reason: "No valid ticker rows found." };
+  for (const bars of Object.values(grouped)) {
+    bars.sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+    for(let i=1;i<bars.length;i++) if(bars[i].timestamp===bars[i-1].timestamp) return {valid:false,reason:"Duplicate daily bar detected."};
+  }
+  return { valid: true, symbols: symbols.sort(), barsBySymbol: grouped, rows: Object.values(grouped).reduce((n,b)=>n+b.length,0), latestBar: Object.values(grouped).flat().reduce((a,b)=>a.timestamp>b.timestamp?a:b).timestamp };
+}
+
+export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt = new Date().toISOString(), costs = {} } = {}) {
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) return { accepted: false, reason: "Simulation-only portfolio required." };
+  const index = portfolio.positions.findIndex(p => p.id === positionId && p.status === "OPEN_PAPER");
+  if (index < 0) return { accepted: false, reason: "Open paper position not found." };
+  const position = portfolio.positions[index], price = num(exitPrice);
+  if (price === null || price <= 0) return { accepted: false, reason: "Exit price must be positive." };
+  const exitValue = position.shares * price, exitCost = estimateAsxSideCost(exitValue, costs);
+  if (!exitCost) return { accepted: false, reason: "Exit costs could not be calculated." };
+  const proceeds = round2(exitValue - exitCost.totalAud);
+  const pnl = round2(proceeds - position.debitAud);
+  const closed = { ...position, status: "CLOSED_PAPER", exitPrice: round2(price), exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
+  const positions = portfolio.positions.slice(); positions[index] = closed;
+  return { accepted: true, portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud + proceeds), positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
+}
+
+export function markPaperPosition(position, markPrice, costs = {}) {
+  const price = num(markPrice);
+  if (!position || position.status !== "OPEN_PAPER" || price === null || price <= 0) return null;
+  const value = position.shares * price, sellCost = estimateAsxSideCost(value, costs);
+  if (!sellCost) return null;
+  return { markPrice: round2(price), marketValueAud: round2(value), estimatedExitCostsAud: sellCost.totalAud, unrealizedProfitLossAud: round2(value - sellCost.totalAud - position.debitAud) };
+}

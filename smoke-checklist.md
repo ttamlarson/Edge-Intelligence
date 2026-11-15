@@ -7,6 +7,13 @@
 - [x] Local HTTPS-equivalent `localhost` secure context fetched both manifest PNG icons and fired `beforeinstallprompt`.
 - [x] Local desktop and mobile navigation smoke tests; no horizontal overflow; offline shell reload passed.
 
+## ASX autonomous paper desk
+- [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
+- [ ] Confirm stale, malformed, duplicate and non-AUD bars cannot create candidates.
+- [ ] Confirm paper positions enforce the AUD 500 start, AUD 200 max allocation, AUD 100 cash reserve, two-position cap and 1% risk budget.
+- [ ] Confirm manual paper exits calculate brokerage/GST/slippage estimates and update the local closed-trade ledger.
+- [ ] Confirm no broker API, credentials or real-money order route exists.
+
 ## Required after account configuration, before deployment is considered verified
 - [ ] Confirm Pages serves the site over HTTPS and applies `_headers` security headers.
 - [ ] Complete standalone install on supported desktop/mobile browsers; only installability event/icons were verified locally, not the OS/browser install dialog.
