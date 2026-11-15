@@ -22,6 +22,11 @@ test("PWA manifest, HTML and service-worker shell use existing icon and module p
   assert.match(html, /href="\.\/manifest\.webmanifest"/);
   assert.match(html, /type="module" src="\.\/app\.js"/);
   assert.match(sw, /"\.\/domain\.js"/);
+  assert.match(sw, /"\.\/autonomous-engine\.js"/);
+  assert.equal(await exists("autonomous-engine.js"), true);
+  assert.equal(manifest.id, "./");
+  assert.equal(manifest.start_url, "./");
+  assert.equal(manifest.scope, "./");
   assert.doesNotMatch(sw, /assets\/icon\.svg/);
 });
 
@@ -39,7 +44,7 @@ test("service-worker installation precaches every required shell resource", asyn
   let installPromise;
   handlers.get("install")({ waitUntil: promise => { installPromise = promise; } });
   await installPromise;
-  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
+  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./autonomous-engine.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
   for (const path of cachedPaths) assert.equal(await exists(path.replace(/^\.\//, "") || "index.html"), true, path);
 });
 
@@ -48,12 +53,12 @@ test("service-worker activation removes only older EDGE shell caches", async () 
   const handlers = new Map(); const deleted = [];
   const context = {
     self: { location: { origin: "https://edge.test" }, clients: { claim: async () => {} }, addEventListener: (name, handler) => handlers.set(name, handler), skipWaiting: () => {} },
-    caches: { open: async () => ({}), keys: async () => ["edge-shell-v1", "edge-shell-v2", "edge-shell-v3", "edge-shell-v4", "edge-shell-v5", "edge-shell-v6", "edge-shell-v7", "user-cache"], delete: async name => deleted.push(name), match: async () => null },
+    caches: { open: async () => ({}), keys: async () => ["edge-shell-v1", "edge-shell-v2", "edge-shell-v3", "edge-shell-v4", "edge-shell-v5", "edge-shell-v6", "edge-shell-v7", "edge-shell-v8", "user-cache"], delete: async name => deleted.push(name), match: async () => null },
     URL, Response, fetch
   };
   vm.runInNewContext(source, context);
   let activation; handlers.get("activate")({ waitUntil: promise => { activation = promise; } }); await activation;
-  assert.deepEqual(deleted, ["edge-shell-v1", "edge-shell-v2", "edge-shell-v3", "edge-shell-v4", "edge-shell-v5", "edge-shell-v6", "edge-shell-v7"]);
+  assert.deepEqual(deleted, ["edge-shell-v1", "edge-shell-v2", "edge-shell-v3", "edge-shell-v4", "edge-shell-v5", "edge-shell-v6", "edge-shell-v7", "edge-shell-v8"]);
 });
 
 test("service-worker update message keeps skipWaiting alive until it resolves", async () => {
@@ -61,8 +66,7 @@ test("service-worker update message keeps skipWaiting alive until it resolves", 
   const handlers = new Map(); const sequence = [];
   const context = {
     self: { location: { origin: "https://edge.test" }, clients: { claim: async () => {} }, addEventListener: (name, handler) => handlers.set(name, handler), skipWaiting: async () => { sequence.push("skipWaiting-start"); await Promise.resolve(); sequence.push("skipWaiting-resolved"); } },
-    caches: { open: async () => ({}), keys: async () => [], delete: async () => true, match: async () => null },
-    URL, Response, fetch
+    caches: { open: async () => ({}), keys: async () => [], delete: async () => true, match: async () => null }, URL, Response, fetch
   };
   vm.runInNewContext(source, context);
   let task; let acknowledgement;
@@ -77,8 +81,7 @@ test("service-worker does not acknowledge an update if skipWaiting fails", async
   const handlers = new Map(); let acknowledged = false; let task;
   const context = {
     self: { location: { origin: "https://edge.test" }, clients: { claim: async () => {} }, addEventListener: (name, handler) => handlers.set(name, handler), skipWaiting: async () => { throw new Error("activation rejected"); } },
-    caches: { open: async () => ({}), keys: async () => [], delete: async () => true, match: async () => null },
-    URL, Response, fetch
+    caches: { open: async () => ({}), keys: async () => [], delete: async () => true, match: async () => null }, URL, Response, fetch
   };
   vm.runInNewContext(source, context);
   handlers.get("message")({ data: { type: "SKIP_WAITING" }, ports: [{ postMessage: () => { acknowledged = true; } }], waitUntil: promise => { task = promise; } });
