@@ -1,4 +1,5 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
+import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, parseAsxDailyCsv } from "./autonomous-engine.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -146,3 +147,42 @@ if($("loadAustralia"))$("loadAustralia").onclick=loadAustralia;
 async function loadAustralia(){const city=$("auCity").value;$("australiaStatus").textContent="Checking official source adapters...";try{const flow=$("absFlow").value.trim()||"CPI_H";const data=await api("/api/au/dashboard?"+new URLSearchParams({city,flow}));const sections=data.sections||{};const entries=[["RBA cash rate",sections.rbaCashRate],["RBA releases",sections.rbaReleases],["ABS indicators",sections.abs],["BOM observations",sections.bom],["AEC results",sections.aec],["ASX",sections.asx],["FEX Global",sections.fex]];$("australiaCards").innerHTML=entries.map(([name,item])=>{const records=item?.records||[];const detail=records.slice(0,8).map(r=>`<div class="market-meta">${esc(r.metric||r.title||r.location||name)}: ${esc(r.value??r.temperatureC??"")} ${esc(r.unit||"C")} | period ${esc(r.observationPeriod||"not stated")} | published ${r.publishedAt?esc(formatDateTime(r.publishedAt,$("auTimezone").value)):"not stated"} | retrieved ${r.retrievedAt?esc(formatDateTime(r.retrievedAt,$("auTimezone").value)):"not available"} | source timezone ${esc(r.sourceTimezone||"not stated")} | <a href="${esc(r.sourceUrl||item?.sourceUrl||"#")}" target="_blank" rel="noopener">official source</a></div>`).join("");const context=records[0]?`${records[0].metric||records[0].title||records[0].location||name}: ${records[0].value??records[0].temperatureC??""} ${records[0].unit||""}; observation period ${records[0].observationPeriod||"not stated"}; published ${records[0].publishedAt||"not stated"}; source ${records[0].sourceUrl||item?.sourceUrl||"not supplied"}`:"No data record returned; only source metadata is available.";return `<article class="panel"><h3>${esc(name)}</h3><p>${esc(item?.status||"not configured")}</p>${detail||`<p>${esc(item?.message||item?.licensing||item?.sourceUrl||"No live data returned; source not integrated.")}</p>`}<button class="secondary-btn" data-research-source="${esc(name)}" data-research-context="${esc(context)}">Research relationship to Australian forecasts</button></article>`}).join("");document.querySelectorAll("[data-research-source]").forEach(button=>button.onclick=()=>{nav("research");$("researchQuestion").value=`How might the verified Australian ${button.dataset.researchSource} information affect relevant market forecasts?`;$("researchRules").value=button.dataset.researchContext});$("australiaStatus").textContent="Source retrieval completed at "+formatDateTime(data.retrieved_at,$("auTimezone").value)+" local time. Each card reports its status; empty records are not data."}catch(error){$("australiaStatus").textContent="Australian dashboard could not load: "+error.message}}
 if($("alertMinRoi")){$("alertMinRoi").value=edgeExtra.alertRules.minRoi;$("alertMinSize").value=edgeExtra.alertRules.minSize}
 renderForecasts();
+
+// Personal ASX paper-trading desk. CSV import is the data boundary until a licensed feed is configured.
+const ASX_STORE = "edge-asx-paper-v1";
+const asxStored = storageValue(ASX_STORE, null);
+let asxPortfolio = asxStored?.mode === "PAPER_ONLY" && asxStored?.liveTradingEnabled === false ? asxStored : createPaperPortfolio();
+let asxUniverse = {};
+let asxCandidates = [];
+function saveAsx(){try{localStorage.setItem(ASX_STORE,JSON.stringify(asxPortfolio))}catch{toast("ASX paper ledger could not be saved in browser storage.")}}
+function aud(value){return new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD"}).format(Number(value)||0)}
+function renderAsxDesk(){
+ const open=asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER");
+ const realized=asxPortfolio.closedTrades.reduce((s,p)=>s+(Number(p.profitLossAud)||0),0);
+ const unrealized=open.reduce((s,p)=>s+(markPaperPosition(p,p.lastMarkPrice||p.entryPrice)?.unrealizedProfitLossAud||0),0);
+ const equity=asxPortfolio.cashAud+open.reduce((s,p)=>s+(Number(p.lastMarkPrice||p.entryPrice)*p.shares||0),0);
+ $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=aud(equity);
+ $("asxRealized").textContent=aud(realized);$("asxUnrealized").textContent=aud(unrealized);
+ $("asxPositions").textContent=open.length;
+ $("asxCandidates").innerHTML=asxCandidates.length?asxCandidates.map((c,i)=>`<div class="position-card"><div><b>${esc(c.symbol)} · ${esc(c.status)}</b><div class="market-meta">${esc(c.reason)} · ${esc(c.source||"")}</div>${c.status==="PAPER_CANDIDATE"?`<div class="market-meta">Ref ${aud(c.entryReference)} · ${c.shares} shares · stop ${aud(c.stopPrice)} · target ${aud(c.targetPrice)} · est. target net ${aud(c.estimatedNetTargetProfitAud)} · RR ${c.rewardRiskAfterCosts}:1</div>`:""}</div>${c.status==="PAPER_CANDIDATE"?`<button class="small-btn" data-asx-open="${i}">Open paper position</button>`:""}</div>`).join(""):'<div class="empty">Import a licensed or otherwise authorised ASX daily OHLC CSV to scan. No live ASX feed is connected.</div>';
+ document.querySelectorAll("[data-asx-open]").forEach(b=>b.onclick=()=>{const c=asxCandidates[Number(b.dataset.asxOpen)];const result=openPaperPosition(asxPortfolio,c);if(!result.accepted){toast(result.reason);return}asxPortfolio=result.portfolio;saveAsx();renderAsxDesk();toast("Paper position opened. No broker order was sent.")});
+ $("asxOpenList").innerHTML=open.length?open.map(p=>{const mark=markPaperPosition(p,p.lastMarkPrice||p.entryPrice);return `<div class="position-card"><div><b>${esc(p.symbol)} · ${p.shares} shares</b><div class="market-meta">Entry ${aud(p.entryPrice)} · Stop ${aud(p.stopPrice)} · Target ${aud(p.targetPrice)} · Est. unrealized ${aud(mark?.unrealizedProfitLossAud)}</div><label class="field-label">MANUAL PAPER EXIT / MARK PRICE <input type="number" step="0.001" min="0.001" data-asx-price="${esc(p.id)}" value="${Number(p.lastMarkPrice||p.entryPrice)}"></label></div><button class="small-btn" data-asx-close="${esc(p.id)}">Close paper position</button></div>`}).join(""):'<div class="empty">No open ASX paper positions.</div>';
+ document.querySelectorAll("[data-asx-close]").forEach(b=>b.onclick=()=>{const p=asxPortfolio.positions.find(x=>x.id===b.dataset.asxClose);const input=document.querySelector(`[data-asx-price="${CSS.escape(p.id)}"]`);const result=closePaperPosition(asxPortfolio,p.id,Number(input.value));if(!result.accepted){toast(result.reason);return}asxPortfolio=result.portfolio;saveAsx();renderAsxDesk();toast("Position closed in paper ledger only.")});
+ $("asxHistory").innerHTML=asxPortfolio.closedTrades.length?asxPortfolio.closedTrades.slice().reverse().map(p=>`<div class="position-card"><div><b>${esc(p.symbol)} · ${p.shares} shares</b><div class="market-meta">Entry ${aud(p.entryPrice)} · Exit ${aud(p.exitPrice)} · ${esc(p.closedAt)}</div></div><b>${aud(p.profitLossAud)}</b></div>`).join(""):'<div class="empty">No closed trades yet.</div>';
+}
+$("asxImportBtn")?.addEventListener("click",()=>{
+ const file=$("asxCsvFile").files[0],source=$("asxSource").value.trim();
+ if(!file||!source){toast("Choose a CSV and identify its data source.");return}
+ if(file.size>5*1024*1024){toast("CSV must be smaller than 5 MB.");return}
+ const reader=new FileReader();reader.onload=()=>{
+  const parsed=parseAsxDailyCsv(String(reader.result||""));
+  if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;return}
+  asxUniverse=parsed.barsBySymbol;
+  const observedAt=parsed.latestBar;
+  asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
+  $("asxImportStatus").textContent=`Imported ${parsed.rows} daily bars for ${parsed.symbols.length} ASX tickers. Latest bar: ${formatDateTime(parsed.latestBar,"Australia/Perth")}. Source label is user-declared and has not been independently verified.`;
+  renderAsxDesk();
+ };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
+});
+$("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
+renderAsxDesk();

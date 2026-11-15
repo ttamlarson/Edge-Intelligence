@@ -1,5 +1,23 @@
 # EDGE task register — remediation status
 
+Updated for the autonomous ASX trading foundation. “Complete” describes code and deterministic tests only; it does not establish live data access, broker connectivity, legal eligibility or profitability.
+
+## Autonomous trading — $500 AUD personal account
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Deterministic daily swing strategy foundation | Complete | 20/50-day trend filter, 20-session breakout, ATR-based stop/target; candidate only. Not validated as profitable. |
+| $500 portfolio risk configuration | Complete | 1% equity risk budget, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions, whole-share sizing. |
+| ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. |
+| Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp within 36 hours, 51 valid daily OHLC bars. |
+| Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; validates candidate and calculates estimated exit costs and realized P&L. |
+| Licensed ASX daily data integration | Not implemented | No ASX feed or licence configured. No live scan can run. |
+| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV and screens each ticker locally. Scheduled live scanning still not implemented. |
+| Broker read-only account/portfolio adapter | Not implemented | IBKR account and API permissions not configured or verified. |
+| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; no broker reconciliation or immutable server audit. |
+| Out-of-sample backtest and walk-forward validation | Not implemented | Existing replay is descriptive only; no profitability claim. |
+| Live order execution | Disabled by design | No order routes, credentials or broker integration. Do not enable in this phase. |
+
 Updated after local implementation and automated verification on `edge-production-remediation`. “Complete” means the code and its deterministic tests establish the stated behavior. It does not mean an external account, production deployment, legal status or provider service was live-verified.
 
 ## P0 — Security and data integrity
