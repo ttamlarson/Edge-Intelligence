@@ -16,6 +16,12 @@ The first personal-account trading foundation is implemented in `autonomous-engi
 
 This is an engine foundation, not a live strategy. The repository does not yet contain a licensed ASX market-data feed, automated daily scanner, broker read-only adapter, full trade-close/mark-to-market ledger, or a validated backtest. Until these are implemented and verified, no genuine ASX candidate or performance claim can be produced. A deterministic screen is not evidence of positive expected returns.
 
+## ASX Autopilot paper desk
+
+The sidebar's **ASX Autopilot · Paper** workspace accepts a multi-ticker daily OHLC CSV with `Symbol, Date, Open, High, Low, Close` headers. It validates row structure, groups tickers, screens each ticker with the deterministic strategy in `autonomous-engine.js`, and stores a virtual AUD portfolio in the additive browser key `edge-asx-paper-v1`. Users can open candidate positions in simulation, mark them manually, close them, and review estimated net P&L in the local ledger.
+
+CSV source labels are user-declared, not independently authenticated. Only import data you are authorised to use. The latest daily close is a reference, not an executable fill. The paper desk is not connected to a live ASX feed, broker account, or order API. Browser storage is device-local and is not a server-side audit ledger. The strategy has not been validated as profitable.
+
 ## Architecture
 
 - `index.html`, `app.js`, `domain.js`, `styles.css`: browser single-page app. Existing localStorage keys remain in use: `edge-intelligence-v1`, `edge-forecasts-v1`, and `edge-alert-rules-v1`.

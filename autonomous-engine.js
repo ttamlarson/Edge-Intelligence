@@ -7,7 +7,7 @@ export const EDGE_MAX_OPEN_POSITIONS = 2;
 export const EDGE_COMMISSION_MIN_AUD = 5;
 export const EDGE_GST_RATE = 0.10;
 export const EDGE_DEFAULT_SLIPPAGE_BPS = 10;
-export const EDGE_MAX_DAILY_BAR_AGE_MS = 5 * 24 * 60 * 60 * 1000;
+export const EDGE_MAX_DAILY_BAR_AGE_MS = 36 * 60 * 60 * 1000;
 const num = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const round2 = value => Math.round((value + Number.EPSILON) * 100) / 100;
 
