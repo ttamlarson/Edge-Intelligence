@@ -14,7 +14,9 @@ The first personal-account trading foundation is implemented in `autonomous-engi
 - Rejects stale, malformed, non-AUD or unprovenanced daily bars; rejects candidates that fail post-cost reward/risk or portfolio limits.
 - Paper portfolio only. It cannot submit orders and has no broker credentials, broker connection or live execution route.
 
-This is an engine foundation, not a live strategy. The repository does not yet contain a licensed ASX market-data feed, automated daily scanner, broker read-only adapter, full trade-close/mark-to-market ledger, or a validated backtest. Until these are implemented and verified, no genuine ASX candidate or performance claim can be produced. A deterministic screen is not evidence of positive expected returns.
+This is an engine foundation, not a live strategy. The repository does not yet contain a licensed ASX market-data feed, automated daily scanner, broker read-only adapter, or a robust out-of-sample backtest. Manual marking, paper exits and closed-trade history are implemented in a device-local browser ledger; they are not broker-reconciled or an immutable server audit. Until external data and strategy validation are completed, no genuine ASX performance claim can be made. A deterministic screen is not evidence of positive expected returns.
+
+The default screen requires at least 2:1 reward/risk after estimated round-trip costs while its initial target is 4 x ATR against a 2 x ATR stop (approximately 2:1 before costs). This can reject otherwise qualifying small-account setups. The cost schedule and risk/target policy are deliberately not changed without confirming the user's actual brokerage tariff and risk preferences.
 
 ## ASX Autopilot paper desk
 
