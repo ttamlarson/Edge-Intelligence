@@ -29,6 +29,7 @@ test("paper position cannot be opened from an unvalidated or executable candidat
 test("paper portfolio preserves reserve and limits concurrent positions", () => {
   const portfolio = createPaperPortfolio();
   const candidate = { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, symbol: "TEST", shares: 10, entryReference: 10, stopPrice: 9, targetPrice: 12, notionalAud: 100, estimatedEntryCostsAud: 5.6 };
-  const result = openPaperPosition(portfolio, candidate, { id: "p1", openedAt: new Date(now).toISOString() });
+  Object.assign(candidate, { source: "Synthetic test fixture only", currency: "AUD", observedAt: new Date(now).toISOString() });
+  const result = openPaperPosition(portfolio, candidate, { id: "p1", openedAt: new Date(now).toISOString(), now });
   assert.equal(result.accepted, true); assert.equal(result.portfolio.cashAud, 394.4); assert.equal(result.portfolio.positions.length, 1); assert.equal(result.portfolio.liveTradingEnabled, false);
 });
