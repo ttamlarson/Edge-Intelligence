@@ -10,8 +10,8 @@
 
 ## ASX autonomous paper desk
 - [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
-- [x] Automated tests reject malformed OHLC, duplicate sessions, missing provenance, non-AUD and stale daily bars.
-- [x] Automated tests cover paper exits, exit-cost estimates, mark-to-market, portfolio cash reserve, position caps and simulation-only restrictions.
+- [x] Automated tests reject malformed OHLC, duplicate sessions, impossible ISO dates, missing provenance, non-AUD and stale daily bars.
+- [x] Automated tests cover CSV-to-screen-to-open-to-mark-to-close lifecycle, fee accounting, cash reconciliation, closed-trade history, stale-candidate rejection and re-entry after closed positions.
 - [ ] Complete a browser-level import/open/mark/close walkthrough with authorised market data.
 - [x] Automated tests confirm there is no broker order execution path in the ASX paper engine.
 
