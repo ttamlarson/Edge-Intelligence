@@ -75,14 +75,47 @@ export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } 
   return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: round2(capital), cashAud: round2(capital), positions: [], closedTrades: [], liveTradingEnabled: false };
 }
 
-export function openPaperPosition(portfolio, candidate, { id, openedAt = new Date().toISOString() } = {}) {
+export function openPaperPosition(portfolio, candidate, { id, openedAt = new Date().toISOString(), now = Date.now() } = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) throw new TypeError("A simulation-only portfolio is required.");
+  if (!Array.isArray(portfolio.positions) || (portfolio.closedTrades !== undefined && !Array.isArray(portfolio.closedTrades)) || !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
+    return { accepted: false, reason: "Paper portfolio cash or ledger state is invalid." };
+  }
   if (!candidate || candidate.status !== "PAPER_CANDIDATE" || candidate.executable !== false || candidate.simulatedOnly !== true) return { accepted: false, reason: "Only validated paper candidates can be opened." };
-  if (portfolio.positions.length >= EDGE_MAX_OPEN_POSITIONS || portfolio.positions.some(p => p.symbol === candidate.symbol)) return { accepted: false, reason: "Position limit or duplicate symbol." };
-  const debit = candidate.notionalAud + candidate.estimatedEntryCostsAud;
+
+  const symbol = candidate.symbol;
+  const shares = num(candidate.shares), entryPrice = num(candidate.entryReference);
+  const stopPrice = num(candidate.stopPrice), targetPrice = num(candidate.targetPrice);
+  const notional = num(candidate.notionalAud), entryCosts = num(candidate.estimatedEntryCostsAud);
+  const observedAt = Date.parse(candidate.observedAt || ""), openedTimestamp = Date.parse(openedAt || "");
+  if (typeof symbol !== "string" || !/^[A-Z0-9.]{2,12}$/.test(symbol) || candidate.currency !== "AUD" ||
+      typeof candidate.source !== "string" || !candidate.source.trim() ||
+      !Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now + 5 * 60_000 || now - observedAt > EDGE_MAX_DAILY_BAR_AGE_MS) {
+    return { accepted: false, reason: "Candidate provenance or freshness is invalid." };
+  }
+  if (!Number.isFinite(openedTimestamp) || !Number.isInteger(shares) || shares < 1 ||
+      entryPrice === null || entryPrice <= 0 || stopPrice === null || stopPrice <= 0 || stopPrice >= entryPrice ||
+      targetPrice === null || targetPrice <= entryPrice || notional === null || notional <= 0 ||
+      round2(shares * entryPrice) !== round2(notional) || notional > EDGE_MAX_POSITION_AUD ||
+      entryCosts === null || entryCosts < 0) {
+    return { accepted: false, reason: "Candidate sizing or price levels are invalid." };
+  }
+
+  const openPositions = portfolio.positions.filter(position => position?.status === "OPEN_PAPER");
+  if (openPositions.length >= EDGE_MAX_OPEN_POSITIONS || openPositions.some(position => position.symbol === symbol)) {
+    return { accepted: false, reason: "Position limit or duplicate open symbol." };
+  }
+  const positionId = String(id || crypto.randomUUID());
+  const knownIds = [...portfolio.positions, ...(portfolio.closedTrades || [])].map(position => position?.id);
+  if (!positionId || knownIds.includes(positionId)) return { accepted: false, reason: "Paper position ID must be unique." };
+
+  const debit = round2(notional + entryCosts);
   if (debit > portfolio.cashAud - EDGE_MIN_CASH_RESERVE_AUD) return { accepted: false, reason: "Insufficient cash after preserving the minimum reserve." };
-  const position = { id: String(id || crypto.randomUUID()), symbol: candidate.symbol, shares: candidate.shares, entryPrice: candidate.entryReference, stopPrice: candidate.stopPrice, targetPrice: candidate.targetPrice, entryCostsAud: candidate.estimatedEntryCostsAud, debitAud: round2(debit), openedAt, status: "OPEN_PAPER" };
-  return { accepted: true, portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position] }, position };
+  const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), debitAud: debit, openedAt, status: "OPEN_PAPER" };
+  return {
+    accepted: true,
+    portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position], closedTrades: portfolio.closedTrades || [] },
+    position
+  };
 }
 
 export function parseAsxDailyCsv(csvText) {
@@ -107,8 +140,10 @@ export function parseAsxDailyCsv(csvText) {
   for (const cells of rows) {
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
     const dateRaw = String(cells[cols.date] || "").trim();
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? Date.parse(dateRaw + "T00:00:00Z") : Date.parse(dateRaw);
-    const bar = { timestamp: Number.isFinite(date) ? new Date(date).toISOString() : null, open: num(cells[cols.open]), high: num(cells[cols.high]), low: num(cells[cols.low]), close: num(cells[cols.close]) };
+    const isIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw);
+    const date = isIsoDate ? Date.parse(dateRaw + "T00:00:00Z") : Date.parse(dateRaw);
+    const validDate = Number.isFinite(date) && (!isIsoDate || new Date(date).toISOString().slice(0, 10) === dateRaw);
+    const bar = { timestamp: validDate ? new Date(date).toISOString() : null, open: num(cells[cols.open]), high: num(cells[cols.high]), low: num(cells[cols.low]), close: num(cells[cols.close]) };
     if (!/^[A-Z0-9.]{2,12}$/.test(symbol) || !bar.timestamp || [bar.open,bar.high,bar.low,bar.close].some(v => v === null || v <= 0) || bar.high < Math.max(bar.open,bar.close) || bar.low > Math.min(bar.open,bar.close) || bar.low > bar.high) return { valid: false, reason: "A row has an invalid ticker, date or OHLC value." };
     (grouped[symbol] ||= []).push(bar);
   }
