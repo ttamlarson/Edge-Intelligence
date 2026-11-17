@@ -11,6 +11,33 @@ export const EDGE_MAX_DAILY_BAR_AGE_MS = 36 * 60 * 60 * 1000;
 const num = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const round2 = value => Math.round((value + Number.EPSILON) * 100) / 100;
 
+// Parse only deterministic market-data date formats. Date-only CSV values use
+// ISO YYYY-MM-DD or Australian DD/MM/YYYY; timestamps must carry an explicit
+// timezone so browser locale settings cannot shift a trading session.
+function parseAsxCsvDate(value) {
+  const raw = String(value ?? "").trim();
+  const calendarTimestamp = (year, month, day) => {
+    if (![year, month, day].every(Number.isInteger) || year < 1900 || year > 9999) return null;
+    const timestamp = Date.UTC(year, month - 1, day);
+    const date = new Date(timestamp);
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+      ? timestamp
+      : null;
+  };
+
+  let match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) return calendarTimestamp(Number(match[1]), Number(match[2]), Number(match[3]));
+
+  match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match) return calendarTimestamp(Number(match[3]), Number(match[2]), Number(match[1]));
+
+  match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (!match || calendarTimestamp(Number(match[1]), Number(match[2]), Number(match[3])) === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(raw)) return null;
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export function estimateAsxSideCost(tradeValueAud, { commissionRate = 0.0008, minimumCommissionAud = EDGE_COMMISSION_MIN_AUD, gstRate = EDGE_GST_RATE, slippageBps = EDGE_DEFAULT_SLIPPAGE_BPS } = {}) {
   const value = num(tradeValueAud);
   if (value === null || value <= 0 || ![commissionRate, minimumCommissionAud, gstRate, slippageBps].every(v => Number.isFinite(v) && v >= 0)) return null;
@@ -132,7 +159,7 @@ export function parseAsxDailyCsv(csvText) {
   if (quoted) return { valid: false, reason: "CSV contains an unterminated quoted field." };
   row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row);
   if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
-  const headers = rows.shift().map(x => x.toLowerCase().replace(/[ _-]/g, ""));
+  const headers = rows.shift().map(x => x.replace(/^\uFEFF/, "").toLowerCase().replace(/[ _-]/g, ""));
   const index = (...names) => headers.findIndex(h => names.includes(h));
   const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close","adjclose") };
   if (Object.values(cols).some(v => v < 0)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
@@ -140,9 +167,8 @@ export function parseAsxDailyCsv(csvText) {
   for (const cells of rows) {
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
     const dateRaw = String(cells[cols.date] || "").trim();
-    const isIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw);
-    const date = isIsoDate ? Date.parse(dateRaw + "T00:00:00Z") : Date.parse(dateRaw);
-    const validDate = Number.isFinite(date) && (!isIsoDate || new Date(date).toISOString().slice(0, 10) === dateRaw);
+    const date = parseAsxCsvDate(dateRaw);
+    const validDate = Number.isFinite(date);
     const bar = { timestamp: validDate ? new Date(date).toISOString() : null, open: num(cells[cols.open]), high: num(cells[cols.high]), low: num(cells[cols.low]), close: num(cells[cols.close]) };
     if (!/^[A-Z0-9.]{2,12}$/.test(symbol) || !bar.timestamp || [bar.open,bar.high,bar.low,bar.close].some(v => v === null || v <= 0) || bar.high < Math.max(bar.open,bar.close) || bar.low > Math.min(bar.open,bar.close) || bar.low > bar.high) return { valid: false, reason: "A row has an invalid ticker, date or OHLC value." };
     (grouped[symbol] ||= []).push(bar);
