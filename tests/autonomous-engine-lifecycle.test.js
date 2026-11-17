@@ -48,6 +48,22 @@ test("CSV parser rejects malformed OHLC, duplicate sessions and impossible ISO d
   assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-02-31,40,41,39,40").valid, false);
 });
 
+test("CSV parser strips a UTF-8 BOM and interprets Australian DD/MM/YYYY dates", () => {
+  const csv = "\uFEFFSymbol,Date,Open,High,Low,Close\nBHP,12/11/2026,40,41,39,40.5\nCBA,13/11/2026,170,172,169,171";
+  const result = parseAsxDailyCsv(csv);
+  assert.equal(result.valid, true, result.reason);
+  assert.equal(result.barsBySymbol.BHP[0].timestamp, "2026-11-12T00:00:00.000Z");
+  assert.equal(result.barsBySymbol.CBA[0].timestamp, "2026-11-13T00:00:00.000Z");
+});
+
+test("CSV parser rejects impossible Australian dates and timezone-less timestamps", () => {
+  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,31/02/2026,40,41,39,40").valid, false);
+  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00,40,41,39,40").valid, false);
+  const explicitZone = parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00+08:00,40,41,39,40");
+  assert.equal(explicitZone.valid, true, explicitZone.reason);
+  assert.equal(explicitZone.barsBySymbol.BHP[0].timestamp, "2026-11-11T16:00:00.000Z");
+});
+
 test("default cost assumptions reject this synthetic setup at the after-cost 2:1 gate", () => {
   const imported = parseAsxDailyCsv(makeCsv("BHP"));
   const bars = imported.barsBySymbol.BHP;
