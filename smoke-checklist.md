@@ -10,7 +10,7 @@
 
 ## ASX autonomous paper desk
 - [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
-- [x] Automated tests reject malformed OHLC, duplicate sessions, impossible ISO/Australian dates, timezone-less timestamps, missing provenance, non-AUD and stale daily bars.
+- [x] Automated tests reject malformed OHLC, duplicate sessions, impossible ISO/Australian dates, timezone-less and unsupported timestamps, missing provenance, non-AUD and stale daily bars.
 - [x] Automated tests cover UTF-8 BOM headers, Australian DD/MM/YYYY parsing and ISO timestamps with explicit timezone offsets.
 - [x] Automated tests cover CSV-to-screen-to-open-to-mark-to-close lifecycle, fee accounting, cash reconciliation, closed-trade history, stale-candidate rejection and re-entry after closed positions.
 - [ ] Complete a browser-level import/open/mark/close walkthrough with authorised market data.
