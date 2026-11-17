@@ -20,7 +20,7 @@ The default screen requires at least 2:1 reward/risk after estimated round-trip 
 
 ## ASX Autopilot paper desk
 
-The sidebar's **ASX Autopilot · Paper** workspace accepts a multi-ticker daily OHLC CSV with `Symbol, Date, Open, High, Low, Close` headers. It validates row structure, groups tickers, screens each ticker with the deterministic strategy in `autonomous-engine.js`, and stores a virtual AUD portfolio in the additive browser key `edge-asx-paper-v1`. Users can open candidate positions in simulation, mark them manually, close them, and review estimated net P&L in the local ledger.
+The sidebar's **ASX Autopilot · Paper** workspace accepts a multi-ticker daily OHLC CSV with `Symbol, Date, Open, High, Low, Close` headers. Date fields must be ISO `YYYY-MM-DD`, Australian `DD/MM/YYYY`, or ISO-8601 timestamps with an explicit `Z` or UTC offset; timezone-less timestamps and other locale-dependent date strings are rejected. UTF-8 BOM headers are supported. It validates row structure, groups tickers, screens each ticker with the deterministic strategy in `autonomous-engine.js`, and stores a virtual AUD portfolio in the additive browser key `edge-asx-paper-v1`. Users can open candidate positions in simulation, mark them manually, close them, and review estimated net P&L in the local ledger.
 
 CSV source labels are user-declared, not independently authenticated. Only import data you are authorised to use. The latest daily close is a reference, not an executable fill. The paper desk is not connected to a live ASX feed, broker account, or order API. Browser storage is device-local and is not a server-side audit ledger. The strategy has not been validated as profitable.
 
