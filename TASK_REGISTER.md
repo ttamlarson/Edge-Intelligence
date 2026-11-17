@@ -12,7 +12,7 @@ Updated for the autonomous ASX trading foundation. “Complete” describes code
 | Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp within 36 hours, 51 valid daily OHLC bars. |
 | Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; candidate shape, provenance and freshness validated; only currently open positions count toward concurrency limits; fees and realized P&L covered by lifecycle tests. |
 | Licensed ASX daily data integration | Not implemented | No ASX feed or licence configured. No live scan can run. |
-| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV and screens each ticker locally. Scheduled live scanning still not implemented. |
+| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV; supports UTF-8 BOM headers, ISO dates, Australian DD/MM/YYYY (slash dates are always day-first) and timezone-explicit ISO timestamps; rejects impossible and timezone-less/unsupported dates. Scheduled live scanning still not implemented. |
 | Broker read-only account/portfolio adapter | Not implemented | IBKR account and API permissions not configured or verified. |
 | Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; no broker reconciliation or immutable server audit. |
 | Out-of-sample backtest and walk-forward validation | Not implemented | Existing replay is descriptive only; no profitability claim. |
