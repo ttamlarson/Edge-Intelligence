@@ -376,20 +376,22 @@ async function handle(request, env, ctx) {
     }
     return reply(data);
   }
-  if (requestUrl.pathname === "/api/crypto/kraken/ohlc" && request.method === "GET") {
-    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-kraken-ohlc");
-    const pair = (requestUrl.searchParams.get("pair") || "XBTAUD").toUpperCase();
-    if (!new Set(["XBTAUD","ETHAUD"]).has(pair)) throw new HttpError(400, "Only approved AUD spot pairs are enabled.");
-    if ((requestUrl.searchParams.get("interval") || "60") !== "60") throw new HttpError(400, "Only completed hourly candles are enabled.");
-    const response = await providerJson("https://api.kraken.com/0/public/OHLC?" + new URLSearchParams({pair,interval:"60"}), {headers:{Accept:"application/json"}}, 1024*1024);
-    if (!Array.isArray(response.error) || response.error.length) throw new HttpError(502, "Kraken public market data returned an error.");
-    const result=response.result;
-    if (!result || typeof result!=="object" || Array.isArray(result)) throw new HttpError(502, "Kraken OHLC response is malformed.");
-    const key=Object.keys(result).find(name=>name!=="last"&&Array.isArray(result[name]));
-    if(!key) throw new HttpError(502, "Kraken returned no candle series for this pair.");
-    const rows=result[key];
-    if(rows.length<61||rows.length>721) throw new HttpError(502, "Kraken candle count is outside the supported range.");
-    return reply({source:"Kraken public Spot API",pair,quoteCurrency:"AUD",intervalMinutes:60,retrievedAt:isoNow(),observedAt:new Date(Number(rows.at(-2)?.[0])*1000).toISOString(),candles:rows.slice(0,-1).map(row=>({timestamp:new Date(Number(row[0])*1000).toISOString(),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[6])})),dataClass:"public_exchange_market_data_not_execution",disclaimer:"Public hourly spot candles for research and paper simulation only. No account access or order execution."});
+  if (requestUrl.pathname === "/api/crypto/coinspot/market" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-coinspot-market");
+    const requested = (requestUrl.searchParams.get("coins") || "BTC,ETH").toUpperCase().split(",");
+    if (!requested.length || requested.length > 2 || requested.some(coin => !new Set(["BTC","ETH"]).has(coin)) || new Set(requested).size !== requested.length) throw new HttpError(400, "Only BTC and ETH AUD markets are enabled.");
+    const markets = await Promise.all(requested.map(async coin => {
+      const [latest, trades] = await Promise.all([
+        providerJson("https://www.coinspot.com.au/pubapi/v2/latest/" + coin.toLowerCase(), {headers:{Accept:"application/json"}}, 128*1024),
+        providerJson("https://www.coinspot.com.au/pubapi/v2/orders/summary/completed/" + coin.toLowerCase(), {headers:{Accept:"application/json"}}, 512*1024)
+      ]);
+      if (latest.status !== "ok" || trades.status !== "ok" || !latest.prices || !Array.isArray(trades.orders)) throw new HttpError(502, "CoinSpot returned an invalid public market response.");
+      const bid=Number(latest.prices.bid), ask=Number(latest.prices.ask), last=Number(latest.prices.last);
+      if (![bid,ask,last].every(Number.isFinite) || bid<=0 || ask<bid || last<=0) throw new HttpError(502, "CoinSpot returned invalid bid/ask/last prices.");
+      const completed=trades.orders.filter(order => order.market === coin + "/AUD" && Number.isFinite(Number(order.rate)) && Number(order.rate)>0 && Number.isFinite(Date.parse(order.solddate))).map(order => ({timestamp:new Date(order.solddate).toISOString(),price:Number(order.rate),amount:Number(order.amount),totalAud:Number(order.total)})).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+      return {coin,pair:coin+"/AUD",bid,ask,last,spreadPct:Number(((ask-bid)/ask*100).toFixed(4)),completedTrades:completed.slice(-100),completedTradesCount:completed.length,source:"CoinSpot Public API V2",retrievedAt:isoNow(),dataClass:"live_public_quote_and_recent_completed_trades_not_ohlc"};
+    }));
+    return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
