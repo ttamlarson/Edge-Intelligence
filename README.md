@@ -91,3 +91,11 @@ The ASX Autopilot workspace includes an optional DataCedar Explorer (free) conne
 The connector uses daily historical bars only. DataCedar's documentation describes the Explorer tier as one year of daily history and seven days of minute history; EDGE deliberately does not use minute data. Provider coverage can vary by symbol. An empty series is reported as no data, never replaced with synthetic prices. The provider documentation also distinguishes its historical research bars from a consolidated real-time feed and best-execution record. Confirm the current DataCedar plan and data-use terms before relying on returned data. No automatic trade is opened: a candidate still requires a separate user action in the paper desk.
 
 Required Worker secret: `DATACEDAR_API_KEY`. The existing localStorage key `edge-asx-paper-v1` and saved positions are unchanged.
+
+## Live execution preparation (locked)
+
+The proposed live account limits are AUD 100 maximum allocated capital, AUD 20 maximum realised daily loss, AUD 25 maximum individual order notional, and one open position. These are hard ceilings for the initial release, not a target allocation or a profitability claim.
+
+`live-execution-guard.js` is a deliberately non-executing safety boundary. It validates BTC/AUD and ETH/AUD spot order intents, checks the proposed capital and loss limits, and evaluates independent release gates for explicit user activation, out-of-sample strategy validation, forward-paper approval, separately configured trading credentials, account reconciliation, and the emergency kill switch. It has no CoinSpot transport, signing, credential access, or order-submission function. Its accepted intents are still marked `executable: false`.
+
+Live trading remains disabled. The existing `COINSPOT_READONLY_KEY` and `COINSPOT_READONLY_SECRET` remain read-only and must not be repurposed. A future execution adapter must use a separate least-privilege trading key, never request withdrawal or transfer permissions, and must add durable idempotency, order-status reconciliation, balance reservation, partial-fill handling, stale-quote rejection, and a global server-side kill switch before any order route is enabled. Do not deploy a trading adapter or create live orders until the strategy has passed the documented validation gates and the user has explicitly activated live execution.
