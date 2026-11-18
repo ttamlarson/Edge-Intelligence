@@ -11,6 +11,7 @@ on:
       - "datacedar.js"
       - "crypto-engine.js"
       - "coinspot.js"
+      - "coinspot-paper.js"
       - "wrangler.toml"
       - "package.json"
       - ".github/workflows/worker-deploy.yml"
