@@ -167,3 +167,31 @@ test("closing fails safely for malformed portfolio history and invalid chronolog
   assert.equal(opened.portfolio.positions[0].status, "OPEN_PAPER");
   assert.equal(opened.portfolio.closedTrades.length, 0);
 });
+
+
+test("paper opening revalidates risk budget and fee assumptions against candidate values", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const portfolio = createPaperPortfolio();
+  const excessiveRisk = {
+    ...candidate,
+    shares: 10,
+    notionalAud: 147,
+    estimatedEntryCostsAud: 0,
+    estimatedNetTargetProfitAud: 0,
+    estimatedNetStopLossAud: 0,
+    rewardRiskAfterCosts: 0
+  };
+  const riskResult = openPaperPosition(portfolio, excessiveRisk, { id: "risk-bypass", now });
+  assert.equal(riskResult.accepted, false);
+  assert.match(riskResult.reason, /risk budget/);
+
+  const alteredFees = {
+    ...candidate,
+    assumptions: { ...candidate.assumptions, commissionRate: 0.0008 }
+  };
+  const feeResult = openPaperPosition(portfolio, alteredFees, { id: "fee-bypass", now });
+  assert.equal(feeResult.accepted, false);
+  assert.match(feeResult.reason, /entry costs/);
+  assert.equal(portfolio.cashAud, 500);
+  assert.equal(portfolio.positions.length, 0);
+});
