@@ -2,6 +2,16 @@ name: Deploy EDGE Cloudflare Worker
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "index.js"
+      - "domain.js"
+      - "au-sources.js"
+      - "datacedar.js"
+      - "wrangler.toml"
+      - "package.json"
+      - ".github/workflows/worker-deploy.yml"
 
 permissions:
   contents: read
