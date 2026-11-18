@@ -17,6 +17,7 @@ const SECURITY_HEADERS = {
 let accessKeysCache = null;
 let accessKeysCacheAt = 0;
 let accessKeysPending = null;
+let lastCoinSpotNonce = 0;
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -154,6 +155,20 @@ async function readLimitedText(response, maxBytes, makeTooLarge) {
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return new TextDecoder().decode(bytes);
+}
+
+async function coinSpotReadOnly(env, path, extra = {}) {
+  const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
+  if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
+  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
+  const nonce=Math.max(Date.now()*1000,lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
+  const body=JSON.stringify({...extra,nonce});
+  const cryptoKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-512"},false,["sign"]);
+  const signature=await crypto.subtle.sign("HMAC",cryptoKey,new TextEncoder().encode(body));
+  const sign=[...new Uint8Array(signature)].map(b=>b.toString(16).padStart(2,"0")).join("");
+  const response=await providerJson("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body},512*1024);
+  if(response?.status!=="ok")throw new HttpError(502,"CoinSpot read-only API rejected the request.");
+  return response;
 }
 
 async function prediction(env, path) {
@@ -415,6 +430,13 @@ async function handle(request, env, ctx) {
       return reply(await saveAccount(next));
     }
     throw new HttpError(404,"Paper trading route not found.");
+  }
+  if (requestUrl.pathname === "/api/coinspot/account" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-readonly-account");
+    const [balances,orders]=await Promise.all([coinSpotReadOnly(env,"/my/balances"),coinSpotReadOnly(env,"/my/orders/market/open",{markettype:"AUD"})]);
+    if(!Array.isArray(balances.balances))throw new HttpError(502,"CoinSpot balance response was malformed.");
+    const clean=balances.balances.map(item=>{const symbol=Object.keys(item||{})[0];const v=item?.[symbol];return /^[A-Z0-9]{2,12}$/.test(symbol||"")&&v&&Number.isFinite(Number(v.balance))?{coin:symbol,balance:Number(v.balance),audValue:Number.isFinite(Number(v.audbalance))?Number(v.audbalance):null,rate:Number.isFinite(Number(v.rate))?Number(v.rate):null}:null;}).filter(Boolean);
+    return reply({provider:"CoinSpot",access:"READ_ONLY",balances:clean,openBuyOrders:Array.isArray(orders.buyorders)?orders.buyorders:[],openSellOrders:Array.isArray(orders.sellorders)?orders.sellorders:[],retrievedAt:isoNow(),liveTradingEnabled:false});
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/market" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-coinspot-market");
