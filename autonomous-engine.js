@@ -179,6 +179,33 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   };
 }
 
+// Refresh open paper-position valuations from validated provider bars. This is
+// valuation-only: it never changes cash, entry cost, realised P&L or trade status.
+export function updatePaperMarksFromBars(portfolio, barsBySymbol, { source = "DataCedar ASX historical daily bars" } = {}) {
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) ||
+      !barsBySymbol || typeof barsBySymbol !== "object" || Array.isArray(barsBySymbol)) {
+    return { accepted: false, portfolio, markedSymbols: [], skippedSymbols: [], reason: "Simulation-only portfolio and validated symbol bars are required." };
+  }
+  let next = portfolio;
+  const markedSymbols = [], skippedSymbols = [];
+  for (const position of portfolio.positions.filter(item => item?.status === "OPEN_PAPER")) {
+    const bars = barsBySymbol[position.symbol];
+    const latest = Array.isArray(bars) ? bars.reduce((best, bar) =>
+      Date.parse(bar?.timestamp || "") > Date.parse(best?.timestamp || "") ? bar : best, null) : null;
+    const timestamp = Date.parse(latest?.timestamp || "");
+    const price = num(latest?.close);
+    if (!latest || !Number.isFinite(timestamp) || price === null || price <= 0) {
+      skippedSymbols.push(position.symbol); continue;
+    }
+    const result = recordPaperMark(next, position.id, price, { markedAt: new Date(timestamp).toISOString() });
+    if (!result.accepted) { skippedSymbols.push(position.symbol); continue; }
+    next = result.portfolio;
+    markedSymbols.push(position.symbol);
+  }
+  return { accepted: true, portfolio: next, markedSymbols, skippedSymbols, source };
+}
+
 export function parseAsxDailyCsv(csvText) {
   if (typeof csvText !== "string" || csvText.length > 5_000_000) return { valid: false, reason: "CSV must be text under 5 MB." };
   const rows = []; let row = [], field = "", quoted = false;
