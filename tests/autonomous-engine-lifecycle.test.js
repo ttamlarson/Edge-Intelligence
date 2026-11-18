@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createPaperPortfolio, closePaperPosition, evaluateAsxSwingSetup, markPaperPosition,
-  openPaperPosition, parseAsxDailyCsv
+  openPaperPosition, parseAsxDailyCsv, recordPaperMark
 } from "../autonomous-engine.js";
 
 const now = Date.parse("2026-11-16T00:30:00.000Z");
@@ -194,4 +194,64 @@ test("paper opening revalidates risk budget and fee assumptions against candidat
   assert.match(feeResult.reason, /entry costs/);
   assert.equal(portfolio.cashAud, 500);
   assert.equal(portfolio.positions.length, 0);
+});
+
+test("saving a paper mark persists the latest valuation without changing cash or trade history", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const openedAt = new Date(now).toISOString();
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, { id: "mark-persist-1", openedAt, now });
+  assert.equal(opened.accepted, true, opened.reason);
+  const cashBeforeMark = opened.portfolio.cashAud;
+  const historyBeforeMark = opened.portfolio.closedTrades;
+
+  const firstMark = recordPaperMark(opened.portfolio, "mark-persist-1", 15, {
+    markedAt: new Date(now + 60_000).toISOString(),
+    costs: zeroCostSchedule
+  });
+  assert.equal(firstMark.accepted, true, firstMark.reason);
+  assert.equal(firstMark.position.lastMarkPrice, 15);
+  assert.equal(firstMark.position.lastMarkedAt, new Date(now + 60_000).toISOString());
+  assert.equal(firstMark.mark.unrealizedProfitLossAud, 1.5);
+  assert.equal(firstMark.portfolio.cashAud, cashBeforeMark);
+  assert.equal(firstMark.portfolio.closedTrades, historyBeforeMark);
+  assert.equal(opened.portfolio.positions[0].lastMarkPrice, undefined);
+
+  const secondMark = recordPaperMark(firstMark.portfolio, "mark-persist-1", 15.25, {
+    markedAt: new Date(now + 120_000).toISOString(),
+    costs: zeroCostSchedule
+  });
+  assert.equal(secondMark.accepted, true, secondMark.reason);
+  assert.equal(secondMark.position.lastMarkPrice, 15.25);
+  assert.equal(secondMark.portfolio.cashAud, cashBeforeMark);
+  assert.equal(secondMark.portfolio.closedTrades.length, 0);
+
+  const outOfOrder = recordPaperMark(secondMark.portfolio, "mark-persist-1", 14, {
+    markedAt: new Date(now + 90_000).toISOString(),
+    costs: zeroCostSchedule
+  });
+  assert.equal(outOfOrder.accepted, false);
+  assert.match(outOfOrder.reason, /earlier than the previous mark/);
+  assert.equal(secondMark.portfolio.positions[0].lastMarkPrice, 15.25);
+});
+
+test("paper marking rejects closed positions and invalid prices without changing the portfolio", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "mark-invalid-1", openedAt: new Date(now).toISOString(), now
+  });
+  const invalidPrice = recordPaperMark(opened.portfolio, "mark-invalid-1", 0, {
+    markedAt: new Date(now + 60_000).toISOString()
+  });
+  assert.equal(invalidPrice.accepted, false);
+  assert.equal(opened.portfolio.positions[0].lastMarkPrice, undefined);
+  const closed = closePaperPosition(opened.portfolio, "mark-invalid-1", 15, {
+    closedAt: new Date(now + 60_000).toISOString()
+  });
+  assert.equal(closed.accepted, true);
+  const closedMark = recordPaperMark(closed.portfolio, "mark-invalid-1", 16, {
+    markedAt: new Date(now + 120_000).toISOString()
+  });
+  assert.equal(closedMark.accepted, false);
+  assert.match(closedMark.reason, /not found/);
+  assert.equal(closed.portfolio.closedTrades.length, 1);
 });
