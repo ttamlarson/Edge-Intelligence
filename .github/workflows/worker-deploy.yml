@@ -12,6 +12,7 @@ on:
       - "crypto-engine.js"
       - "coinspot.js"
       - "coinspot-paper.js"
+      - "coinspot-strategy.js"
       - "wrangler.toml"
       - "package.json"
       - ".github/workflows/worker-deploy.yml"
