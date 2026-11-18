@@ -100,7 +100,7 @@ export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl 
   const contentLength = Number(response.headers.get("Content-Length"));
   if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error("DataCedar response exceeds the 4 MB limit.");
   const text = await response.text();
-  if (text.length > MAX_RESPONSE_BYTES) throw new Error("DataCedar response exceeds the 4 MB limit.");
+  if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error("DataCedar response exceeds the 4 MB limit.");
   let payload;
   try { payload = JSON.parse(text); } catch { throw new Error("DataCedar returned invalid JSON."); }
   if (!response.ok) {
