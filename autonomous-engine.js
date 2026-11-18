@@ -225,9 +225,11 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   if (index < 0) return { accepted: false, reason: "Open paper position not found." };
   const position = portfolio.positions[index], price = num(exitPrice);
   const openedTimestamp = Date.parse(position.openedAt || ""), closedTimestamp = Date.parse(closedAt || "");
+  const lastMarkedTimestamp = position.lastMarkedAt ? Date.parse(position.lastMarkedAt) : openedTimestamp;
   if (!Number.isInteger(position.shares) || position.shares < 1 || !Number.isFinite(position.debitAud) || position.debitAud < 0 ||
-      !Number.isFinite(openedTimestamp) || !Number.isFinite(closedTimestamp) || closedTimestamp < openedTimestamp) {
-    return { accepted: false, reason: "Open position or close timestamp is invalid." };
+      !Number.isFinite(openedTimestamp) || !Number.isFinite(lastMarkedTimestamp) || !Number.isFinite(closedTimestamp) ||
+      closedTimestamp < Math.max(openedTimestamp, lastMarkedTimestamp)) {
+    return { accepted: false, reason: "Open position or close timestamp is invalid or precedes the latest mark." };
   }
   if (price === null || price <= 0) return { accepted: false, reason: "Exit price must be positive." };
   const exitValue = position.shares * price, exitCost = estimateAsxSideCost(exitValue, costs);

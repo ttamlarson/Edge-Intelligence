@@ -255,3 +255,31 @@ test("paper marking rejects closed positions and invalid prices without changing
   assert.match(closedMark.reason, /not found/);
   assert.equal(closed.portfolio.closedTrades.length, 1);
 });
+
+test("closing cannot predate a previously saved manual paper mark", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "mark-close-order-1", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  const marked = recordPaperMark(opened.portfolio, "mark-close-order-1", 15, {
+    markedAt: new Date(now + 60_000).toISOString(),
+    costs: zeroCostSchedule
+  });
+  assert.equal(marked.accepted, true, marked.reason);
+
+  const earlierClose = closePaperPosition(marked.portfolio, "mark-close-order-1", 15.5, {
+    closedAt: new Date(now + 30_000).toISOString()
+  });
+  assert.equal(earlierClose.accepted, false);
+  assert.match(earlierClose.reason, /precedes the latest mark/);
+  assert.equal(marked.portfolio.positions[0].status, "OPEN_PAPER");
+  assert.equal(marked.portfolio.closedTrades.length, 0);
+
+  const laterClose = closePaperPosition(marked.portfolio, "mark-close-order-1", 15.5, {
+    closedAt: new Date(now + 120_000).toISOString()
+  });
+  assert.equal(laterClose.accepted, true, laterClose.reason);
+  assert.equal(laterClose.trade.closedAt, new Date(now + 120_000).toISOString());
+  assert.equal(laterClose.portfolio.closedTrades.length, 1);
+});
