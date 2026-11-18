@@ -1,5 +1,5 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
-import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, parseAsxDailyCsv } from "./autonomous-engine.js";
+import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -193,13 +193,15 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
   const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
   if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
   asxUniverse=data.barsBySymbol||{};
+  const markUpdate=updatePaperMarksFromBars(asxPortfolio,asxUniverse);
+  if(markUpdate.markedSymbols.length){asxPortfolio=markUpdate.portfolio;saveAsx()}
   asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
    symbol,bars:asxUniverse[symbol],source:"DataCedar ASX historical daily bars",currency:"AUD",
    observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,
    cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length
   }));
   const counts=Object.entries(data.rowsBySymbol||{}).map(([symbol,count])=>symbol+": "+count+" bars").join("; ");
-  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
+  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". "+(markUpdate.markedSymbols.length?"Updated paper marks for "+markUpdate.markedSymbols.join(", ")+"; cash and realised P&L unchanged. ":"No open positions received a newer eligible mark. ")+"Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
   renderAsxDesk();
  }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
  finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
