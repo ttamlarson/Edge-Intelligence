@@ -18,6 +18,7 @@
       <nav>
         <button class="nav-item" data-page="australia"><span>AU</span> Australia dashboard</button>
         <button class="nav-item" data-page="asx-autopilot"><span>↗</span> ASX Autopilot · Paper</button>
+        <button class="nav-item" data-page="crypto">CoinSpot Crypto · Paper</button>
         <button class="nav-item" data-page="research">AI research</button>
         <button class="nav-item" data-page="backtest">Backtesting</button>
         <button class="nav-item" data-page="forecasts">Forecast tracking</button>
@@ -104,6 +105,20 @@
         <div class="panel"><div class="panel-head"><h3>Positions</h3><button class="text-btn" id="resetPaper">Reset simulation</button></div><div id="positionList" class="market-list"></div></div>
       </section>
 
+      <section class="page" id="page-crypto">
+        <div class="welcome-row"><div><div class="eyebrow">COINSPOT · AUD SPOT MARKETS</div><h1>Crypto <em>watchtower.</em></h1><p class="muted">Live public market quotes and recent completed trades. No exchange account or API key required for this feed.</p></div><button class="primary-btn" id="cryptoRefreshBtn">Refresh market data</button></div>
+        <div class="notice"><span>ⓘ</span><div><b>Research and paper mode only</b><p>Live trading is disabled. CoinSpot's public feed does not provide a verified hourly OHLC history here, so EDGE will not generate trade signals or claim a backtest from sampled trades.</p></div></div>
+        <div class="metric-grid">
+          <article class="metric-card"><span>STARTING PAPER CAPITAL</span><strong>$100.00</strong><small>AUD · fixed simulation allocation</small></article>
+          <article class="metric-card"><span>MAX DEPLOYMENT</span><strong>$50.00</strong><small>Per strategy guardrail</small></article>
+          <article class="metric-card"><span>MAX DAILY LOSS</span><strong>$3.00</strong><small>Paper risk limit</small></article>
+          <article class="metric-card"><span>LIVE EXECUTION</span><strong>DISABLED</strong><small>No orders can be submitted</small></article>
+        </div>
+        <div class="section-heading"><div><h2>CoinSpot AUD markets</h2><p id="cryptoStatus">Not yet refreshed · prices are not loaded</p></div></div>
+        <div id="cryptoMarketRows" class="integration-grid"><div class="empty">Select Refresh market data to load BTC/AUD and ETH/AUD.</div></div>
+        <div class="section-heading"><div><h2>Strategy readiness</h2><p>Historical candle coverage, fee-aware backtesting and paper execution are required before considering any live deployment.</p></div></div>
+        <div class="notice"><span>!</span><div><b>Not ready for live trading</b><p>EDGE currently has quote monitoring only. It needs a validated historical dataset, realistic CoinSpot fee and spread modelling, persistent paper positions, and reconciliation tests before any order capability is considered.</p></div></div>
+      </section>
       <section class="page" id="page-asx-autopilot">
         <div class="page-title"><div class="eyebrow">AUTONOMOUS STRATEGY · PAPER ONLY</div><h1>ASX Autopilot</h1><p class="muted">Daily swing-trading scanner and virtual portfolio. Fetch historical daily bars through the secure DataCedar connector or import OHLC data you are authorised to use. EDGE does not fetch real-time ASX quotes or place broker orders.</p></div>
         <div class="notice"><span>ⓘ</span><div><b>Paper trading only</b><p>All positions use virtual AUD. Candidate prices are historical daily closes, not executable quotes. Costs are estimates; verify brokerage and slippage. The source label is user-entered, not independently verified.</p></div></div>
