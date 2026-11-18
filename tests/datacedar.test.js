@@ -61,6 +61,7 @@ test("DataCedar rejects missing key, unexpected redirects, invalid JSON and prov
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"] }), /API key is not configured/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => new Response("{}", { headers: { "Content-Type": "application/json" } }) }), /response did not contain/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => new Response("<html>") }), /invalid JSON/);
+  await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => ({ url: "https://evil.example/steal", headers: new Headers(), text: async () => "{}" }) }), /unexpected host/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => new Response(JSON.stringify({ error: { code: "AUTH_INVALID" } }), { status: 401 }) }), /rejected the API key/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => new Response(JSON.stringify({ error: { code: "HISTORY_LIMIT_EXCEEDED" } }), { status: 403 }) }), /plan window/);
 });
