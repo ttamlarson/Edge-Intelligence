@@ -9,6 +9,7 @@ on:
       - "domain.js"
       - "au-sources.js"
       - "datacedar.js"
+      - "crypto-engine.js"
       - "wrangler.toml"
       - "package.json"
       - ".github/workflows/worker-deploy.yml"
