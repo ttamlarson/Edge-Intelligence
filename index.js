@@ -376,6 +376,21 @@ async function handle(request, env, ctx) {
     }
     return reply(data);
   }
+  if (requestUrl.pathname === "/api/crypto/kraken/ohlc" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-kraken-ohlc");
+    const pair = (requestUrl.searchParams.get("pair") || "XBTAUD").toUpperCase();
+    if (!new Set(["XBTAUD","ETHAUD"]).has(pair)) throw new HttpError(400, "Only approved AUD spot pairs are enabled.");
+    if ((requestUrl.searchParams.get("interval") || "60") !== "60") throw new HttpError(400, "Only completed hourly candles are enabled.");
+    const response = await providerJson("https://api.kraken.com/0/public/OHLC?" + new URLSearchParams({pair,interval:"60"}), {headers:{Accept:"application/json"}}, 1024*1024);
+    if (!Array.isArray(response.error) || response.error.length) throw new HttpError(502, "Kraken public market data returned an error.");
+    const result=response.result;
+    if (!result || typeof result!=="object" || Array.isArray(result)) throw new HttpError(502, "Kraken OHLC response is malformed.");
+    const key=Object.keys(result).find(name=>name!=="last"&&Array.isArray(result[name]));
+    if(!key) throw new HttpError(502, "Kraken returned no candle series for this pair.");
+    const rows=result[key];
+    if(rows.length<61||rows.length>721) throw new HttpError(502, "Kraken candle count is outside the supported range.");
+    return reply({source:"Kraken public Spot API",pair,quoteCurrency:"AUD",intervalMinutes:60,retrievedAt:isoNow(),observedAt:new Date(Number(rows.at(-2)?.[0])*1000).toISOString(),candles:rows.slice(0,-1).map(row=>({timestamp:new Date(Number(row[0])*1000).toISOString(),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[6])})),dataClass:"public_exchange_market_data_not_execution",disclaimer:"Public hourly spot candles for research and paper simulation only. No account access or order execution."});
+  }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
     return reply(await marketSearch(request, env));
