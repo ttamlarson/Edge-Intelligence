@@ -1,6 +1,7 @@
 import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } from "./domain.js";
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
+import { normalizeCoinSpotMarket } from "./coinspot.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -386,10 +387,8 @@ async function handle(request, env, ctx) {
         providerJson("https://www.coinspot.com.au/pubapi/v2/orders/summary/completed/" + coin.toLowerCase(), {headers:{Accept:"application/json"}}, 512*1024)
       ]);
       if (latest.status !== "ok" || trades.status !== "ok" || !latest.prices || !Array.isArray(trades.orders)) throw new HttpError(502, "CoinSpot returned an invalid public market response.");
-      const bid=Number(latest.prices.bid), ask=Number(latest.prices.ask), last=Number(latest.prices.last);
-      if (![bid,ask,last].every(Number.isFinite) || bid<=0 || ask<bid || last<=0) throw new HttpError(502, "CoinSpot returned invalid bid/ask/last prices.");
-      const completed=trades.orders.filter(order => order.market === coin + "/AUD" && Number.isFinite(Number(order.rate)) && Number(order.rate)>0 && Number.isFinite(Date.parse(order.solddate))).map(order => ({timestamp:new Date(order.solddate).toISOString(),price:Number(order.rate),amount:Number(order.amount),totalAud:Number(order.total)})).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
-      return {coin,pair:coin+"/AUD",bid,ask,last,spreadPct:Number(((ask-bid)/ask*100).toFixed(4)),completedTrades:completed.slice(-100),completedTradesCount:completed.length,source:"CoinSpot Public API V2",retrievedAt:isoNow(),dataClass:"live_public_quote_and_recent_completed_trades_not_ohlc"};
+      try { return normalizeCoinSpotMarket({coin,latest,trades,retrievedAt:isoNow()}); }
+      catch { throw new HttpError(502, "CoinSpot returned invalid public market data."); }
     }));
     return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
