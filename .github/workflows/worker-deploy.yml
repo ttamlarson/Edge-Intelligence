@@ -39,19 +39,43 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: 3d6d1c93342d0a22c108dee320c2bf6e
         run: |
           node --input-type=commonjs <<'NODE'
-          const { execFileSync } = require('node:child_process');
           const fs = require('node:fs');
-          const run = (args) => execFileSync('wrangler', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
-          let namespaces = JSON.parse(run(['kv', 'namespace', 'list', '--json']));
-          let namespace = namespaces.find((item) => item.title === 'EDGE_KV');
-          if (!namespace) {
-            const created = JSON.parse(run(['kv', 'namespace', 'create', 'EDGE_KV', '--json']));
-            namespace = created.result || created;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          if (!token || !account) throw new Error('Cloudflare API token or account ID is missing.');
+          const headers = {
+            Authorization: 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          };
+          async function api(path, options = {}) {
+            const response = await fetch('https://api.cloudflare.com/client/v4' + path, {
+              ...options,
+              headers: { ...headers, ...(options.headers || {}) }
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || body.success === false) {
+              const messages = (body.errors || []).map(error => error.message).filter(Boolean);
+              throw new Error('Cloudflare API ' + response.status + ': ' + (messages.join('; ') || response.statusText));
+            }
+            return body;
           }
-          if (!namespace || !/^[a-f0-9]{32}$/i.test(namespace.id || '')) {
-            throw new Error('Could not identify the EDGE_KV namespace ID.');
-          }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'namespace_id=' + namespace.id + '\n');
+          (async () => {
+            const base = '/accounts/' + account + '/storage/kv/namespaces';
+            const listed = await api(base);
+            let namespace = (listed.result || []).find(item => item.title === 'EDGE_KV');
+            if (!namespace) {
+              const created = await api(base, {
+                method: 'POST',
+                body: JSON.stringify({ title: 'EDGE_KV' })
+              });
+              namespace = created.result;
+            }
+            if (!namespace || !/^[a-f0-9]{32}$/i.test(namespace.id || '')) {
+              throw new Error('Cloudflare did not return a valid EDGE_KV namespace ID.');
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'namespace_id=' + namespace.id + '\\n');
+            process.stdout.write('EDGE_KV namespace ready: ' + namespace.id + '\\n');
+          })().catch(error => { console.error(error.message); process.exit(1); });
           NODE
 
       - name: Build production Worker configuration
