@@ -24,6 +24,19 @@ The sidebar's **ASX Autopilot · Paper** workspace accepts a multi-ticker daily 
 
 CSV source labels are user-declared, not independently authenticated. Only import data you are authorised to use. The latest daily close is a reference, not an executable fill. The paper desk is not connected to a live ASX feed, broker account, or order API. Browser storage is device-local and is not a server-side audit ledger. The strategy has not been validated as profitable.
 
+## CoinSpot crypto research and paper trading
+
+The **CoinSpot Crypto · Paper** workspace supports public BTC/AUD and ETH/AUD quotes, a persistent per-Cloudflare-Access-user AUD 100 paper ledger, and a separate CoinSpot read-only account adapter.
+
+- Public market data: CoinSpot V2 latest bid/ask/last and up to 100 recent completed trades. The public API data is not an OHLC candle history.
+- Paper account: AUD 100 starting capital, AUD 50 maximum position spend, one open position, AUD 3 daily realised-loss pause, 0.1% fee each side, and modelled spread/slippage. Entries use the public ask; exits use the public bid. Stops and targets are simulation-only and are evaluated when the authenticated paper-account endpoint is refreshed.
+- Strategy research: `coinspot-strategy.js` is a hypothesis-only 1-hour EMA20/EMA50 trend-continuation screen with RSI and ATR filters, next-bar-open entries, conservative same-candle stop-first resolution, fee/spread/slippage costs and a chronological in-sample/out-of-sample split. It requires at least 300 validated hourly candles uploaded as CSV. The CSV source is user-supplied and not independently verified.
+- The strategy assessment requires at least 30 out-of-sample trades, positive out-of-sample net P&L, profit factor above 1.2 and maximum drawdown below 10% before it can be considered for forward paper testing. Passing those thresholds is not proof of future profitability.
+- Private CoinSpot integration is read-only only. Configure Worker secrets `COINSPOT_READONLY_KEY` and `COINSPOT_READONLY_SECRET` using a CoinSpot Read Only API key. Do not enable trade, withdrawal or transfer permissions. Use the Cloudflare dashboard's Worker > Settings > Variables and Secrets interface to add these values. Never commit credentials or enter them in the browser UI, GitHub source, or ChatGPT.
+- CoinSpot API V2 is documented by CoinSpot as BETA; verify API behavior and current fees before use. Market orders currently show a 0.1% fee, while instant buy/sell/swap and stop/take-profit/limit order products show different fee schedules.
+
+No real-money order endpoint is implemented or enabled. No strategy is claimed profitable until it has been tested on a genuine, sufficiently large, independently sourced dataset and then forward-tested in paper mode. A positive backtest alone is not a guarantee.
+
 ## Architecture
 
 - `index.html`, `app.js`, `domain.js`, `styles.css`: browser single-page app. Existing localStorage keys remain in use: `edge-intelligence-v1`, `edge-forecasts-v1`, and `edge-alert-rules-v1`.
