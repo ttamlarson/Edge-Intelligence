@@ -386,7 +386,15 @@ async function handle(request, env, ctx) {
     if (requestUrl.pathname === "/api/crypto/coinspot/paper/account" && request.method === "GET") {
       await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-paper-account");
       const account = await loadAccount();
-      const marked = account.openPosition ? await (async()=>{const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");return markCoinSpotPaperAccount(account,{bid:Number(q.prices?.bid)});})() : markCoinSpotPaperAccount(account,{bid:1});
+      let marked;
+      if(account.openPosition){
+        const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+        if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+        const bid=Number(q.prices?.bid),position=account.openPosition;
+        const exitReason=bid<=position.stopPrice?"PAPER_STOP_LOSS":bid>=position.targetPrice?"PAPER_TAKE_PROFIT":null;
+        if(exitReason){account=closeCoinSpotPaperPosition(account,{bid,reason:exitReason});await saveAccount(account);}
+        marked=markCoinSpotPaperAccount(account,{bid});
+      } else marked=markCoinSpotPaperAccount(account,{bid:1});
       return reply(marked);
     }
     if (requestUrl.pathname === "/api/crypto/coinspot/paper/open" && request.method === "POST") {
