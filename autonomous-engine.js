@@ -252,3 +252,43 @@ export function markPaperPosition(position, markPrice, costs = {}) {
   if (!Number.isFinite(unrealizedProfitLossAud)) return null;
   return { markPrice: round2(price), marketValueAud: round2(value), estimatedExitCostsAud: sellCost.totalAud, unrealizedProfitLossAud };
 }
+
+// Persist a valuation-only mark for an open paper position. This never changes
+// cash or realized trade history; it only updates the position's last mark.
+export function recordPaperMark(portfolio, positionId, markPrice, { markedAt = new Date().toISOString(), costs = {} } = {}) {
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) {
+    return { accepted: false, reason: "Simulation-only portfolio required." };
+  }
+  if (!Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) ||
+      !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
+    return { accepted: false, reason: "Paper portfolio cash or trade history is invalid." };
+  }
+  const index = portfolio.positions.findIndex(position => position?.id === positionId && position.status === "OPEN_PAPER");
+  if (index < 0) return { accepted: false, reason: "Open paper position not found." };
+
+  const position = portfolio.positions[index];
+  const openedTimestamp = Date.parse(position.openedAt || "");
+  const markedTimestamp = Date.parse(markedAt || "");
+  const previousMarkTimestamp = position.lastMarkedAt ? Date.parse(position.lastMarkedAt) : openedTimestamp;
+  if (!Number.isFinite(openedTimestamp) || !Number.isFinite(markedTimestamp) ||
+      !Number.isFinite(previousMarkTimestamp) || markedTimestamp < openedTimestamp ||
+      markedTimestamp < previousMarkTimestamp) {
+    return { accepted: false, reason: "Paper mark timestamp is invalid or earlier than the previous mark." };
+  }
+
+  const mark = markPaperPosition(position, markPrice, costs);
+  if (!mark) return { accepted: false, reason: "Paper mark price or position accounting is invalid." };
+  const updatedPosition = {
+    ...position,
+    lastMarkPrice: mark.markPrice,
+    lastMarkedAt: new Date(markedTimestamp).toISOString()
+  };
+  const positions = portfolio.positions.slice();
+  positions[index] = updatedPosition;
+  return {
+    accepted: true,
+    portfolio: { ...portfolio, positions },
+    position: updatedPosition,
+    mark
+  };
+}
