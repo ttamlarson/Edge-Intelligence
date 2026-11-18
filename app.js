@@ -164,7 +164,7 @@ function renderAsxDesk(){
  $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=aud(equity);
  $("asxRealized").textContent=aud(realized);$("asxUnrealized").textContent=aud(unrealized);
  $("asxPositions").textContent=open.length;
- $("asxCandidates").innerHTML=asxCandidates.length?asxCandidates.map((c,i)=>`<div class="position-card"><div><b>${esc(c.symbol)} · ${esc(c.status)}</b><div class="market-meta">${esc(c.reason)} · ${esc(c.source||"")}</div>${c.status==="PAPER_CANDIDATE"?`<div class="market-meta">Ref ${aud(c.entryReference)} · ${c.shares} shares · stop ${aud(c.stopPrice)} · target ${aud(c.targetPrice)} · est. target net ${aud(c.estimatedNetTargetProfitAud)} · RR ${c.rewardRiskAfterCosts}:1</div>`:""}</div>${c.status==="PAPER_CANDIDATE"?`<button class="small-btn" data-asx-open="${i}">Open paper position</button>`:""}</div>`).join(""):'<div class="empty">Import a licensed or otherwise authorised ASX daily OHLC CSV to scan. No live ASX feed is connected.</div>';
+ $("asxCandidates").innerHTML=asxCandidates.length?asxCandidates.map((c,i)=>`<div class="position-card"><div><b>${esc(c.symbol)} · ${esc(c.status)}</b><div class="market-meta">${esc(c.reason)} · ${esc(c.source||"")}</div>${c.status==="PAPER_CANDIDATE"?`<div class="market-meta">Ref ${aud(c.entryReference)} · ${c.shares} shares · stop ${aud(c.stopPrice)} · target ${aud(c.targetPrice)} · est. target net ${aud(c.estimatedNetTargetProfitAud)} · RR ${c.rewardRiskAfterCosts}:1</div>`:""}</div>${c.status==="PAPER_CANDIDATE"?`<button class="small-btn" data-asx-open="${i}">Open paper position</button>`:""}</div>`).join(""):'<div class="empty">Connect DataCedar historical daily bars or import an authorised ASX daily OHLC CSV to scan. No real-time ASX feed is connected.</div>';
  document.querySelectorAll("[data-asx-open]").forEach(b=>b.onclick=()=>{const c=asxCandidates[Number(b.dataset.asxOpen)];const result=openPaperPosition(asxPortfolio,c);if(!result.accepted){toast(result.reason);return}asxPortfolio=result.portfolio;saveAsx();renderAsxDesk();toast("Paper position opened. No broker order was sent.")});
  $("asxOpenList").innerHTML=open.length?open.map(p=>{const mark=markPaperPosition(p,p.lastMarkPrice||p.entryPrice);return `<div class="position-card"><div><b>${esc(p.symbol)} · ${p.shares} shares</b><div class="market-meta">Entry ${aud(p.entryPrice)} · Stop ${aud(p.stopPrice)} · Target ${aud(p.targetPrice)} · Last mark ${esc(p.lastMarkedAt||"Not marked yet")} · Est. unrealized ${aud(mark?.unrealizedProfitLossAud)}</div><label class="field-label">MANUAL PAPER MARK / EXIT PRICE <input type="number" step="0.001" min="0.001" data-asx-price="${esc(p.id)}" value="${Number(p.lastMarkPrice||p.entryPrice)}"></label></div><div class="position-actions"><button class="small-btn" data-asx-mark="${esc(p.id)}">Save mark</button><button class="small-btn" data-asx-close="${esc(p.id)}">Close paper position</button></div></div>`}).join(""):'<div class="empty">No open ASX paper positions.</div>';
  document.querySelectorAll("[data-asx-mark]").forEach(b=>b.onclick=()=>{const p=asxPortfolio.positions.find(x=>x.id===b.dataset.asxMark);const input=p&&document.querySelector("[data-asx-price=\""+CSS.escape(p.id)+"\"]");if(!p||!input)return;const result=recordPaperMark(asxPortfolio,p.id,Number(input.value));if(!result.accepted){toast(result.reason);return}asxPortfolio=result.portfolio;saveAsx();renderAsxDesk();toast("Paper mark saved. Cash and realized P&L are unchanged.")});
@@ -184,6 +184,25 @@ $("asxImportBtn")?.addEventListener("click",()=>{
   $("asxImportStatus").textContent=`Imported ${parsed.rows} daily bars for ${parsed.symbols.length} ASX tickers. Latest bar: ${formatDateTime(parsed.latestBar,"Australia/Perth")}. Source label is user-declared and has not been independently verified.`;
   renderAsxDesk();
  };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
+});
+$("asxDataCedarBtn")?.addEventListener("click",async()=>{
+ const button=$("asxDataCedarBtn"),symbols=$("asxDataCedarSymbols").value.trim();
+ if(!symbols){$("asxImportStatus").textContent="Enter one to three ASX tickers, for example BHP,CBA,CSL.";return}
+ button.disabled=true;button.textContent="Fetching DataCedar history…";
+ try{
+  const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
+  if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
+  asxUniverse=data.barsBySymbol||{};
+  asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
+   symbol,bars:asxUniverse[symbol],source:"DataCedar ASX historical daily bars",currency:"AUD",
+   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,
+   cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length
+  }));
+  const counts=Object.entries(data.rowsBySymbol||{}).map(([symbol,count])=>symbol+": "+count+" bars").join("; ");
+  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
+  renderAsxDesk();
+ }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
+ finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
 });
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
 renderAsxDesk();

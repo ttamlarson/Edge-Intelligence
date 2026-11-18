@@ -1,5 +1,6 @@
 import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } from "./domain.js";
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
+import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -352,7 +353,28 @@ async function handle(request, env, ctx) {
 
   if (requestUrl.pathname === "/api/health" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "health");
-    return reply({ status: "worker_responding", providers: { marketData: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: "licensed integration not configured", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; execution requires provider secret and KV", realMoneyTrading: false, retrieved_at: isoNow() });
+    return reply({ status: "worker_responding", providers: { datacedar: env.DATACEDAR_API_KEY ? "key configured; retrieval not verified" : "requires DATACEDAR_API_KEY Worker secret", marketData: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: env.DATACEDAR_API_KEY ? "DataCedar key configured; historical bars require a successful retrieval" : "DataCedar ASX historical adapter requires DATACEDAR_API_KEY Worker secret", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; execution requires provider secret and KV", realMoneyTrading: false, retrieved_at: isoNow() });
+  }
+  if (requestUrl.pathname === "/api/asx/datacedar/status" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "datacedar-status");
+    return reply({ status: env.DATACEDAR_API_KEY ? "key_configured_retrieval_unverified" : "requires_external_access", provider: "DataCedar", exchange: "ASX", timeframe: "1d", configured: Boolean(env.DATACEDAR_API_KEY), history: "Explorer plan: up to one year of daily bars; minute bars are not used by this paper workflow", message: env.DATACEDAR_API_KEY ? "The Worker secret is present. Run a symbol request to verify live provider access." : "Create a free DataCedar key and set it as the DATACEDAR_API_KEY Worker secret. Never paste it into the browser or GitHub source.", sourceUrl: "https://datacedar.com/markets/australia", retrievedAt: isoNow() });
+  }
+  if (requestUrl.pathname === "/api/asx/datacedar/bars" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "datacedar-bars");
+    if (!env.DATACEDAR_API_KEY) throw new HttpError(503, "DataCedar is not configured. Set DATACEDAR_API_KEY as a Cloudflare Worker secret.");
+    let symbols;
+    try { symbols = normalizeDataCedarSymbols(requestUrl.searchParams.get("symbols") || ""); }
+    catch (error) { throw new HttpError(400, error.message); }
+    const from = requestUrl.searchParams.get("from") || undefined;
+    const to = requestUrl.searchParams.get("to") || undefined;
+    let data;
+    try { data = await fetchDataCedarBars({ symbols, from, to, apiKey: env.DATACEDAR_API_KEY }); }
+    catch (error) {
+      if (/ticker|symbol|date range|history|maximum|valid YYYY-MM-DD|unique|one and three/i.test(error.message)) throw new HttpError(400, error.message);
+      if (/API key|plan|rate limit|not found|redirected/i.test(error.message)) throw new HttpError(502, error.message);
+      throw new HttpError(502, "DataCedar request could not be validated. Retry later or check provider access.");
+    }
+    return reply(data);
   }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");

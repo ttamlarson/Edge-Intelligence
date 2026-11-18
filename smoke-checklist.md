@@ -41,3 +41,14 @@
 ## Release boundary
 - This branch is research and paper simulation only. It does not connect to a broker, submit orders, or enable real-money trading.
 - GitHub Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
+
+
+## DataCedar ASX connector smoke checks
+
+- [ ] Confirm the Worker has the `DATACEDAR_API_KEY` secret; do not expose its value in browser code or logs.
+- [ ] Call `GET /api/asx/datacedar/status` and confirm it reports the key configured without claiming data retrieval is verified.
+- [ ] Fetch one ASX ticker (for example BHP), then two or three tickers; confirm returned bars are AUD, daily, raw-adjustment, timestamped and source-attributed.
+- [ ] Try an unknown ticker and a ticker with no coverage; confirm EDGE reports provider errors or an empty series without sample-price substitution.
+- [ ] Confirm more than three tickers, invalid dates and date windows over 366 days are rejected.
+- [ ] Confirm fetching data alone does not change cash, positions, marks, closed trades or the `edge-asx-paper-v1` storage key.
+- [ ] Open a candidate only by using its separate paper-trading action; confirm no broker route is called.

@@ -62,3 +62,19 @@ See `wrangler.toml` for required bindings and placeholders. Do not deploy until 
 ## Production and staging
 
 Deployment steps, Worker secrets, source-ingestion contracts and manual verification remain in `smoke-checklist.md`. No production deployment is authorised by this code change.
+
+
+## DataCedar ASX historical data connector
+
+The ASX Autopilot workspace includes an optional DataCedar Explorer (free) connector for up to three tickers per request. The Worker calls the fixed DataCedar v3 batch-bars endpoint using exchange-qualified identifiers (`asx:TICKER`), daily timeframe, raw adjustment and a maximum 366-day request window. It validates the symbol identity, UTC timestamps, OHLC consistency, optional volume, duplicate dates and requested date bounds before returning AUD bars to the existing deterministic paper screen.
+
+### Setup
+
+1. Create a free DataCedar account and API key at https://datacedar.com/markets/australia.
+2. In the Cloudflare Worker environment, add the secret `DATACEDAR_API_KEY` using the Cloudflare dashboard or `wrangler secret put DATACEDAR_API_KEY`. Never place the key in frontend code, browser storage, GitHub source or logs.
+3. Deploy the Worker after reviewing the change, then open ASX Autopilot and enter up to three ASX tickers.
+4. Use the status route `GET /api/asx/datacedar/status`, then request `GET /api/asx/datacedar/bars?symbols=BHP,CBA` through the authenticated Worker.
+
+The connector uses daily historical bars only. DataCedar's documentation describes the Explorer tier as one year of daily history and seven days of minute history; EDGE deliberately does not use minute data. Provider coverage can vary by symbol. An empty series is reported as no data, never replaced with synthetic prices. The provider documentation also distinguishes its historical research bars from a consolidated real-time feed and best-execution record. Confirm the current DataCedar plan and data-use terms before relying on returned data. No automatic trade is opened: a candidate still requires a separate user action in the paper desk.
+
+Required Worker secret: `DATACEDAR_API_KEY`. The existing localStorage key `edge-asx-paper-v1` and saved positions are unchanged.

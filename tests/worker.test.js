@@ -189,3 +189,48 @@ test("AI response with invalid evidence fields is rejected", async t => {
   const response = await worker.fetch(new Request("https://api.example.au/api/research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: "Will there be an RBA cut?" }) }), baseEnv({ OPENAI_API_KEY: "test-secret" }), access("user-1"));
   assert.equal(response.status, 502);
 });
+
+test("DataCedar status is explicit and does not claim retrieval before a key is configured", async () => {
+  const response = await worker.fetch(new Request("https://api.example.au/api/asx/datacedar/status"), baseEnv(), access("user-1"));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.configured, false);
+  assert.equal(body.status, "requires_external_access");
+  assert.match(body.message, /DATACEDAR_API_KEY/);
+});
+
+test("DataCedar bars route fails closed until the Worker secret is configured", async () => {
+  const response = await worker.fetch(new Request("https://api.example.au/api/asx/datacedar/bars?symbols=BHP"), baseEnv(), access("user-1"));
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /DATACEDAR_API_KEY/);
+});
+
+test("DataCedar bars route validates symbols and returns normalized historical bars", async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let requestedUrl, requestedKey;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = new URL(url); requestedKey = options.headers["X-API-Key"];
+    const timestamp = String(Date.parse("2026-11-17T00:00:00.000Z"));
+    return new Response(JSON.stringify({ data: { "asx:BHP": [{ sid: "asx:BHP", timeframe: "1Day", ts_ms: timestamp, open: 45, high: 47, low: 44, close: 46, volume: "123" }] } }), { headers: { "Content-Type": "application/json" } });
+  };
+  const env = baseEnv({ DATACEDAR_API_KEY: "server-only-secret" });
+  const response = await worker.fetch(new Request("https://api.example.au/api/asx/datacedar/bars?symbols=bhp"), env, access("user-1"));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(requestedUrl.hostname, "api.datacedar.com");
+  assert.equal(requestedKey, "server-only-secret");
+  assert.equal(body.source, "DataCedar ASX historical daily bars");
+  assert.equal(body.currency, "AUD");
+  assert.equal(body.barsBySymbol.BHP[0].close, 46);
+  assert.equal(body.dataClass, "historical_market_data_not_realtime");
+});
+
+test("DataCedar bars route rejects more than three symbols without calling provider", async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let called = false; globalThis.fetch = async () => { called = true; throw new Error("must not call"); };
+  const response = await worker.fetch(new Request("https://api.example.au/api/asx/datacedar/bars?symbols=BHP,CBA,CSL,WES"), baseEnv({ DATACEDAR_API_KEY: "key" }), access("user-1"));
+  assert.equal(response.status, 400);
+  assert.equal(called, false);
+});
