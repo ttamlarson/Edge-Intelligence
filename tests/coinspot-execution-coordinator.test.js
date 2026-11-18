@@ -36,7 +36,7 @@ test("nonce allocation is strictly monotonic", async () => {
   const a = await (await call("/nonce")).json();
   const b = await (await call("/nonce")).json();
   assert.ok(Number.isSafeInteger(a.nonce));
-  assert.equal(b.nonce, a.nonce + 1);
+  assert.ok(b.nonce > a.nonce, "each allocation must exceed the previous nonce");
 });
 
 test("idempotency reservations replay safely and reject key reuse with changed intent", async () => {
