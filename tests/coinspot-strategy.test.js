@@ -1,0 +1,5 @@
+import test from "node:test";import assert from "node:assert/strict";import {validateCoinSpotCandles,backtestCoinSpotTrend} from "../coinspot-strategy.js";
+const candles=Array.from({length:400},(_,i)=>{const close=100+i*.08+Math.sin(i/5)*.7;return {timestamp:new Date(Date.UTC(2025,0,1,i)).toISOString(),open:close-.1,high:close+.5,low:close-.5,close,volume:100+i};});
+test("validates minimum history and OHLCV integrity",()=>{assert.throws(()=>validateCoinSpotCandles(candles.slice(0,299)));assert.equal(validateCoinSpotCandles(candles).length,400);const bad=candles.map(x=>({...x}));bad[3].high=1;assert.throws(()=>validateCoinSpotCandles(bad));});
+test("backtest uses 100 AUD, split samples and explicit trading costs",()=>{const x=backtestCoinSpotTrend({candles});assert.equal(x.startingCapitalAud,100);assert.equal(x.liveTradingEnabled,false);assert.ok(x.inSample);assert.ok(x.outOfSample);assert.equal(x.costs.feeRate,.001);});
+test("rejects unsupported starting capital and invalid parameters",()=>{assert.throws(()=>backtestCoinSpotTrend({candles,startingCapitalAud:500}));assert.throws(()=>backtestCoinSpotTrend({candles,spreadBps:-1}));});
