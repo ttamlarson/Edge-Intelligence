@@ -34,7 +34,7 @@ function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{toas
 function money(n,currency=null){return formatMoney(n,currency)}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.page===page));$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}}
+function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.page)));
 document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.goto)));
 $("dismissNotice").onclick=()=>{$("dismissNotice").closest(".notice").remove()};
