@@ -52,3 +52,19 @@
 - [ ] Confirm more than three tickers, invalid dates and date windows over 366 days are rejected.
 - [ ] Confirm fetching data alone does not change cash, positions, marks, closed trades or the `edge-asx-paper-v1` storage key.
 - [ ] Open a candidate only by using its separate paper-trading action; confirm no broker route is called.
+
+
+## CoinSpot live execution preparation (still locked)
+
+- [x] Durable Object class allocates monotonically increasing nonces transactionally.
+- [x] Durable idempotency reservations reject key reuse with a changed order intent.
+- [x] Authenticated Worker routes scope coordinator state to the Cloudflare Access user.
+- [x] Coordinator request bodies are bounded and malformed requests fail closed.
+- [ ] Configure the Worker secret EDGE_COORDINATOR_TOKEN; never place its value in source control.
+- [ ] Deploy the Worker and verify Durable Object migration and authenticated coordinator routes.
+- [ ] Implement a separate least-privilege CoinSpot trading-key adapter; existing read-only keys must remain read-only.
+- [ ] Implement exchange order-status/fill reconciliation, balance reservations, timeout/unknown-order recovery and emergency kill switch.
+- [ ] Obtain trustworthy hourly BTC/AUD and ETH/AUD OHLCV history with source provenance; current public quote endpoint is not an hourly candle feed.
+- [ ] Run chronological out-of-sample validation and independently review costs, drawdown and trade count.
+- [ ] Complete at least 60 days of forward paper trading with immutable server-side trade/equity records.
+- [ ] Require explicit operator activation after all release gates; live order submission stays disabled until then.
