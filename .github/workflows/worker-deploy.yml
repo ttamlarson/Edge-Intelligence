@@ -1,0 +1,90 @@
+name: Deploy EDGE Cloudflare Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-cloudflare-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate application
+        run: |
+          npm test
+          npm run check
+
+      - name: Install Wrangler
+        run: npm install --global wrangler
+
+      - name: Provision or reuse production KV namespace
+        id: kv
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const run = (args) => execFileSync('wrangler', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+          let namespaces = JSON.parse(run(['kv', 'namespace', 'list', '--json']));
+          let namespace = namespaces.find((item) => item.title === 'EDGE_KV');
+          if (!namespace) {
+            const created = JSON.parse(run(['kv', 'namespace', 'create', 'EDGE_KV', '--json']));
+            namespace = created.result || created;
+          }
+          if (!namespace || !/^[a-f0-9]{32}$/i.test(namespace.id || '')) {
+            throw new Error('Could not identify the EDGE_KV namespace ID.');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'namespace_id=' + namespace.id + '\\n');
+          NODE
+
+      - name: Build production Worker configuration
+        env:
+          EDGE_KV_NAMESPACE_ID: ${{ steps.kv.outputs.namespace_id }}
+          CF_ACCESS_TEAM_DOMAIN: ${{ secrets.CF_ACCESS_TEAM_DOMAIN }}
+          CF_ACCESS_AUD: ${{ secrets.CF_ACCESS_AUD }}
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+          const required = ['EDGE_KV_NAMESPACE_ID', 'CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD'];
+          for (const key of required) {
+            if (!process.env[key]) throw new Error('Missing GitHub Actions secret/configuration: ' + key);
+          }
+          if (!/^[a-z0-9-]+\\.cloudflareaccess\\.com$/i.test(process.env.CF_ACCESS_TEAM_DOMAIN)) {
+            throw new Error('CF_ACCESS_TEAM_DOMAIN must be your Cloudflare Access team domain.');
+          }
+          const source = fs.readFileSync('wrangler.toml', 'utf8');
+          const production = source.split('[env.staging]')[0]
+            .replace('https://REPLACE_WITH_YOUR_PAGES_DOMAIN', 'https://ttamlarson.github.io')
+            .replace('REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com', process.env.CF_ACCESS_TEAM_DOMAIN)
+            .replace('REPLACE_WITH_ACCESS_APPLICATION_AUD', process.env.CF_ACCESS_AUD)
+            .replace('REPLACE_WITH_YOUR_KV_NAMESPACE_ID', process.env.EDGE_KV_NAMESPACE_ID);
+          if (/REPLACE_WITH/.test(production)) throw new Error('A production configuration placeholder remains.');
+          fs.writeFileSync('wrangler.deploy.toml', production);
+          NODE
+
+      - name: Deploy production Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy --config wrangler.deploy.toml
+
+      - name: Remove generated configuration
+        if: always()
+        run: rm -f wrangler.deploy.toml
