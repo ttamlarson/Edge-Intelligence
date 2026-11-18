@@ -17,7 +17,7 @@ export function parseKrakenOhlc(payload,{pair="XBTAUD",retrievedAt=new Date().to
 function ema(v,p){if(v.length<p)return null;const a=2/(p+1);let x=v.slice(0,p).reduce((s,z)=>s+z,0)/p;for(const z of v.slice(p))x=z*a+x*(1-a);return x;}
 function atr(c,p=14){if(c.length<p+1)return null;return c.slice(-p).reduce((s,x,i)=>{const prev=c[c.length-p-1+i].close;return s+Math.max(x.high-x.low,Math.abs(x.high-prev),Math.abs(x.low-prev));},0)/p;}
 function rsi(v,p=14){if(v.length<p+1)return null;let g=0,l=0;for(let i=v.length-p;i<v.length;i++){const d=v[i]-v[i-1];if(d>0)g+=d;else l-=d;}return l===0?100:100-100/(1+g/l);}
-export function evaluateCryptoSpotSetup({marketData,equityAud=100,cashAud=equityAud,dailyLossAud=0,feeRate=.0025,slippageBps=15,now=Date.now()}={}){
+export function evaluateCryptoSpotSetup({marketData,equityAud=100,cashAud=equityAud,dailyLossAud=0,feeRate=.001,slippageBps=15,now=Date.now()}={}){
  const reject=reason=>({status:"REJECTED",simulatedOnly:true,executable:false,reason});
  if(!marketData||marketData.quoteCurrency!=="AUD"||marketData.dataClass!=="public_exchange_market_data_not_execution"||!Array.isArray(marketData.candles)||marketData.candles.length<60)return reject("Validated AUD-quoted Kraken spot candles are required.");
  if(!Number.isFinite(Date.parse(marketData.observedAt))||Date.parse(marketData.observedAt)>now+60_000||now-Date.parse(marketData.observedAt)>90*60_000)return reject("Market data is stale or future-dated.");
