@@ -616,3 +616,4 @@ export default {
 };
 
 export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart };
+export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
