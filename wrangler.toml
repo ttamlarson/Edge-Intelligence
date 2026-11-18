@@ -85,3 +85,4 @@ id = "REPLACE_WITH_YOUR_STAGING_KV_NAMESPACE_ID"
 #    wrangler secret put OPENAI_API_KEY
 #    wrangler secret put ALERT_WEBHOOK_URL  (optional)
 #    wrangler secret put AEC_INGESTION_TOKEN  (optional; after the bridge is configured)
+# Optional ASX historical daily bars: wrangler secret put DATACEDAR_API_KEY
