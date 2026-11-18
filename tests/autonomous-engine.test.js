@@ -52,3 +52,32 @@ test("paper portfolio preserves reserve and limits concurrent positions", () => 
   assert.equal(third.accepted, false);
   assert.match(third.reason, /Position limit/);
 });
+
+import { updatePaperMarksFromBars } from "../autonomous-engine.js";
+
+test("DataCedar daily bars update open paper marks without changing cash or realised history", () => {
+  const portfolio = createPaperPortfolio();
+  const openedAt = new Date(now - 86400000).toISOString();
+  const bars = makeBars().map((bar, index) => ({ ...bar, timestamp: new Date(now - (55 - index) * 86400000).toISOString() }));
+  const candidate = evaluateAsxSwingSetup({ symbol: "TEST", bars, source: "Test fixture", currency: "AUD", observedAt: new Date(now).toISOString(), now, costs: { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 } });
+  assert.equal(candidate.status, "PAPER_CANDIDATE");
+  const opened = openPaperPosition(portfolio, candidate, { id: "mark-test", openedAt, now });
+  assert.equal(opened.accepted, true, opened.reason);
+  const cashBefore = opened.portfolio.cashAud;
+  const realisedBefore = opened.portfolio.closedTrades.length;
+  const markBars = { TEST: [{ timestamp: new Date(now + 3600000).toISOString(), close: candidate.entryReference + 0.25 }] };
+  const result = updatePaperMarksFromBars(opened.portfolio, markBars);
+  assert.deepEqual(result.markedSymbols, ["TEST"]);
+  assert.equal(result.portfolio.cashAud, cashBefore);
+  assert.equal(result.portfolio.closedTrades.length, realisedBefore);
+  assert.equal(result.portfolio.positions[0].lastMarkPrice, candidate.entryReference + 0.25);
+  assert.equal(result.portfolio.liveTradingEnabled, false);
+});
+
+test("DataCedar mark refresh skips absent and older marks without altering ledger", () => {
+  const portfolio = createPaperPortfolio();
+  const result = updatePaperMarksFromBars(portfolio, { MISSING: [] });
+  assert.deepEqual(result.markedSymbols, []);
+  assert.equal(result.portfolio.cashAud, 500);
+  assert.equal(result.accepted, true);
+});
