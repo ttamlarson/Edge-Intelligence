@@ -362,7 +362,9 @@ async function handle(request, env, ctx) {
   if (requestUrl.pathname === "/api/asx/datacedar/bars" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "datacedar-bars");
     if (!env.DATACEDAR_API_KEY) throw new HttpError(503, "DataCedar is not configured. Set DATACEDAR_API_KEY as a Cloudflare Worker secret.");
-    const symbols = normalizeDataCedarSymbols(requestUrl.searchParams.get("symbols") || "");
+    let symbols;
+    try { symbols = normalizeDataCedarSymbols(requestUrl.searchParams.get("symbols") || ""); }
+    catch (error) { throw new HttpError(400, error.message); }
     const from = requestUrl.searchParams.get("from") || undefined;
     const to = requestUrl.searchParams.get("to") || undefined;
     let data;
