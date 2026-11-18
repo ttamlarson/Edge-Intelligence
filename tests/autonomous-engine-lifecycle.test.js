@@ -141,3 +141,29 @@ test("paper portfolio rejects stale candidate data at the time of opening", () =
   assert.equal(result.accepted, false);
   assert.match(result.reason, /provenance or freshness/);
 });
+
+
+test("marking rejects corrupt position quantities and accounting values", () => {
+  const valid = { id: "mark-1", status: "OPEN_PAPER", shares: 2, debitAud: 20 };
+  assert.equal(markPaperPosition({ ...valid, shares: 0 }, 12), null);
+  assert.equal(markPaperPosition({ ...valid, debitAud: Number.NaN }, 12), null);
+  assert.equal(markPaperPosition({ ...valid, shares: 1.5 }, 12), null);
+});
+
+test("closing fails safely for malformed portfolio history and invalid chronology", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const openedAt = new Date(now).toISOString();
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, { id: "close-guard-1", openedAt, now });
+  assert.equal(opened.accepted, true);
+  const missingHistory = { ...opened.portfolio, closedTrades: undefined };
+  const invalidHistory = closePaperPosition(missingHistory, "close-guard-1", 15, { closedAt: new Date(now + 60_000).toISOString() });
+  assert.equal(invalidHistory.accepted, false);
+  assert.match(invalidHistory.reason, /trade history/);
+  assert.equal(opened.portfolio.cashAud, 426.5);
+
+  const backwardsTime = closePaperPosition(opened.portfolio, "close-guard-1", 15, { closedAt: new Date(now - 1).toISOString() });
+  assert.equal(backwardsTime.accepted, false);
+  assert.match(backwardsTime.reason, /timestamp/);
+  assert.equal(opened.portfolio.positions[0].status, "OPEN_PAPER");
+  assert.equal(opened.portfolio.closedTrades.length, 0);
+});
