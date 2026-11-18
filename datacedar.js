@@ -2,7 +2,7 @@ const BASE_URL = "https://api.datacedar.com/v3";
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_SYMBOLS = 3;
 const TICKER = /^[A-Z0-9.]{2,12}$/;
-const DATE = /^\\d{4}-\\d{2}-\\d{2}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function normalizeDataCedarSymbols(value) {
   const input = Array.isArray(value) ? value : String(value || "").split(",");
@@ -32,11 +32,12 @@ export function parseDataCedarBars(payload, symbols, { retrievedAt = new Date().
     if (rows == null) { barsBySymbol[ticker] = []; rowsBySymbol[ticker] = 0; continue; }
     if (!Array.isArray(rows) || rows.length > 50_000) throw new Error(`DataCedar returned an invalid bar series for ${ticker}.`);
     const bars = rows.map(row => {
-      if (!row || typeof row !== "object" || row.sid !== sid || row.adjustment && row.adjustment !== "raw") {
+      if (!row || typeof row !== "object" || row.sid !== sid || row.adjustment && row.adjustment !== "raw" || row.timeframe && !["1Day", "1d"].includes(row.timeframe)) {
         throw new Error(`DataCedar returned a malformed or mismatched bar for ${ticker}.`);
       }
       const epoch = Number(row.ts_ms);
-      const timestamp = Number.isSafeInteger(epoch) && epoch > 0 ? new Date(epoch).toISOString() : null;
+      const parsedDate = Number.isSafeInteger(epoch) && epoch > 0 ? new Date(epoch) : null;
+      const timestamp = parsedDate && Number.isFinite(parsedDate.getTime()) ? parsedDate.toISOString() : null;
       const open = Number(row.open), high = Number(row.high), low = Number(row.low), close = Number(row.close);
       const volume = row.volume == null ? null : Number(row.volume);
       if (!timestamp || ![open, high, low, close].every(value => Number.isFinite(value) && value > 0) ||
