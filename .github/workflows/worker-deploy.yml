@@ -18,6 +18,7 @@ on:
       - "coinspot-execution-coordinator.js"
       - "wrangler.toml"
       - "package.json"
+      - "tests/**"
       - ".github/workflows/worker-deploy.yml"
 
 permissions:
