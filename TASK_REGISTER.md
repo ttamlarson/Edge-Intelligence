@@ -103,3 +103,12 @@ Updated after local implementation and automated verification on `edge-productio
 - Verified `npm run check`: passed.
 - Verified `npm run build:pages`: passed and emitted the static Pages assets to `dist/`.
 - These are local deterministic checks only. No Cloudflare account configuration, live provider request, data entitlement, deployment, or live trading was verified.
+
+## DataCedar ASX connector
+
+- [x] Add a server-side DataCedar v3 adapter for ASX daily bars, with bounded tickers/date windows and strict response validation.
+- [x] Add authenticated Worker status and daily-bars routes; API key is read only from Worker secret `DATACEDAR_API_KEY`.
+- [x] Add ASX Autopilot UI controls to fetch up to three tickers and screen them with the existing paper-only engine.
+- [x] Add deterministic adapter tests and document secret setup and smoke checks.
+- [ ] Operator action required: create a free DataCedar API key and configure Cloudflare Worker secret `DATACEDAR_API_KEY`.
+- [ ] After the secret is configured, exercise a real ASX symbol request and verify current provider coverage before describing the integration as live.
