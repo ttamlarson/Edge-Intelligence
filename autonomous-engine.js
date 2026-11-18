@@ -192,7 +192,7 @@ export function updatePaperMarksFromBars(portfolio, barsBySymbol, { source = "Da
   for (const position of portfolio.positions.filter(item => item?.status === "OPEN_PAPER")) {
     const bars = barsBySymbol[position.symbol];
     const latest = Array.isArray(bars) ? bars.reduce((best, bar) =>
-      Date.parse(bar?.timestamp || "") > Date.parse(best?.timestamp || "") ? bar : best, null) : null;
+      !best || Date.parse(bar?.timestamp || "") > Date.parse(best.timestamp || "") ? bar : best, null) : null;
     const timestamp = Date.parse(latest?.timestamp || "");
     const price = num(latest?.close);
     if (!latest || !Number.isFinite(timestamp) || price === null || price <= 0) {
