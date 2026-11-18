@@ -185,5 +185,24 @@ $("asxImportBtn")?.addEventListener("click",()=>{
   renderAsxDesk();
  };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
 });
+$("asxDataCedarBtn")?.addEventListener("click",async()=>{
+ const button=$("asxDataCedarBtn"),symbols=$("asxDataCedarSymbols").value.trim();
+ if(!symbols){$("asxImportStatus").textContent="Enter one to three ASX tickers, for example BHP,CBA,CSL.";return}
+ button.disabled=true;button.textContent="Fetching DataCedar history…";
+ try{
+  const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
+  if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
+  asxUniverse=data.barsBySymbol||{};
+  asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
+   symbol,bars:asxUniverse[symbol],source:"DataCedar ASX historical daily bars",currency:"AUD",
+   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,
+   cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length
+  }));
+  const counts=Object.entries(data.rowsBySymbol||{}).map(([symbol,count])=>symbol+": "+count+" bars").join("; ");
+  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
+  renderAsxDesk();
+ }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
+ finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
+});
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
 renderAsxDesk();
