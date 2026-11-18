@@ -358,11 +358,26 @@ async function marketSearch(request, env) {
 
 async function handle(request, env, ctx) {
   const requestUrl = new URL(request.url); const origin = request.headers.get("Origin");
-  if (origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
+  if (origin && origin !== requestUrl.origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
   if (request.method === "OPTIONS") {
     const requestedHeaders = (request.headers.get("Access-Control-Request-Headers") || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
     if (requestedHeaders.some(header => header !== "content-type")) return json({ error: "Requested headers are not allowed." }, 403, origin, env);
     return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin, env) } });
+  }
+  // Proxy the static frontend from GitHub Pages through this Worker. The app and API
+  // then share the Worker origin, so Cloudflare Access uses a first-party Safari cookie.
+  if (!requestUrl.pathname.startsWith("/api/")) {
+    if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png"]);
+    if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
+    const assetPath = requestUrl.pathname === "/" ? "/Edge-Intelligence/" : "/Edge-Intelligence" + requestUrl.pathname;
+    const upstream = await fetch("https://ttamlarson.github.io" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
+    const headers = new Headers(upstream.headers);
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("X-Frame-Options", "DENY");
+    headers.set("Referrer-Policy", "no-referrer");
+    headers.set("Cache-Control", requestUrl.pathname === "/" || requestUrl.pathname === "/index.html" ? "no-cache" : "public, max-age=300");
+    return new Response(request.method === "HEAD" ? null : upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
   }
   if (!requestUrl.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404, origin, env);
   const principal = await authenticate(request, env, ctx);
