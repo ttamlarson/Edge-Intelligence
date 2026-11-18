@@ -93,7 +93,7 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
   const netStopLoss = notional - shares * stopPrice + buyCost.totalAud + sellCost.totalAud;
   if (notional + buyCost.totalAud > maxSpend) return reject("Position plus estimated entry costs breaches the available allocation.");
   if (netTargetProfit <= 0 || netTargetProfit < 2 * netStopLoss) return reject("Expected net reward after estimated costs is below the 2:1 minimum.");
-  return { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, strategy: "ASX_DAILY_TREND_BREAKOUT_V1", symbol: String(symbol).toUpperCase(), source: validated.source, currency: "AUD", observedAt: validated.observedAt, entryReference: round2(last), stopPrice, targetPrice, shares, notionalAud: round2(notional), riskBudgetAud: round2(riskBudget), estimatedEntryCostsAud: buyCost.totalAud, estimatedNetTargetProfitAud: round2(netTargetProfit), estimatedNetStopLossAud: round2(netStopLoss), rewardRiskAfterCosts: round2(netTargetProfit / netStopLoss), assumptions: { commissionMinimumAud: costs.minimumCommissionAud ?? EDGE_COMMISSION_MIN_AUD, gstRate: costs.gstRate ?? EDGE_GST_RATE, slippageBps: costs.slippageBps ?? EDGE_DEFAULT_SLIPPAGE_BPS, exitAtStopOrTarget: true }, reason: "Candidate passed deterministic screening; it is not an order or a prediction of profit." };
+  return { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, strategy: "ASX_DAILY_TREND_BREAKOUT_V1", symbol: String(symbol).toUpperCase(), source: validated.source, currency: "AUD", observedAt: validated.observedAt, entryReference: round2(last), stopPrice, targetPrice, shares, notionalAud: round2(notional), riskBudgetAud: round2(riskBudget), estimatedEntryCostsAud: buyCost.totalAud, estimatedNetTargetProfitAud: round2(netTargetProfit), estimatedNetStopLossAud: round2(netStopLoss), rewardRiskAfterCosts: round2(netTargetProfit / netStopLoss), assumptions: { commissionRate: costs.commissionRate ?? 0.0008, commissionMinimumAud: costs.minimumCommissionAud ?? EDGE_COMMISSION_MIN_AUD, gstRate: costs.gstRate ?? EDGE_GST_RATE, slippageBps: costs.slippageBps ?? EDGE_DEFAULT_SLIPPAGE_BPS, exitAtStopOrTarget: true }, reason: "Candidate passed deterministic screening; it is not an order or a prediction of profit." };
 }
 
 export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } = {}) {
@@ -125,6 +125,40 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
       round2(shares * entryPrice) !== round2(notional) || notional > EDGE_MAX_POSITION_AUD ||
       entryCosts === null || entryCosts < 0) {
     return { accepted: false, reason: "Candidate sizing or price levels are invalid." };
+  }
+
+  // Recalculate risk and all cost-sensitive reward figures at the point of
+  // opening. A caller must not be able to mutate a screened candidate to
+  // bypass the portfolio risk budget or the estimated entry/exit fees.
+  const riskBudget = num(candidate.riskBudgetAud);
+  const assumptions = candidate.assumptions || {};
+  const costs = {
+    commissionRate: num(assumptions.commissionRate),
+    minimumCommissionAud: num(assumptions.commissionMinimumAud),
+    gstRate: num(assumptions.gstRate),
+    slippageBps: num(assumptions.slippageBps)
+  };
+  if (riskBudget === null || riskBudget <= 0 ||
+      !Object.values(costs).every(value => value !== null && value >= 0) ||
+      !Number.isFinite(portfolio.startingCapitalAud) || portfolio.startingCapitalAud <= 0 ||
+      riskBudget > round2(portfolio.startingCapitalAud * EDGE_RISK_PER_TRADE_PCT) + 0.01 ||
+      shares * (entryPrice - stopPrice) > riskBudget + 0.01) {
+    return { accepted: false, reason: "Candidate exceeds the paper portfolio risk budget or has invalid cost assumptions." };
+  }
+  const expectedEntryCost = estimateAsxSideCost(notional, costs);
+  const expectedStopCost = estimateAsxSideCost(shares * stopPrice, costs);
+  const expectedTargetCost = estimateAsxSideCost(shares * targetPrice, costs);
+  if (!expectedEntryCost || !expectedStopCost || !expectedTargetCost ||
+      round2(entryCosts) !== expectedEntryCost.totalAud) {
+    return { accepted: false, reason: "Candidate entry costs do not match its declared fee assumptions." };
+  }
+  const netTargetProfit = round2(shares * targetPrice - notional - expectedEntryCost.totalAud - expectedTargetCost.totalAud);
+  const netStopLoss = round2(notional - shares * stopPrice + expectedEntryCost.totalAud + expectedStopCost.totalAud);
+  if (netStopLoss <= 0 || netTargetProfit < 2 * netStopLoss ||
+      round2(num(candidate.estimatedNetTargetProfitAud)) !== netTargetProfit ||
+      round2(num(candidate.estimatedNetStopLossAud)) !== netStopLoss ||
+      round2(num(candidate.rewardRiskAfterCosts)) !== round2(netTargetProfit / netStopLoss)) {
+    return { accepted: false, reason: "Candidate net reward/risk does not reconcile with its prices and fees." };
   }
 
   const openPositions = portfolio.positions.filter(position => position?.status === "OPEN_PAPER");
