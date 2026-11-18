@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "edge-shell-v";
-const CACHE_NAME = `${CACHE_PREFIX}11`;
+const CACHE_NAME = `${CACHE_PREFIX}12`;
 const SHELL = [
   "./",
   "./index.html",
