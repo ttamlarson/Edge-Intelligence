@@ -56,3 +56,6 @@ button{touch-action:manipulation}
   .metric-grid{gap:7px}
   .metric-card{padding:11px}
 }
+
+/* CoinSpot account connection state */
+#coinSpotAccountStatus.connected{color:var(--success,#a8ef62)}
