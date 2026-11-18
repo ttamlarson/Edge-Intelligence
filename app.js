@@ -77,7 +77,6 @@ async function loadCoinSpotMarkets(){
  }finally{if(button){button.disabled=false;button.textContent="Refresh market data"}}
 }
 function coinSpotBalanceDisplay(value){const n=Number(value);if(!Number.isFinite(n))return "Unavailable";const clean=Math.abs(n)<1e-8?0:Math.max(0,n);return clean.toFixed(8).replace(/\.?0+$/,"")||"0";}
-function coinSpotBalanceDisplay(value){const n=Number(value);if(!Number.isFinite(n))return "Unavailable";const clean=Math.abs(n)<1e-8?0:Math.max(0,n);return clean.toFixed(8).replace(/\\.?0+$/,"")||"0";}
 function renderCoinSpotPortfolio(balances){
  const rows=balances.map(x=>({...x,audValue:Number(x.audValue)})).filter(x=>Number.isFinite(x.audValue)&&x.audValue>0).sort((a,b)=>b.audValue-a.audValue);
  const total=rows.reduce((sum,x)=>sum+x.audValue,0), summary=$("coinSpotPortfolioSummary");
