@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#090d16">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EDGE">
+  <link rel="apple-touch-icon" href="./icon-192.png">
   <meta name="description" content="Australian-first market research and official economic indicators. Research and simulations only; no trading.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
@@ -175,6 +179,18 @@
       <footer>EDGE INTELLIGENCE <span>Independent research · Simulated trading only</span></footer>
     </main>
   </div>
+  <nav class="mobile-nav" aria-label="Main navigation">
+    <button class="mobile-nav-item active" data-page="overview" aria-label="Overview"><span>◫</span><small>Home</small></button>
+    <button class="mobile-nav-item" data-page="australia" aria-label="Australia dashboard"><span>AU</span><small>Australia</small></button>
+    <button class="mobile-nav-item" data-page="asx-autopilot" aria-label="ASX Autopilot"><span>↗</span><small>ASX</small></button>
+    <button class="mobile-nav-item" data-page="crypto" aria-label="CoinSpot Crypto"><span>₿</span><small>Crypto</small></button>
+    <button class="mobile-nav-item" data-page="analyzer" aria-label="AI research"><span>✳</span><small>Research</small></button>
+    <button class="mobile-nav-item" data-page="discover" aria-label="Discover markets"><span>⌕</span><small>Discover</small></button>
+    <button class="mobile-nav-item" data-page="watchlist" aria-label="Watchlist"><span>☆</span><small>Saved</small></button>
+    <button class="mobile-nav-item" data-page="paper" aria-label="Paper trading"><span>▤</span><small>Paper</small></button>
+    <button class="mobile-nav-item" data-page="alerts" aria-label="Alerts"><span>♢</span><small>Alerts</small></button>
+    <button class="mobile-nav-item" data-page="settings" aria-label="Settings"><span>⚙</span><small>Settings</small></button>
+  </nav>
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="./app.js"></script>
 </body>
