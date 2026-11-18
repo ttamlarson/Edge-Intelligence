@@ -62,10 +62,14 @@ jobs:
         run: |
           node --input-type=commonjs <<'NODE'
           const fs = require('node:fs');
-          const required = ['EDGE_KV_NAMESPACE_ID', 'CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD'];
+          const required = ['EDGE_KV_NAMESPACE_ID', 'CF_ACCESS_TEAM_DOMAIN'];
           for (const key of required) {
             if (!process.env[key]) throw new Error('Missing GitHub Actions secret/configuration: ' + key);
           }
+          // First deployment bootstrap: use a deliberately non-matching audience until
+          // the Worker is deployed and Cloudflare Access can be enabled from its dashboard.
+          // Protected API requests remain inaccessible until the real AUD is added and redeployed.
+          const accessAud = process.env.CF_ACCESS_AUD || 'EDGE_ACCESS_BOOTSTRAP_PENDING';
           if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/i.test(process.env.CF_ACCESS_TEAM_DOMAIN)) {
             throw new Error('CF_ACCESS_TEAM_DOMAIN must be your Cloudflare Access team domain.');
           }
@@ -73,7 +77,7 @@ jobs:
           const production = source.split('[env.staging]')[0]
             .replace('https://REPLACE_WITH_YOUR_PAGES_DOMAIN', 'https://ttamlarson.github.io')
             .replace('REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com', process.env.CF_ACCESS_TEAM_DOMAIN)
-            .replace('REPLACE_WITH_ACCESS_APPLICATION_AUD', process.env.CF_ACCESS_AUD)
+            .replace('REPLACE_WITH_ACCESS_APPLICATION_AUD', accessAud)
             .replace('REPLACE_WITH_YOUR_KV_NAMESPACE_ID', process.env.EDGE_KV_NAMESPACE_ID);
           if (/REPLACE_WITH/.test(production)) throw new Error('A production configuration placeholder remains.');
           fs.writeFileSync('wrangler.deploy.toml', production);
