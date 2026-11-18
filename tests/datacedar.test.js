@@ -66,6 +66,6 @@ test("DataCedar rejects missing key, unexpected redirects, invalid JSON and prov
 });
 
 test("DataCedar accepts only valid date windows within one year", async () => {
-  await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", from: "2026-02-01", to: "2026-11-18", now: new Date("2026-11-18T00:00:00Z"), fetchImpl: async () => new Response(JSON.stringify({ data: {} })) }), /maximum 366-day/);
+  await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", from: "2025-11-01", to: "2026-11-18", now: new Date("2026-11-18T00:00:00Z"), fetchImpl: async () => new Response(JSON.stringify({ data: {} })) }), /maximum 366-day/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", from: "2026-02-30", now: new Date("2026-11-18T00:00:00Z"), fetchImpl: async () => new Response(JSON.stringify({ data: {} })) }), /valid YYYY-MM-DD/);
 });
