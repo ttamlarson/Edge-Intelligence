@@ -385,7 +385,7 @@ async function handle(request, env, ctx) {
     const saveAccount = async account => { await env.EDGE_KV.put(storageKey, JSON.stringify(account)); return account; };
     if (requestUrl.pathname === "/api/crypto/coinspot/paper/account" && request.method === "GET") {
       await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-paper-account");
-      const account = await loadAccount();
+      let account = await loadAccount();
       let marked;
       if(account.openPosition){
         const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
