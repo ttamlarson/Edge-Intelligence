@@ -27,9 +27,28 @@ test("paper position cannot be opened from an unvalidated or executable candidat
   assert.equal(openPaperPosition(createPaperPortfolio(), { status: "PAPER_CANDIDATE", executable: true, simulatedOnly: true }).accepted, false);
 });
 test("paper portfolio preserves reserve and limits concurrent positions", () => {
+  const zeroCosts = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
+  const makeCandidate = (symbol, cashAud, openPositions) => evaluateAsxSwingSetup({
+    symbol, bars: makeBars(), source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: new Date(now).toISOString(), equityAud: 500, cashAud, openPositions, now, costs: zeroCosts
+  });
   const portfolio = createPaperPortfolio();
-  const candidate = { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, symbol: "TEST", shares: 10, entryReference: 10, stopPrice: 9, targetPrice: 12, notionalAud: 100, estimatedEntryCostsAud: 5.6 };
-  Object.assign(candidate, { source: "Synthetic test fixture only", currency: "AUD", observedAt: new Date(now).toISOString() });
-  const result = openPaperPosition(portfolio, candidate, { id: "p1", openedAt: new Date(now).toISOString(), now });
-  assert.equal(result.accepted, true); assert.equal(result.portfolio.cashAud, 394.4); assert.equal(result.portfolio.positions.length, 1); assert.equal(result.portfolio.liveTradingEnabled, false);
+  const candidate = makeCandidate("TEST", portfolio.cashAud, 0);
+  assert.equal(candidate.status, "PAPER_CANDIDATE", candidate.reason);
+  const first = openPaperPosition(portfolio, candidate, { id: "p1", openedAt: new Date(now).toISOString(), now });
+  assert.equal(first.accepted, true, first.reason);
+  assert.ok(first.portfolio.cashAud >= 100);
+  assert.equal(first.portfolio.positions.length, 1);
+  assert.equal(first.portfolio.liveTradingEnabled, false);
+
+  const secondCandidate = makeCandidate("TEST2", first.portfolio.cashAud, 1);
+  const second = openPaperPosition(first.portfolio, secondCandidate, { id: "p2", openedAt: new Date(now).toISOString(), now });
+  assert.equal(second.accepted, true, second.reason);
+  assert.equal(second.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 2);
+  assert.ok(second.portfolio.cashAud >= 100);
+
+  const thirdCandidate = makeCandidate("TEST3", second.portfolio.cashAud, 0);
+  const third = openPaperPosition(second.portfolio, thirdCandidate, { id: "p3", openedAt: new Date(now).toISOString(), now });
+  assert.equal(third.accepted, false);
+  assert.match(third.reason, /Position limit/);
 });
