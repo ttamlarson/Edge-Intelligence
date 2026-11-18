@@ -73,8 +73,8 @@ jobs:
             if (!namespace || !/^[a-f0-9]{32}$/i.test(namespace.id || '')) {
               throw new Error('Cloudflare did not return a valid EDGE_KV namespace ID.');
             }
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'namespace_id=' + namespace.id + '\\n');
-            process.stdout.write('EDGE_KV namespace ready: ' + namespace.id + '\\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'namespace_id=' + namespace.id + '\n');
+            process.stdout.write('EDGE_KV namespace ready: ' + namespace.id + '\n');
           })().catch(error => { console.error(error.message); process.exit(1); });
           NODE
 
