@@ -10,6 +10,7 @@ on:
       - "au-sources.js"
       - "datacedar.js"
       - "crypto-engine.js"
+      - "coinspot.js"
       - "wrangler.toml"
       - "package.json"
       - ".github/workflows/worker-deploy.yml"
