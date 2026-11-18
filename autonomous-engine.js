@@ -184,23 +184,37 @@ export function parseAsxDailyCsv(csvText) {
 
 export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt = new Date().toISOString(), costs = {} } = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) return { accepted: false, reason: "Simulation-only portfolio required." };
-  const index = portfolio.positions.findIndex(p => p.id === positionId && p.status === "OPEN_PAPER");
+  if (!Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) || !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
+    return { accepted: false, reason: "Paper portfolio cash or trade history is invalid." };
+  }
+  const index = portfolio.positions.findIndex(p => p?.id === positionId && p.status === "OPEN_PAPER");
   if (index < 0) return { accepted: false, reason: "Open paper position not found." };
   const position = portfolio.positions[index], price = num(exitPrice);
+  const openedTimestamp = Date.parse(position.openedAt || ""), closedTimestamp = Date.parse(closedAt || "");
+  if (!Number.isInteger(position.shares) || position.shares < 1 || !Number.isFinite(position.debitAud) || position.debitAud < 0 ||
+      !Number.isFinite(openedTimestamp) || !Number.isFinite(closedTimestamp) || closedTimestamp < openedTimestamp) {
+    return { accepted: false, reason: "Open position or close timestamp is invalid." };
+  }
   if (price === null || price <= 0) return { accepted: false, reason: "Exit price must be positive." };
   const exitValue = position.shares * price, exitCost = estimateAsxSideCost(exitValue, costs);
-  if (!exitCost) return { accepted: false, reason: "Exit costs could not be calculated." };
+  if (!Number.isFinite(exitValue) || !exitCost) return { accepted: false, reason: "Exit costs could not be calculated." };
   const proceeds = round2(exitValue - exitCost.totalAud);
   const pnl = round2(proceeds - position.debitAud);
+  const nextCash = round2(portfolio.cashAud + proceeds);
+  if (!Number.isFinite(proceeds) || proceeds < 0 || !Number.isFinite(nextCash)) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
   const closed = { ...position, status: "CLOSED_PAPER", exitPrice: round2(price), exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
   const positions = portfolio.positions.slice(); positions[index] = closed;
-  return { accepted: true, portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud + proceeds), positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
+  return { accepted: true, portfolio: { ...portfolio, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
 }
 
 export function markPaperPosition(position, markPrice, costs = {}) {
   const price = num(markPrice);
-  if (!position || position.status !== "OPEN_PAPER" || price === null || price <= 0) return null;
+  if (!position || position.status !== "OPEN_PAPER" || price === null || price <= 0 ||
+      !Number.isInteger(position.shares) || position.shares < 1 ||
+      !Number.isFinite(position.debitAud) || position.debitAud < 0) return null;
   const value = position.shares * price, sellCost = estimateAsxSideCost(value, costs);
-  if (!sellCost) return null;
-  return { markPrice: round2(price), marketValueAud: round2(value), estimatedExitCostsAud: sellCost.totalAud, unrealizedProfitLossAud: round2(value - sellCost.totalAud - position.debitAud) };
+  if (!Number.isFinite(value) || !sellCost) return null;
+  const unrealizedProfitLossAud = round2(value - sellCost.totalAud - position.debitAud);
+  if (!Number.isFinite(unrealizedProfitLossAud)) return null;
+  return { markPrice: round2(price), marketValueAud: round2(value), estimatedExitCostsAud: sellCost.totalAud, unrealizedProfitLossAud };
 }
