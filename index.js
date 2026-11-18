@@ -166,7 +166,17 @@ function coinSpotDiagnostic(status, message) {
   return `CoinSpot rejected the authenticated request (HTTP ${status || "unknown"}). Check that the API key is active and email-confirmed, and that the key and secret match.`;
 }
 
-async function coinSpotReadOnly(env, path, extra = {}) {
+let coinSpotRequestQueue = Promise.resolve();
+
+function coinSpotReadOnly(env, path, extra = {}) {
+  // CoinSpot requires strictly increasing nonces. Serialize requests using the
+  // same API key so parallel balance/order calls cannot arrive out of order.
+  const run = coinSpotRequestQueue.then(() => coinSpotReadOnlyNow(env, path, extra));
+  coinSpotRequestQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function coinSpotReadOnlyNow(env, path, extra = {}) {
   const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
   if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
   if(!/^\\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
