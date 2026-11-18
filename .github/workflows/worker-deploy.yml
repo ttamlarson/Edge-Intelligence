@@ -100,10 +100,10 @@ jobs:
           for (const key of required) {
             if (!process.env[key]) throw new Error('Missing GitHub Actions secret/configuration: ' + key);
           }
-          // First deployment bootstrap: use a deliberately non-matching audience until
-          // the Worker is deployed and Cloudflare Access can be enabled from its dashboard.
-          // Protected API requests remain inaccessible until the real AUD is added and redeployed.
-          const accessAud = process.env.CF_ACCESS_AUD || 'EDGE_ACCESS_BOOTSTRAP_PENDING';
+          const accessAud = String(process.env.CF_ACCESS_AUD || '').trim();
+          if (!accessAud || accessAud === 'EDGE_ACCESS_BOOTSTRAP_PENDING' || accessAud.length > 256) {
+            throw new Error('CF_ACCESS_AUD is missing or invalid. Configure the Cloudflare Access application first, then save its AUD as the GitHub Actions secret CF_ACCESS_AUD.');
+          }
           if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/i.test(process.env.CF_ACCESS_TEAM_DOMAIN)) {
             throw new Error('CF_ACCESS_TEAM_DOMAIN must be your Cloudflare Access team domain.');
           }
