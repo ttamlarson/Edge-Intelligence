@@ -37,6 +37,14 @@ period = 60
 binding = "EDGE_KV"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
 
+[[durable_objects.bindings]]
+name = "COINSPOT_EXECUTION_COORDINATOR"
+class_name = "CoinSpotExecutionCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CoinSpotExecutionCoordinator"]
+
 [triggers]
 crons = ["*/15 * * * *"]
 
