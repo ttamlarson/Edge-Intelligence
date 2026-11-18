@@ -179,7 +179,7 @@ function coinSpotReadOnly(env, path, extra = {}) {
 async function coinSpotReadOnlyNow(env, path, extra = {}) {
   const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
   if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
-  if(!/^\\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
+  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
   // Add a random sub-millisecond component to reduce nonce collisions across isolates.
   const random = new Uint32Array(1); crypto.getRandomValues(random);
   const nonce=Math.max(Date.now()*1000+(random[0]%1000),lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
