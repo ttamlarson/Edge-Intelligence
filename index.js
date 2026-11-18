@@ -478,6 +478,28 @@ async function handle(request, env, ctx) {
     }
     throw new HttpError(404,"Paper trading route not found.");
   }
+  if (requestUrl.pathname.startsWith("/api/crypto/coinspot/execution/")) {
+    if (!env.COINSPOT_EXECUTION_COORDINATOR || !env.EDGE_COORDINATOR_TOKEN) throw new HttpError(503, "CoinSpot execution coordinator is not configured.");
+    const routes = new Map([
+      ["/api/crypto/coinspot/execution/nonce", "/nonce"],
+      ["/api/crypto/coinspot/execution/idempotency/reserve", "/idempotency/reserve"],
+      ["/api/crypto/coinspot/execution/idempotency/complete", "/idempotency/complete"]
+    ]);
+    const internalPath = routes.get(requestUrl.pathname);
+    if (!internalPath || request.method !== "POST") throw new HttpError(404, "Execution coordination route not found.");
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "coinspot-execution-coordination");
+    const id = env.COINSPOT_EXECUTION_COORDINATOR.idFromName(await userKey("coinspot-execution", principal.sub));
+    const stub = env.COINSPOT_EXECUTION_COORDINATOR.get(id);
+    const body = await readJson(request, 16 * 1024);
+    const result = await stub.fetch("https://coordinator.internal" + internalPath, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-edge-coordinator-token": env.EDGE_COORDINATOR_TOKEN },
+      body: JSON.stringify(body)
+    });
+    const payload = await result.json().catch(() => ({ error: "Coordinator returned invalid JSON." }));
+    if (!result.ok) throw new HttpError(result.status, payload.error || "Coordinator request failed.");
+    return reply(payload, result.status);
+  }
   if (requestUrl.pathname === "/api/coinspot/account" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-readonly-account");
     const [balances,orders]=await Promise.all([coinSpotReadOnly(env,"/my/balances"),coinSpotReadOnly(env,"/my/orders/market/open",{markettype:"AUD"})]);
