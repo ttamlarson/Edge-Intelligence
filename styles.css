@@ -59,3 +59,15 @@ button{touch-action:manipulation}
 
 /* CoinSpot account connection state */
 #coinSpotAccountStatus.connected{color:var(--success,#a8ef62)}
+
+/* CoinSpot portfolio intelligence */
+.portfolio-summary{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;padding:18px;border:1px solid var(--border,rgba(255,255,255,.12));border-radius:14px;background:var(--panel,rgba(255,255,255,.03));margin:12px 0 16px}
+.portfolio-total small,.portfolio-subheading{display:block;font-size:.68rem;letter-spacing:.11em;font-weight:700;opacity:.7}
+.portfolio-total strong{display:block;font-size:clamp(1.7rem,5vw,2.35rem);line-height:1.2;margin:7px 0}
+.portfolio-total p,.portfolio-disclaimer{font-size:.78rem;opacity:.68;margin:4px 0 0}
+.portfolio-subheading{margin-bottom:12px}
+.allocation-row{margin:10px 0}
+.allocation-label{display:flex;justify-content:space-between;gap:12px;font-size:.82rem;margin-bottom:6px}
+.allocation-label span{opacity:.75;text-align:right}
+.allocation-track{height:7px;border-radius:99px;background:rgba(127,127,127,.18);overflow:hidden}
+.allocation-track span{display:block;height:100%;border-radius:99px;background:var(--accent,#72d6a0);min-width:2px}
