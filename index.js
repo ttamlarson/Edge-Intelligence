@@ -2,6 +2,7 @@ import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } 
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
+import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -376,6 +377,36 @@ async function handle(request, env, ctx) {
       throw new HttpError(502, "DataCedar request could not be validated. Retry later or check provider access.");
     }
     return reply(data);
+  }
+  if (requestUrl.pathname.startsWith("/api/crypto/coinspot/paper")) {
+    if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
+    const storageKey = await userKey("crypto-paper", principal.sub);
+    const loadAccount = async () => normalizePaperAccount(JSON.parse(await env.EDGE_KV.get(storageKey) || "null") || createCoinSpotPaperAccount(), isoNow());
+    const saveAccount = async account => { await env.EDGE_KV.put(storageKey, JSON.stringify(account)); return account; };
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/account" && request.method === "GET") {
+      await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-paper-account");
+      const account = await loadAccount();
+      const marked = account.openPosition ? await (async()=>{const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");return markCoinSpotPaperAccount(account,{bid:Number(q.prices?.bid)});})() : markCoinSpotPaperAccount(account,{bid:1});
+      return reply(marked);
+    }
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/open" && request.method === "POST") {
+      await routeLimit(env.WRITE_LIMITER, principal.sub, "crypto-paper-open");
+      const body=await readJson(request),coin=String(body.coin||"").toUpperCase();
+      if(!["BTC","ETH"].includes(coin))throw new HttpError(400,"Only BTC and ETH AUD paper markets are enabled.");
+      const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+      if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+      let account;try{account=openCoinSpotPaperPosition(await loadAccount(),{coin,ask:Number(q.prices?.ask)});}catch(error){throw new HttpError(409,error.message);}
+      return reply(await saveAccount(account),201);
+    }
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/close" && request.method === "POST") {
+      await routeLimit(env.WRITE_LIMITER, principal.sub, "crypto-paper-close");
+      const account=await loadAccount();if(!account.openPosition)throw new HttpError(409,"There is no open paper position.");
+      const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+      if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+      let next;try{next=closeCoinSpotPaperPosition(account,{bid:Number(q.prices?.bid)});}catch(error){throw new HttpError(409,error.message);}
+      return reply(await saveAccount(next));
+    }
+    throw new HttpError(404,"Paper trading route not found.");
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/market" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-coinspot-market");
