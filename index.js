@@ -157,18 +157,40 @@ async function readLimitedText(response, maxBytes, makeTooLarge) {
   return new TextDecoder().decode(bytes);
 }
 
+function coinSpotDiagnostic(status, message) {
+  const detail = String(message || "").toLowerCase();
+  if (/nonce/.test(detail)) return "CoinSpot rejected the request nonce. EDGE generated a fresh nonce; retry once. If this persists, another client may be sharing this API key.";
+  if (/sign|hmac|signature/.test(detail)) return "CoinSpot rejected the request signature. Check that the API key and secret are the matching pair and contain no extra characters.";
+  if (/key|auth|unauthori[sz]ed|credential/.test(detail) || status === 401) return "CoinSpot rejected the API key. Confirm it is active, email-confirmed, Read Only, and paired with its matching secret.";
+  if (/permission|access|forbidden/.test(detail) || status === 403) return "CoinSpot denied access to this Read Only endpoint. Check the API key permissions in CoinSpot.";
+  return `CoinSpot rejected the authenticated request (HTTP ${status || "unknown"}). Check that the API key is active and email-confirmed, and that the key and secret match.`;
+}
+
 async function coinSpotReadOnly(env, path, extra = {}) {
   const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
   if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
-  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
-  const nonce=Math.max(Date.now()*1000,lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
+  if(!/^\\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
+  // Add a random sub-millisecond component to reduce nonce collisions across isolates.
+  const random = new Uint32Array(1); crypto.getRandomValues(random);
+  const nonce=Math.max(Date.now()*1000+(random[0]%1000),lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
   const body=JSON.stringify({...extra,nonce});
   const cryptoKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-512"},false,["sign"]);
   const signature=await crypto.subtle.sign("HMAC",cryptoKey,new TextEncoder().encode(body));
   const sign=[...new Uint8Array(signature)].map(b=>b.toString(16).padStart(2,"0")).join("");
-  const response=await providerJson("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body},512*1024);
-  if(response?.status!=="ok")throw new HttpError(502,"CoinSpot read-only API rejected the request.");
-  return response;
+  let response;
+  try {
+    response=await fetch("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body,signal:AbortSignal.timeout(10_000)});
+  } catch {
+    throw new HttpError(502,"Could not reach CoinSpot. Retry the read-only account request.");
+  }
+  if(response.url && new URL(response.url).hostname!=="www.coinspot.com.au") throw new HttpError(502,"CoinSpot redirected to an unexpected host.");
+  const length=Number(response.headers.get("Content-Length"));
+  if(Number.isFinite(length)&&length>512*1024) throw new HttpError(502,"CoinSpot response exceeded the size limit.");
+  const raw=await readLimitedText(response,512*1024,()=>new HttpError(502,"CoinSpot response exceeded the size limit."));
+  let payload;
+  try { payload=JSON.parse(raw); } catch { throw new HttpError(502,"CoinSpot returned an invalid response."); }
+  if(!response.ok || payload?.status!=="ok") throw new HttpError(502,coinSpotDiagnostic(response.status,payload?.message));
+  return payload;
 }
 
 async function prediction(env, path) {
