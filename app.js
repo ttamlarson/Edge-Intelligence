@@ -1,6 +1,7 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
 import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
+import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
 import { parseBinanceKlineCsv } from "./crypto-csv.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
@@ -58,7 +59,8 @@ async function api(path,opts={}){if(!state.backend)throw new Error("No backend c
 async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
  const parsed = parseBinanceKlineCsv(await file.text(), { symbol, quoteAsset, exchange: "Binance via CryptoFetch" });
  const result = backtestCoinSpotTrend({ candles: parsed.candles, quoteCurrency: quoteAsset });
- return { ...parsed, result };
+ const adaptive = backtestAdaptiveRegime({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
+ return { ...parsed, result, adaptive };
 }
 function renderCryptoBacktest(label, imported) {
  const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
@@ -71,10 +73,12 @@ function renderCryptoBacktest(label, imported) {
   ["IN-SAMPLE NET P&L",moneyQ(r.inSample.netPnlQuote),r.inSample.trades+" closed trades"],
   ["ASSESSMENT",r.assessment,"Research only · no live orders"]
  ];
- const sample=r.sample, o=r.outOfSample, ins=r.inSample;;
+ const sample=r.sample, o=r.outOfSample, ins=r.inSample;
+ const ar=imported.adaptive, ao=ar.outOfSample, ai=ar.inSample;
+ const adaptiveCards=[["OOS NET P&L",moneyQ(ao.netPnlQuote),ao.trades+" closed trades"],["OOS WIN RATE",ao.winRatePct+"%",ao.wins+" winners"],["PROFIT FACTOR",ao.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",ao.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(ai.netPnlQuote),ai.trades+" trades"],["ASSESSMENT",ar.assessment,"Research only · no live orders"]];
  const skipLabels={positionOpen:"Position already open",dailyLossLimit:"Daily loss limit",trendFilter:"Trend filter",rsiFilter:"RSI filter",volatilityFilter:"ATR / volatility filter",insufficientCapitalOrRisk:"Capital or risk sizing"};
  const skipRows=Object.entries(o.skipped||{}).map(([key,value])=>`<tr><td>${esc(skipLabels[key]||key)}</td><td>${value}</td></tr>`).join("");
- return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><p class="muted tiny">Data provenance: CryptoFetch export, Binance ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
+ return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><p class="muted tiny">Data provenance: CryptoFetch export, Binance ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
 }
 $("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
  const files=[["BTCUSDT","BTC","USDT",$("btcHistoryFile")?.files?.[0]],["ETHUSDT","ETH","USDT",$("ethHistoryFile")?.files?.[0]]].filter(x=>x[3]);
