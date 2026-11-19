@@ -25,6 +25,7 @@ test("PWA manifest, HTML and service-worker shell use existing icon and module p
   assert.match(sw, /"\.\/autonomous-engine\.js"/);
   assert.match(sw, /"\.\/coinspot-strategy\.js"/);
   assert.match(sw, /"\.\/adaptive-regime-strategy\.js"/);
+  assert.match(sw, /"\.\/adaptive-regime-strategy\.js"/);
   assert.match(sw, /"\.\/crypto-csv\.js"/);
   assert.equal(await exists("crypto-csv.js"), true);
   assert.equal(await exists("autonomous-engine.js"), true);
