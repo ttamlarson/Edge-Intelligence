@@ -117,9 +117,9 @@ Updated after local implementation and automated verification on `edge-productio
 
 | Task | Status | Evidence / remaining boundary |
 |---|---|---|
-| Preserve the existing Cloudflare Pages Git integration | Complete | Cloudflare's GitHub App created a Pages preview check for PR #12, confirming the repository is already connected to the `edge-intelligence` Pages project. |
+| Preserve the existing Cloudflare Pages Git integration | Complete | Cloudflare's GitHub App successfully deployed PR #12 to a branch preview at `https://edge-production-remediation-dwko.edge-intelligence-486.pages.dev`, confirming the repository is connected to the `edge-intelligence` Pages project. The Pages domain suffix is `edge-intelligence-486.pages.dev`. |
 | Ensure the repository validates the static frontend before merge | Complete | Existing `ci.yml` runs tests, syntax checks and `npm run build:pages`; CI passed on the initial PR commit. |
-| Keep the existing Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and sets its allowed frontend origin to `https://edge-intelligence.pages.dev`. Worker redeploy occurs separately after merge. |
+| Keep the existing Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and sets its allowed frontend origin to `https://edge-intelligence-486.pages.dev`. Worker redeploy occurs separately after merge. |
 | Remove conflicting GitHub Pages / Direct Upload publishing workflow | Implemented on feature branch | Pages is already Git-integrated. Do not switch it to Wrangler Direct Upload; Cloudflare's GitHub App performs preview and production deployments. |
 | Verify production Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and successful production deployment. |
 | Cloudflare API token Pages permission | Not required for current deployment path | Pages deployment is authorized by the Cloudflare GitHub App. Existing `CLOUDFLARE_API_TOKEN` remains dedicated to the Worker deployment workflow. |
