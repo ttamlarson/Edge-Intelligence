@@ -118,6 +118,20 @@
           <article class="metric-card"><span>MAX DAILY LOSS</span><strong>$3.00</strong><small>Paper risk limit</small></article>
           <article class="metric-card"><span>LIVE EXECUTION</span><strong>DISABLED</strong><small>No orders can be submitted</small></article>
         </div>
+        <div class="panel" id="cryptoAutoPaperPanel">
+          <div class="panel-head"><div><h3>Automated crypto paper trader</h3><p>10 USDT markets · 1-hour trend signals · server scan every 15 minutes · no exchange credentials or orders</p></div><button class="secondary-btn" id="cryptoAutoPaperRefresh">Run scan now</button></div>
+          <div class="notice"><span>ⓘ</span><div><b>SIMULATION ONLY · SHARED PAPER LEDGER</b><p>Virtual starting capital: 100 USDT. Risk budget 0.5% per trade, maximum 25% allocation, daily loss stop 2% of starting capital. Binance public spot prices and completed hourly candles; scheduled monitoring is not tick-by-tick and may miss fast price moves. No live trading capability is connected.</p></div></div>
+          <div class="metric-grid">
+            <article class="metric-card"><span>VIRTUAL EQUITY</span><strong id="autoPaperEquity">100.00 USDT</strong><small>Marked to latest quote</small></article>
+            <article class="metric-card"><span>AVAILABLE CASH</span><strong id="autoPaperCash">100.00 USDT</strong><small>After simulated entries</small></article>
+            <article class="metric-card"><span>REALIZED P&L</span><strong id="autoPaperRealized">0.00 USDT</strong><small>After estimated costs</small></article>
+            <article class="metric-card"><span>MAX DRAWDOWN</span><strong id="autoPaperDrawdown">0.00%</strong><small>Since bot inception</small></article>
+          </div>
+          <div class="result-section"><h4 id="autoPaperStatus">WAITING FOR FIRST SCHEDULED SCAN</h4><p id="autoPaperLastScan">The Worker checks markets on its 15-minute schedule.</p><div id="autoPaperPosition" class="market-list"><div class="empty">No automated paper position.</div></div></div>
+          <div class="result-section"><h4>MARKET SCANNER · 10 USDT PAIRS</h4><div id="autoPaperMarkets" class="integration-grid"><div class="empty">Waiting for the first scheduled market scan.</div></div></div>
+          <div class="result-section"><h4>RECENT AUTOMATED PAPER TRADES</h4><div id="autoPaperHistory" class="market-list"><div class="empty">No completed automated trades yet.</div></div></div>
+          <p class="muted tiny">Strategy: EMA 20/50/200 alignment, RSI 50–68, rising MACD momentum, ADX strength filter and ATR-based risk levels. Entry/exit costs are modelled; historical and paper performance do not guarantee future returns. The ledger is shared across authenticated EDGE users.</p>
+        </div>
         <div class="section-heading"><div><h2>CoinSpot AUD markets</h2><p id="cryptoStatus">Not yet refreshed · prices are not loaded</p></div></div>
         <div id="cryptoMarketRows" class="integration-grid"><div class="empty">Select Refresh market data to load BTC/AUD and ETH/AUD.</div></div>
         <div class="section-heading"><div><h2>CoinSpot account connection</h2><p>Optional private read-only connection. No trading or withdrawal permissions are required or used.</p></div><button class="secondary-btn" id="coinSpotAccountRefresh">Check CoinSpot account</button></div>
