@@ -10,3 +10,15 @@ test("trailing stop closes paper position and records net fees",()=>{const now="
 test("daily loss circuit breaker prevents a new entry",()=>{const now="2026-11-19T08:00:00.000Z",a=createAutoPaperAccount(now);a.closedTrades=[{closedAt:now,pnl:-3}];a.openPosition=null;const s={signal:true,timestamp:bars.at(-1).timestamp,atr:2,adx:30};const n=processAutoPaperSignals(a,{signals:{BTCUSDT:s},prices:{BTCUSDT:175},now});assert.equal(n.openPosition,null);});
 
 test("marks open-position equity net of exit fees, spread and slippage",()=>{const now="2026-11-19T08:00:00.000Z",s={signal:true,timestamp:bars.at(-1).timestamp,atr:2,adx:30};const a=processAutoPaperSignals(createAutoPaperAccount(now),{signals:{BTCUSDT:s},prices:{BTCUSDT:175},now});const p=a.openPosition;const marked=markAutoPaperAccount(a,{prices:{BTCUSDT:175},now});assert.ok(marked.equity<a.cash+p.quantity*175);});
+
+test("reports every failed entry gate with observed values and requirements",()=>{
+ const s=evaluateAutoSignal(bars);
+ assert.ok(s.checks && s.failedChecks);
+ for(const key of ["trend","rsi","macd","adx","atr"]){assert.equal(typeof s.checks[key].passed,"boolean");assert.ok("value" in s.checks[key]);assert.ok(s.checks[key].required);}
+ assert.deepEqual(s.failedChecks,Object.entries(s.checks).filter(([,v])=>!v.passed).map(([k])=>k.toUpperCase()));
+ assert.equal(s.signal,s.failedChecks.length===0);
+});
+test("warmup diagnostic explains the missing candle count",()=>{
+ const s=evaluateAutoSignal(bars.slice(0,100));
+ assert.equal(s.checks.warmup.passed,false);assert.equal(s.checks.warmup.value,100);assert.equal(s.checks.warmup.required,220);
+});
