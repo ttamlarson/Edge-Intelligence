@@ -77,7 +77,7 @@ async function fetchBinanceHourlyHistory(symbol, days=365) {
     if(!Number.isFinite(last)||last<cursor)throw new Error("unordered candle response");
     cursor=last+3600000;
     if(batch.length<1000)break;
-    if(collected.length>9000)throw new Error("history exceeded 9,000 candles");
+    if(collected.length>50000)throw new Error("history exceeded 50,000 candles (about 5.7 years)");
    }
    if(collected.length<300)throw new Error("only "+collected.length+" candles returned");
    rows=collected;sourceHost=host;break;
@@ -126,7 +126,7 @@ function renderCryptoBacktest(label, imported) {
 $("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults"),button=$("fetchCryptoHistoryBtn");
  let symbols; try { symbols=parseBinanceUsdtSymbols($("cryptoHistorySymbols")?.value||""); } catch(error) { status.textContent=error.message; return; }
- const days=Math.max(90,Math.min(365,Number($("cryptoHistoryDays")?.value)||365));
+ const days=Math.max(90,Math.min(1825,Number($("cryptoHistoryDays")?.value)||1095));
  
  button.disabled=true;button.textContent="Fetching history…";status.textContent="Downloading "+days+" days of hourly Binance data for "+symbols.join(", ")+". This may take a minute.";out.innerHTML="";
  try{
@@ -134,7 +134,7 @@ $("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
   out.innerHTML=results.map(x=>renderCryptoBacktest(x.symbol,x.imported)).join("");
   status.textContent="Fetched and tested "+results.map(x=>x.symbol).join(", ")+". "+days+" requested days; each market has an independent chronological 70/30 split. Verify candle counts and gaps in each result."; 
  }catch(error){status.textContent="Binance history fetch/test failed: "+error.message+" You can still import CSV files below."; }
- finally{button.disabled=false;button.textContent="Fetch 12 months from Binance";}
+ finally{button.disabled=false;button.textContent="Fetch up to 5 years from Binance";}
 });
 $("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
  const selected=[...($("cryptoHistoryFiles")?.files||[])];
