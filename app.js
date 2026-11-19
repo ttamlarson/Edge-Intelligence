@@ -1,6 +1,7 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
 import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
+import { parseBinanceKlineCsv } from "./crypto-csv.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -54,8 +55,37 @@ renderPaper();
 }
 function renderPaper(){const open=state.positions.filter(p=>!p.closed);$("paperBalance").textContent=money(state.balance,"AUD");$("paperPositions").textContent=open.length;$("paperRealized").textContent=money(state.realized,"AUD");$("paperReturn").textContent=((state.realized/10000)*100).toFixed(2)+"%";$("positionList").innerHTML=state.positions.length?state.positions.map((p,i)=>`<div class="position-card"><div><b>${esc(p.question)}</b><div class="market-meta">${esc(p.side)} | Entry ${Number(p.price).toFixed(1)}% YES | Stake ${esc(money(p.stake,"AUD"))} virtual AUD ${p.closed?"| CLOSED":"| SIMULATED"}${p.resolution?" | Resolved "+(p.resolution===1?"YES":"NO"):""}</div></div>${p.closed?"":`<div>${p.resolution?"":`<button class="small-btn" data-paper-outcome="1" data-paper-id="${i}">Resolve YES (simulated)</button> <button class="small-btn" data-paper-outcome="0" data-paper-id="${i}">Resolve NO (simulated)</button>`} <button class="small-btn" data-close="${i}">Close at entry</button></div>`}</div>`).join(""):`<div class="empty">No simulated positions yet.</div>`;document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.close)];if(!p||p.closed)return;p.closed=true;state.balance+=Number(p.stake)||0;save();render();toast("Closed at entry in the paper simulation; no profit or loss.")});document.querySelectorAll("[data-paper-outcome]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.paperId)];if(!p||p.closed)return;const result=paperSettlement({stake:Number(p.stake),side:p.side,entryProbability:Number(p.price),outcome:Number(b.dataset.paperOutcome)});if(!result){toast("Position data is invalid; it was not settled.");return}p.closed=true;p.resolution=Number(b.dataset.paperOutcome);p.profitLoss=result.profitLoss;p.payout=result.payout;state.balance+=result.payout;state.realized+=result.profitLoss;save();render();toast("Paper position resolved in a simulation only.")})}
 async function api(path,opts={}){if(!state.backend)throw new Error("No backend configured. Add your Worker URL in Settings.");const base=normalizeBackendUrl(state.backend);let r;try{r=await fetch(base+path,{credentials:"include",...opts,headers:{...((opts.method||"GET").toUpperCase()==="GET"?{}:{"Content-Type":"application/json"}),...(opts.headers||{})}})}catch(error){const detail=error?.message||"Network request blocked";throw new Error("Could not reach the Cloudflare Worker. This is a browser/network failure, not a CoinSpot credential rejection. Check the saved Worker URL, Cloudflare Access login/cookie, CORS origin and deployment. ("+detail+")")}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Backend request failed ("+r.status+")");return data}
-function parseCoinSpotHistoryCsv(raw){const lines=raw.trim().split(/\r?\n/);if(lines.length<301)throw Error("CSV must contain at least 300 hourly candles plus a header.");const header=lines.shift().split(",").map(x=>x.trim().toLowerCase());const idx=Object.fromEntries(["timestamp","open","high","low","close","volume"].map(k=>[k,header.indexOf(k)]));if(Object.values(idx).some(v=>v<0))throw Error("CSV header must include timestamp,open,high,low,close,volume.");return lines.map(line=>{const cells=line.split(",");return {timestamp:cells[idx.timestamp]?.trim(),open:Number(cells[idx.open]),high:Number(cells[idx.high]),low:Number(cells[idx.low]),close:Number(cells[idx.close]),volume:Number(cells[idx.volume])};});}
-$("coinSpotBacktestBtn")?.addEventListener("click",async()=>{const file=$("coinSpotHistoryFile")?.files?.[0],status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults");if(!file){status.textContent="Choose an hourly OHLCV CSV first.";return}if(file.size>5*1024*1024){status.textContent="CSV must be smaller than 5 MB.";return}const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing…";try{const candles=parseCoinSpotHistoryCsv(await file.text());const r=backtestCoinSpotTrend({candles});const show=x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`;out.innerHTML=[show(["OUT-OF-SAMPLE NET P&L",money(r.outOfSample.netPnlAud,"AUD"),r.outOfSample.trades+" closed trades"]),show(["OUT-OF-SAMPLE WIN RATE",r.outOfSample.winRatePct+"%",r.outOfSample.wins+" winners"]),show(["PROFIT FACTOR",r.outOfSample.profitFactor??"Unavailable","After modelled costs"]),show(["MAX DRAWDOWN",r.outOfSample.maxDrawdownPct+"%","Out-of-sample"]),show(["IN-SAMPLE NET P&L",money(r.inSample.netPnlAud,"AUD"),r.inSample.trades+" closed trades"]),show(["ASSESSMENT",r.assessment,"No live orders enabled"])].join("");status.textContent="Test completed on "+candles.length+" supplied candles. Split "+Math.round(r.splitIndex/candles.length*100)+"% in-sample / remainder out-of-sample. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model each side. Source is user-supplied and not independently verified."; }catch(e){out.innerHTML="";status.textContent="Backtest rejected: "+e.message;}finally{b.disabled=false;b.textContent="Run fee-aware backtest";}});
+async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
+ const parsed = parseBinanceKlineCsv(await file.text(), { symbol, quoteAsset, exchange: "Binance via CryptoFetch" });
+ const result = backtestCoinSpotTrend({ candles: parsed.candles, quoteCurrency: quoteAsset });
+ return { ...parsed, result };
+}
+function renderCryptoBacktest(label, imported) {
+ const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
+ const moneyQ=value=>new Intl.NumberFormat("en-US",{style:"currency",currency:q,maximumFractionDigits:2}).format(Number(value)||0);
+ const cards=[
+  ["OUT-OF-SAMPLE NET P&L",moneyQ(r.outOfSample.netPnlQuote),r.outOfSample.trades+" closed trades"],
+  ["OUT-OF-SAMPLE WIN RATE",r.outOfSample.winRatePct+"%",r.outOfSample.wins+" winners"],
+  ["PROFIT FACTOR",r.outOfSample.profitFactor??"Unavailable","After modelled costs"],
+  ["MAX DRAWDOWN",r.outOfSample.maxDrawdownPct+"%","Out-of-sample"],
+  ["IN-SAMPLE NET P&L",moneyQ(r.inSample.netPnlQuote),r.inSample.trades+" closed trades"],
+  ["ASSESSMENT",r.assessment,"Research only · no live orders"]
+ ];
+ return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p class="muted tiny">Data provenance: CryptoFetch export, Binance ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
+}
+$("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
+ const files=[["BTCUSDT","BTC","USDT",$("btcHistoryFile")?.files?.[0]],["ETHUSDT","ETH","USDT",$("ethHistoryFile")?.files?.[0]]].filter(x=>x[3]);
+ const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults");
+ if(!files.length){status.textContent="Choose the BTCUSDT and/or ETHUSDT hourly CSV file first.";return}
+ for(const [symbol,, ,file] of files)if(file.size>5*1024*1024){status.textContent=symbol+" CSV must be smaller than 5 MB.";return}
+ const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing both markets…";
+ try{
+  const results=await Promise.all(files.map(async([symbol,base,quote,file])=>({symbol,imported:await runCryptoDatasetBacktest(file,symbol,quote)})));
+  out.innerHTML=results.map(x=>renderCryptoBacktest(x.symbol,x.imported)).join("");
+  status.textContent="Completed "+results.map(x=>x.symbol).join(" and ")+". Each market was tested independently with a 70% chronological in-sample / 30% out-of-sample split. Open candle excluded; quote currency retained as USDT.";
+ }catch(e){out.innerHTML="";status.textContent="Backtest rejected: "+e.message;}
+ finally{b.disabled=false;b.textContent="Run BTC + ETH backtests";}
+});
 
 async function loadCoinSpotMarkets(){
  const button=$("cryptoRefreshBtn"),status=$("cryptoStatus"),container=$("cryptoMarketRows");
