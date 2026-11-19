@@ -62,7 +62,7 @@ async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
 }
 function renderCryptoBacktest(label, imported) {
  const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
- const moneyQ=value=>new Intl.NumberFormat("en-US",{style:"currency",currency:q,maximumFractionDigits:2}).format(Number(value)||0);
+ const moneyQ=value=>new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0)+" "+q;
  const cards=[
   ["OUT-OF-SAMPLE NET P&L",moneyQ(r.outOfSample.netPnlQuote),r.outOfSample.trades+" closed trades"],
   ["OUT-OF-SAMPLE WIN RATE",r.outOfSample.winRatePct+"%",r.outOfSample.wins+" winners"],
