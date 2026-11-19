@@ -185,11 +185,11 @@ async function loadCoinSpotMarkets(){
   status.textContent="Market data unavailable";
  }finally{if(button){button.disabled=false;button.textContent="Refresh market data"}}
 }
-async function loadAutomatedCryptoPaper(){
+async function loadAutomatedCryptoPaper(runNow=false){
  const panel=$("cryptoAutoPaperPanel");if(!panel)return;
- const button=$("cryptoAutoPaperRefresh");if(button){button.disabled=true;button.textContent="Refreshing…"}
+ const button=$("cryptoAutoPaperRefresh");if(button){button.disabled=true;button.textContent=runNow?"Scanning markets…":"Loading…"}
  try{
-  const a=await api("/api/crypto/auto-paper/account");
+  const a=await api("/api/crypto/auto-paper/account",runNow?{method:"POST"}:{});
   const fmt=v=>(Number(v)||0).toFixed(2)+" USDT";
   $("autoPaperEquity").textContent=fmt(a.equity);$("autoPaperCash").textContent=fmt(a.cash);$("autoPaperRealized").textContent=fmt(a.realizedPnl);$("autoPaperDrawdown").textContent=(Number(a.maxDrawdownPct)||0).toFixed(2)+"%";
   $("autoPaperStatus").textContent=a.lastScanAt?"AUTOMATED PAPER ENGINE ACTIVE":(a.status||"WAITING FOR FIRST SCHEDULED SCAN").replaceAll("_"," ");
@@ -198,7 +198,7 @@ async function loadAutomatedCryptoPaper(){
   $("autoPaperMarkets").innerHTML=(a.markets||[]).length?a.markets.map(m=>'<article class="integration"><b>'+esc(m.symbol)+'</b><small>'+esc(m.status.replaceAll("_"," "))+'</small><small>'+esc(m.reason||"No signal")+'</small><small>'+(m.rsi==null?"RSI —":"RSI "+Number(m.rsi).toFixed(1))+' · '+(m.adx==null?"ADX —":"ADX "+Number(m.adx).toFixed(1))+'</small><em>'+(m.signal?"QUALIFYING SIGNAL":"NO ENTRY")+'</em></article>').join(""):'<div class="empty">Waiting for first market scan.</div>';
   $("autoPaperHistory").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.symbol)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+fmt(t.pnl)+'</b></div>').join(""):'<div class="empty">No completed automated trades yet.</div>';
  }catch(e){$("autoPaperStatus").textContent="AUTOMATED PAPER STATUS UNAVAILABLE";$("autoPaperLastScan").textContent=e.message;}
- finally{if(button){button.disabled=false;button.textContent="Refresh bot status"}}
+ finally{if(button){button.disabled=false;button.textContent="Run scan now"}}
 }
 function coinSpotBalanceDisplay(value){const n=Number(value);if(!Number.isFinite(n))return "Unavailable";const clean=Math.abs(n)<1e-8?0:Math.max(0,n);return clean.toFixed(8).replace(/\.?0+$/,"")||"0";}
 function renderCoinSpotPortfolio(balances){
@@ -214,7 +214,7 @@ async function openCoinSpotPaper(coin){const buttons=[...document.querySelectorA
 async function closeCoinSpotPaper(){const b=$("cryptoPaperCloseBtn");b.disabled=true;try{await api("/api/crypto/coinspot/paper/close",{method:"POST",body:JSON.stringify({})});toast("Paper position closed at current CoinSpot bid.");await loadCoinSpotPaper();}catch(e){toast("Paper close failed: "+e.message);b.disabled=false;}}
 async function searchMarkets(cursor=null){const q=$("marketSearch").value.trim(),platform=$("venueFilter").value;const body={q,platform:platform==="all"?undefined:platform,limit:40,...(cursor?{cursor}:{})};$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">Loading market data...</td></tr>`;try{const data=await api("/api/markets?"+new URLSearchParams(Object.entries(body).filter(([,v])=>v!==undefined)));const rows=(data.markets||[]).map(normalize);markets=rows;nextMarketCursor=data.next_cursor||null;$("marketRows").innerHTML=rows.length?rows.map(m=>`<tr><td><div class="table-market">${esc(m.title)}</div><div class="table-sub">${esc(m.id)} | ${esc(m.quoteType||"quote type unverified")} | ${m.observedAt?esc(formatDateTime(m.observedAt,$("auTimezone")?.value)):"time unknown"} | ${esc(m.freshness||"freshness unknown")}</div></td><td>${esc(venueLabel(m.platform))}<div class="table-sub">jurisdiction: ${esc(m.raw?.jurisdiction||"unverified")}</div></td><td>${m.yes==null?"unavailable":m.yes.toFixed(1)+"%"}</td><td>${m.volume?.amount!=null?esc(money(m.volume.amount,m.volume.currency)):"Currency unavailable"}</td><td><button class="small-btn" data-watch="${esc(m.id)}">Save</button></td></tr>`).join(""):`<tr><td colspan="5" class="empty">No markets returned for these filters.</td></tr>`;const next=$("marketNext");if(next){next.hidden=!nextMarketCursor;next.disabled=false}bindWatch();$("connectionText").textContent="Provider response received"}catch(e){nextMarketCursor=null;$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">${esc(e.message)} Configure the backend and confirm credentials and venue access.</td></tr>`;if($("marketNext"))$("marketNext").hidden=true}}
 if($("cryptoRefreshBtn"))$("cryptoRefreshBtn").onclick=loadCoinSpotMarkets;
-$("cryptoAutoPaperRefresh")?.addEventListener("click",loadAutomatedCryptoPaper);
+$("cryptoAutoPaperRefresh")?.addEventListener("click",()=>loadAutomatedCryptoPaper(true));
 loadAutomatedCryptoPaper();
 $("coinSpotAccountRefresh")?.addEventListener("click",loadCoinSpotAccount);
 $("searchBtn").onclick=()=>searchMarkets();if($("marketNext"))$("marketNext").onclick=()=>searchMarkets(nextMarketCursor);$("refreshBtn").onclick=()=>{if($("page-discover").classList.contains("active"))searchMarkets();else toast("Refresh markets from Discover.")};
