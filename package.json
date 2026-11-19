@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check app.js && node --check index.js && node --check domain.js && node --check au-sources.js && node --check datacedar.js && node --check scripts/build-pages.js && node --check autonomous-engine.js && node --check crypto-engine.js && node --check coinspot.js && node --check coinspot-paper.js && node --check coinspot-strategy.js && node --check adaptive-regime-strategy.js && node --check crypto-csv.js && node --check live-execution-guard.js && node --check coinspot-live.js && node --check coinspot-execution-coordinator.js",
+    "check": "node --check app.js && node --check index.js && node --check domain.js && node --check au-sources.js && node --check datacedar.js && node --check scripts/build-pages.js && node --check autonomous-engine.js && node --check crypto-engine.js && node --check coinspot.js && node --check coinspot-paper.js && node --check coinspot-strategy.js && node --check adaptive-regime-strategy.js && node --check crypto-csv.js && node --check live-execution-guard.js && node --check coinspot-live.js && node --check coinspot-execution-coordinator.js && node --check regime-adaptive-breakout.js",
     "build:pages": "node scripts/build-pages.js"
   }
 }
