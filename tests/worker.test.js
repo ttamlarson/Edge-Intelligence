@@ -265,6 +265,6 @@ test("Cloudflare asset proxy serves the breakout strategy module required by Str
   t.after(() => { globalThis.fetch = originalFetch; });
   const response = await worker.fetch(new Request("https://edge.example.au/regime-adaptive-breakout.js"), baseEnv());
   assert.equal(response.status, 200);
-  assert.match(requested, /edge-intelligence-486\\.pages\\.dev\\/regime-adaptive-breakout\\.js$/);
+  assert.ok(requested.endsWith("edge-intelligence-486.pages.dev/regime-adaptive-breakout.js"));
   assert.match(await response.text(), /backtestRegimeAdaptiveBreakout/);
 });
