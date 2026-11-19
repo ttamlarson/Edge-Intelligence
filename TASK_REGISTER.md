@@ -112,3 +112,14 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Add deterministic adapter tests and document secret setup and smoke checks.
 - [ ] Operator action required: create a free DataCedar API key and configure Cloudflare Worker secret `DATACEDAR_API_KEY`.
 - [ ] After the secret is configured, exercise a real ASX symbol request and verify current provider coverage before describing the integration as live.
+
+
+## Cloudflare Pages frontend deployment (2026-11-19)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Replace GitHub Pages workflow with Cloudflare Pages Direct Upload workflow | Implemented on feature branch | `.github/workflows/pages-deploy.yml` runs tests, syntax checks and `npm run build:pages`, then deploys `dist/` with Wrangler to the `edge-intelligence` Pages project on `main`. |
+| Reuse existing Cloudflare deployment credentials | Requires external access or approval | Workflow reuses `CLOUDFLARE_API_TOKEN` and the existing account ID. Token must include Account / Cloudflare Pages / Edit plus the existing Worker/KV permissions. Token value is not accessible to this workflow author and was not inspected. |
+| Preserve Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and changes its configured frontend origin to `https://edge-intelligence.pages.dev`. Worker redeploy occurs separately when merged. |
+| Create/verify Cloudflare Pages project and production deployment | Requires external access or approval | Workflow creates the Direct Upload project if absent, then deploys on `main`. A Git-integrated project is detected and causes a safe failure rather than a deployment-mode switch. No production deployment was run from this branch. |
+| Verify Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and a successful deployment. |
