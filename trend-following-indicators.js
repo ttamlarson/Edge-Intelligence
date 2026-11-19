@@ -49,9 +49,10 @@ function adxSeries(bars, period = 14) {
 function indicatorSeries(bars) {
   const closes = bars.map(x => x.close), fast = emaSeries(closes, 12), slow = emaSeries(closes, 26);
   const macd = closes.map((_, i) => fast[i] == null || slow[i] == null ? null : fast[i] - slow[i]);
-  const signalInput = macd.map(x => x ?? 0), signal = emaSeries(signalInput, 9);
+  const first = macd.findIndex(x => x !== null), compact = macd.slice(first), signal = emaSeries(compact, 9);
+  const histogram = macd.map((x, i) => { const offset = i - first; return x == null || offset < 0 || signal[offset] == null ? null : x - signal[offset]; });
   return { e20: emaSeries(closes, 20), e50: emaSeries(closes, 50), e200: emaSeries(closes, 200),
-    rsi: rsiSeries(closes), macd: macd.map((x, i) => x == null || signal[i] == null ? null : x - signal[i]),
+    rsi: rsiSeries(closes), macd: histogram,
     adx: adxSeries(bars), atr: atrSeries(bars) };
 }
 function validate(candles) {
