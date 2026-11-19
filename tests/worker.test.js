@@ -234,3 +234,20 @@ test("DataCedar bars route rejects more than three symbols without calling provi
   assert.equal(response.status, 400);
   assert.equal(called, false);
 });
+
+
+test("Cloudflare asset proxy serves the Crypto CSV module required by Strategy Lab", async t => {
+  const originalFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async url => {
+    requested = String(url);
+    return new Response("export function parseBinanceKlineCsv() {}", {
+      status: 200, headers: { "Content-Type": "text/javascript" }
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const response = await worker.fetch(new Request("https://edge.example.au/crypto-csv.js"), baseEnv());
+  assert.equal(response.status, 200);
+  assert.match(requested, /ttamlarson\.github\.io\/Edge-Intelligence\/crypto-csv\.js$/);
+  assert.match(await response.text(), /parseBinanceKlineCsv/);
+});
