@@ -85,14 +85,14 @@ $("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults");
  if(!selected.length){status.textContent="Choose one or more 1-hour OHLCV CSV files first.";return}
  if(selected.length>10){status.textContent="Select no more than 10 markets per batch.";return}
- const files=selected.map(file=>{
+ let files; try { files=selected.map(file=>{
   const stem=file.name.replace(/\\.csv$/i,"").toUpperCase();
   const quote=["USDT","USDC","AUD","BTC","ETH"].find(q=>stem.endsWith(q));
   if(!quote)throw new Error("Could not infer quote asset from "+file.name+". Name the file with its full symbol, e.g. SOLUSDT.csv.");
   const symbol=stem.match(/[A-Z0-9]{5,20}$/)?.[0];
   if(!symbol||!symbol.endsWith(quote))throw new Error("Could not infer market symbol from "+file.name+".");
   return {symbol,quote,file};
- });
+ }); } catch(error) { status.textContent=error.message; return; }
  if(new Set(files.map(x=>x.symbol)).size!==files.length){status.textContent="Remove duplicate market CSVs.";return}
  for(const item of files)if(item.file.size>5*1024*1024){status.textContent=item.symbol+" CSV must be smaller than 5 MB.";return}
  const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing markets…";
