@@ -10,10 +10,10 @@ test("all feature navigation links resolve to an implemented page and required c
   const pages = [...html.matchAll(/id="page-([a-z-]+)"/g)].map(m => m[1]);
   const nav = [...html.matchAll(/data-page="([a-z-]+)"/g)].map(m => m[1]);
   for (const page of nav) assert.ok(pages.includes(page), `missing page ${page}`);
-  for (const id of ["loadAustralia", "marketSearch", "marketNext", "analyzeBtn", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "refreshHealth", "testConnection"]) {
+  for (const id of ["loadAustralia", "marketSearch", "marketNext", "analyzeBtn", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "refreshHealth", "testConnection", "asxConfirmData"]) {
     assert.match(html, new RegExp(`id="${id}"`), `missing control ${id}`);
   }
-  for (const id of ["loadAustralia", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd"]) assert.ok(app.includes(`$("${id}")`), `control ${id} has no frontend handler`);
+  for (const id of ["loadAustralia", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "asxConfirmData"]) assert.ok(app.includes(`$("${id}")`), `control ${id} has no frontend handler`);
 });
 
 test("static deployment headers include security controls", async () => {

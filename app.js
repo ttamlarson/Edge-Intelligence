@@ -212,10 +212,10 @@ function renderAsxDesk(){
 }
 $("asxImportBtn")?.addEventListener("click",()=>{
  const file=$("asxCsvFile").files[0],source=$("asxSource").value.trim();
- if(!file||!source){toast("Choose a CSV and identify its data source.");return}
+ if(!file||!source||$("asxConfirmData")?.checked!==true){toast("Choose a CSV, name its source, and confirm AUD denomination and data-use rights.");return}
  if(file.size>5*1024*1024){toast("CSV must be smaller than 5 MB.");return}
  const reader=new FileReader();reader.onload=()=>{
-  const parsed=parseAsxDailyCsv(String(reader.result||""));
+  const parsed=parseAsxDailyCsv(String(reader.result||""),{currency:"AUD"});
   if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;return}
   asxUniverse=parsed.barsBySymbol;
   const observedAt=parsed.latestBar;

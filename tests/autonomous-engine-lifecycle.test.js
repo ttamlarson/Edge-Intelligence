@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createPaperPortfolio, closePaperPosition, evaluateAsxSwingSetup, markPaperPosition,
-  openPaperPosition, parseAsxDailyCsv, recordPaperMark
+  createPaperPortfolio, closePaperPosition, estimateAsxSideCost, evaluateAsxSwingSetup, markPaperPosition,
+  openPaperPosition, parseAsxDailyCsv, recordPaperMark, updatePaperMarksFromBars
 } from "../autonomous-engine.js";
 
 const now = Date.parse("2026-11-16T00:30:00.000Z");
 const zeroCostSchedule = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
+const parseCsv = csv => parseAsxDailyCsv(csv, { currency: "AUD" });
 
 function makeCsv(symbol, offset = 0) {
   const rows = ["Symbol,Date,Open,High,Low,Close"];
@@ -22,7 +23,7 @@ function makeCsv(symbol, offset = 0) {
 }
 
 function candidateFromCsv(csv, symbol) {
-  const imported = parseAsxDailyCsv(csv);
+  const imported = parseCsv(csv);
   assert.equal(imported.valid, true, imported.reason);
   assert.deepEqual(imported.symbols, [symbol]);
   const bars = imported.barsBySymbol[symbol];
@@ -36,36 +37,70 @@ function candidateFromCsv(csv, symbol) {
 }
 
 test("CSV parser groups valid daily bars by ticker", () => {
-  const result = parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40.5\nCBA,2026-11-12,170,172,169,171");
+  const result = parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40.5\nCBA,2026-11-12,170,172,169,171");
   assert.equal(result.valid, true);
   assert.deepEqual(result.symbols, ["BHP", "CBA"]);
   assert.equal(result.rows, 2);
 });
 
 test("CSV parser rejects malformed OHLC, duplicate sessions and impossible ISO dates", () => {
-  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,39,39,40").valid, false);
-  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40\nBHP,2026-11-12,40,41,39,40").valid, false);
-  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-02-31,40,41,39,40").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,39,39,40").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,42,41,39,40").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40\nBHP,2026-11-12,40,41,39,40").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-02-31,40,41,39,40").valid, false);
+});
+
+
+test("CSV import requires explicit AUD confirmation and rejects adjusted-close-only data", () => {
+  const csv = "Symbol,Date,Open,High,Low,Close\\nBHP,2026-11-12,40,41,39,40.5";
+  assert.equal(parseAsxDailyCsv(csv).valid, false);
+  assert.match(parseAsxDailyCsv(csv).reason, /explicitly confirmed as AUD/);
+  assert.equal(parseAsxDailyCsv(csv, { currency: "USD" }).valid, false);
+  assert.equal(parseAsxDailyCsv(csv, { currency: "AUD" }).valid, true);
+  const adjusted = "Symbol,Date,Open,High,Low,Adj Close\\nBHP,2026-11-12,40,41,39,40.5";
+  assert.match(parseCsv(adjusted).reason, /Required columns/);
+});
+
+test("CSV parser rejects malformed quotes and supports correctly quoted fields", () => {
+  const malformed = 'Symbol,Date,Open,High,Low,Close\\nBHP"oops,2026-11-12,40,41,39,40';
+  assert.equal(parseCsv(malformed).valid, false);
+  assert.match(parseCsv(malformed).reason, /malformed quoting/);
+  const quoted = '"Symbol","Date","Open","High","Low","Close"\\n"BHP","2026-11-12","40","41","39","40.5"';
+  assert.equal(parseCsv(quoted).valid, true);
 });
 
 test("CSV parser strips a UTF-8 BOM and interprets Australian DD/MM/YYYY dates", () => {
   const csv = "\uFEFFSymbol,Date,Open,High,Low,Close\nBHP,12/11/2026,40,41,39,40.5\nCBA,13/11/2026,170,172,169,171";
-  const result = parseAsxDailyCsv(csv);
+  const result = parseCsv(csv);
   assert.equal(result.valid, true, result.reason);
   assert.equal(result.barsBySymbol.BHP[0].timestamp, "2026-11-12T00:00:00.000Z");
   assert.equal(result.barsBySymbol.CBA[0].timestamp, "2026-11-13T00:00:00.000Z");
 });
 
 test("CSV parser rejects impossible Australian dates and timezone-less timestamps", () => {
-  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,31/02/2026,40,41,39,40").valid, false);
-  assert.equal(parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00,40,41,39,40").valid, false);
-  const explicitZone = parseAsxDailyCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00+08:00,40,41,39,40");
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,31/02/2026,40,41,39,40").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00,40,41,39,40").valid, false);
+  const explicitZone = parseCsv("Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12T00:00:00+08:00,40,41,39,40");
   assert.equal(explicitZone.valid, true, explicitZone.reason);
   assert.equal(explicitZone.barsBySymbol.BHP[0].timestamp, "2026-11-11T16:00:00.000Z");
 });
 
+
+test("signal screening rejects a ticker that does not close above the prior 20-session breakout", () => {
+  const imported = parseCsv(makeCsv("BHP"));
+  const bars = imported.barsBySymbol.BHP.map(bar => ({ ...bar }));
+  Object.assign(bars.at(-1), { open: 14.1, high: 14.3, low: 14.0, close: 14.2 });
+  const result = evaluateAsxSwingSetup({
+    symbol: "BHP", bars, source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: bars.at(-1).timestamp, equityAud: 500, cashAud: 500, now, costs: zeroCostSchedule
+  });
+  assert.equal(result.status, "NO_SIGNAL");
+  assert.equal(result.executable, false);
+  assert.equal(result.simulatedOnly, true);
+});
+
 test("default cost assumptions reject this synthetic setup at the after-cost 2:1 gate", () => {
-  const imported = parseAsxDailyCsv(makeCsv("BHP"));
+  const imported = parseCsv(makeCsv("BHP"));
   const bars = imported.barsBySymbol.BHP;
   const result = evaluateAsxSwingSetup({
     symbol: "BHP", bars, source: "Synthetic test fixture only", currency: "AUD",
@@ -131,6 +166,29 @@ test("paper opening rejects malformed candidate sizing without changing cash", (
   assert.equal(result.accepted, false);
   assert.equal(portfolio.cashAud, 500);
   assert.equal(portfolio.positions.length, 0);
+});
+
+
+test("opening rechecks the AUD 200 allocation cap including entry fees", () => {
+  const base = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const costs = { commissionRate: 0.0008, minimumCommissionAud: 5, gstRate: 0.10, slippageBps: 10 };
+  const shares = 13, entryReference = 15, stopPrice = 14.7, targetPrice = 18.3;
+  const notionalAud = shares * entryReference;
+  const entryCost = estimateAsxSideCost(notionalAud, costs);
+  const stopCost = estimateAsxSideCost(shares * stopPrice, costs);
+  const targetCost = estimateAsxSideCost(shares * targetPrice, costs);
+  const netTarget = shares * targetPrice - notionalAud - entryCost.totalAud - targetCost.totalAud;
+  const netStop = notionalAud - shares * stopPrice + entryCost.totalAud + stopCost.totalAud;
+  const candidate = {
+    ...base, shares, entryReference, stopPrice, targetPrice, notionalAud,
+    riskBudgetAud: 5, estimatedEntryCostsAud: entryCost.totalAud,
+    estimatedNetTargetProfitAud: netTarget, estimatedNetStopLossAud: netStop,
+    rewardRiskAfterCosts: netTarget / netStop,
+    assumptions: { commissionRate: costs.commissionRate, commissionMinimumAud: costs.minimumCommissionAud, gstRate: costs.gstRate, slippageBps: costs.slippageBps }
+  };
+  const result = openPaperPosition(createPaperPortfolio(), candidate, { id: "entry-fees-over-cap", now });
+  assert.equal(result.accepted, false);
+  assert.match(result.reason, /AUD 200 paper allocation cap/);
 });
 
 test("paper portfolio rejects stale candidate data at the time of opening", () => {
@@ -234,6 +292,43 @@ test("saving a paper mark persists the latest valuation without changing cash or
   assert.equal(secondMark.portfolio.positions[0].lastMarkPrice, 15.25);
 });
 
+
+test("provider mark refresh ignores malformed and future bars and chooses the latest eligible OHLC bar", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "provider-mark-guard", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  const valid = { timestamp: new Date(now + 60_000).toISOString(), open: 15, high: 15.5, low: 14.9, close: 15.25 };
+  const refreshed = updatePaperMarksFromBars(opened.portfolio, {
+    BHP: [{ timestamp: "not-a-date", open: 15, high: 16, low: 14, close: 15 }, valid]
+  }, { now: now + 120_000 });
+  assert.deepEqual(refreshed.markedSymbols, ["BHP"]);
+  assert.equal(refreshed.portfolio.positions[0].lastMarkPrice, 15.25);
+  assert.equal(refreshed.portfolio.cashAud, opened.portfolio.cashAud);
+
+  const future = updatePaperMarksFromBars(opened.portfolio, {
+    BHP: [{ ...valid, timestamp: new Date(now + 60 * 60_000).toISOString() }]
+  }, { now });
+  assert.deepEqual(future.markedSymbols, []);
+  assert.deepEqual(future.skippedSymbols, ["BHP"]);
+  assert.equal(future.portfolio.positions[0].lastMarkPrice, undefined);
+  assert.equal(updatePaperMarksFromBars(opened.portfolio, { BHP: [valid] }, { currency: "USD", now }).accepted, false);
+});
+
+test("manual paper marks reject future timestamps without mutating the ledger", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "future-manual-mark", openedAt: new Date(now).toISOString(), now
+  });
+  const result = recordPaperMark(opened.portfolio, "future-manual-mark", 15, {
+    markedAt: new Date(now + 10 * 60_000).toISOString(), now, costs: zeroCostSchedule
+  });
+  assert.equal(result.accepted, false);
+  assert.match(result.reason, /future-dated/);
+  assert.equal(opened.portfolio.positions[0].lastMarkPrice, undefined);
+});
+
 test("paper marking rejects closed positions and invalid prices without changing the portfolio", () => {
   const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
   const opened = openPaperPosition(createPaperPortfolio(), candidate, {
@@ -253,6 +348,29 @@ test("paper marking rejects closed positions and invalid prices without changing
   });
   assert.equal(closedMark.accepted, false);
   assert.match(closedMark.reason, /not found/);
+  assert.equal(closed.portfolio.closedTrades.length, 1);
+});
+
+
+test("a paper close records net-negative proceeds when minimum fees exceed exit value", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "negative-proceeds-close", openedAt: new Date(now).toISOString(), now
+  });
+  const closed = closePaperPosition(opened.portfolio, "negative-proceeds-close", 0.001, {
+    closedAt: new Date(now + 60_000).toISOString()
+  });
+  assert.equal(closed.accepted, true, closed.reason);
+  assert.ok(closed.trade.exitCostsAud > closed.trade.exitValueAud);
+  assert.ok(closed.trade.proceedsAud < 0);
+  assert.equal(closed.portfolio.cashAud, Math.round((opened.portfolio.cashAud + closed.trade.proceedsAud) * 100) / 100);
+  assert.ok(closed.portfolio.cashAud >= 0);
+  assert.equal(closed.portfolio.closedTrades.length, 1);
+  assert.equal(closed.portfolio.closedTrades[0].id, "negative-proceeds-close");
+  const duplicateClose = closePaperPosition(closed.portfolio, "negative-proceeds-close", 15, {
+    closedAt: new Date(now + 120_000).toISOString()
+  });
+  assert.equal(duplicateClose.accepted, false);
   assert.equal(closed.portfolio.closedTrades.length, 1);
 });
 

@@ -9,10 +9,10 @@
 - [ ] Download and inspect the CI static-site artifact after it is produced.
 
 ## ASX autonomous paper desk
-- [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
-- [x] Automated tests reject malformed OHLC, duplicate sessions, impossible ISO/Australian dates, timezone-less and unsupported timestamps, missing provenance, non-AUD and stale daily bars.
-- [x] Automated tests cover UTF-8 BOM headers, Australian DD/MM/YYYY parsing and ISO timestamps with explicit timezone offsets.
-- [x] Automated tests cover CSV-to-screen-to-open-to-mark-to-close lifecycle, fee accounting, cash reconciliation, closed-trade history, stale-candidate rejection and re-entry after closed positions.
+- [ ] Import a broker-authorised ASX daily OHLC CSV, confirm the source, explicitly attest AUD denomination and data-use rights, then verify timestamps, all four OHLC values and ticker grouping.
+- [x] Automated tests reject missing/incorrect AUD confirmation, malformed quoting, adjusted-close-only files, malformed OHLC including Open, duplicate sessions, impossible ISO/Australian dates, timezone-less and unsupported timestamps, missing provenance, non-AUD and stale daily bars.
+- [x] Automated tests cover UTF-8 BOM headers, properly quoted fields, Australian DD/MM/YYYY parsing and ISO timestamps with explicit timezone offsets.
+- [x] Automated tests cover signal rejection, CSV-to-screen-to-open-to-mark-to-close lifecycle, entry/exit fees, the fee-inclusive AUD 200 allocation cap, negative net exit proceeds, cash reconciliation, closed-trade history, stale/future mark rejection and re-entry after closed positions.
 - [ ] Complete a browser-level import/open/mark/close walkthrough with authorised market data.
 - [x] Automated tests confirm there is no broker order execution path in the ASX paper engine.
 

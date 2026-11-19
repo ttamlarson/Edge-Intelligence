@@ -53,8 +53,13 @@ export function validateDailyBars(bars, { source, currency, observedAt, now = Da
   if (currency !== "AUD") return { valid: false, reason: "Only explicitly denominated AUD instruments are eligible." };
   const timestamp = Date.parse(observedAt || "");
   if (!Number.isFinite(timestamp) || timestamp > now + 5 * 60_000 || now - timestamp > maxAgeMs) return { valid: false, reason: "Market data is missing, future-dated or stale." };
-  const clean = bars.map(bar => ({ close: num(bar?.close), high: num(bar?.high), low: num(bar?.low), timestamp: Date.parse(bar?.timestamp || "") }))
-    .filter(bar => bar.close > 0 && bar.high >= bar.close && bar.low > 0 && bar.low <= bar.close && Number.isFinite(bar.timestamp))
+  const clean = bars.map(bar => ({
+    open: num(bar?.open), close: num(bar?.close), high: num(bar?.high), low: num(bar?.low),
+    timestamp: Date.parse(bar?.timestamp || "")
+  }))
+    .filter(bar => bar.open > 0 && bar.close > 0 && bar.high >= Math.max(bar.open, bar.close) &&
+      bar.low > 0 && bar.low <= Math.min(bar.open, bar.close) && bar.low <= bar.high &&
+      Number.isFinite(bar.timestamp))
     .sort((a, b) => a.timestamp - b.timestamp);
   if (clean.length !== bars.length) return { valid: false, reason: "One or more daily bars failed OHLC validation." };
   for (let i = 1; i < clean.length; i++) if (clean[i].timestamp <= clean[i - 1].timestamp) return { valid: false, reason: "Daily bars must have unique increasing timestamps." };
@@ -170,6 +175,7 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   if (!positionId || knownIds.includes(positionId)) return { accepted: false, reason: "Paper position ID must be unique." };
 
   const debit = round2(notional + entryCosts);
+  if (debit > EDGE_MAX_POSITION_AUD) return { accepted: false, reason: "Position plus entry costs exceeds the AUD 200 paper allocation cap." };
   if (debit > portfolio.cashAud - EDGE_MIN_CASH_RESERVE_AUD) return { accepted: false, reason: "Insufficient cash after preserving the minimum reserve." };
   const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), debitAud: debit, openedAt, status: "OPEN_PAPER" };
   return {
@@ -181,24 +187,39 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
 
 // Refresh open paper-position valuations from validated provider bars. This is
 // valuation-only: it never changes cash, entry cost, realised P&L or trade status.
-export function updatePaperMarksFromBars(portfolio, barsBySymbol, { source = "DataCedar ASX historical daily bars" } = {}) {
+export function updatePaperMarksFromBars(portfolio, barsBySymbol, {
+  source = "DataCedar ASX historical daily bars", currency = "AUD", now = Date.now(),
+  maxAgeMs = EDGE_MAX_DAILY_BAR_AGE_MS
+} = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
       !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) ||
-      !barsBySymbol || typeof barsBySymbol !== "object" || Array.isArray(barsBySymbol)) {
-    return { accepted: false, portfolio, markedSymbols: [], skippedSymbols: [], reason: "Simulation-only portfolio and validated symbol bars are required." };
+      !barsBySymbol || typeof barsBySymbol !== "object" || Array.isArray(barsBySymbol) ||
+      typeof source !== "string" || !source.trim() || currency !== "AUD" ||
+      !Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) {
+    return { accepted: false, portfolio, markedSymbols: [], skippedSymbols: [], reason: "Simulation-only portfolio, AUD source and valid symbol bars are required." };
   }
   let next = portfolio;
   const markedSymbols = [], skippedSymbols = [];
   for (const position of portfolio.positions.filter(item => item?.status === "OPEN_PAPER")) {
     const bars = barsBySymbol[position.symbol];
-    const latest = Array.isArray(bars) ? bars.reduce((best, bar) =>
-      !best || Date.parse(bar?.timestamp || "") > Date.parse(best.timestamp || "") ? bar : best, null) : null;
+    const eligible = Array.isArray(bars) ? bars.filter(bar => {
+      const timestamp = Date.parse(bar?.timestamp || "");
+      const open = num(bar?.open), high = num(bar?.high), low = num(bar?.low), close = num(bar?.close);
+      return Number.isFinite(timestamp) && timestamp <= now + 5 * 60_000 && now - timestamp <= maxAgeMs &&
+        open !== null && open > 0 && high !== null && high >= Math.max(open, close) &&
+        low !== null && low > 0 && close !== null && close > 0 &&
+        low <= Math.min(open, close) && low <= high;
+    }) : [];
+    const latest = eligible.reduce((best, bar) =>
+      !best || Date.parse(bar.timestamp) > Date.parse(best.timestamp) ? bar : best, null);
     const timestamp = Date.parse(latest?.timestamp || "");
     const price = num(latest?.close);
     if (!latest || !Number.isFinite(timestamp) || price === null || price <= 0) {
       skippedSymbols.push(position.symbol); continue;
     }
-    const result = recordPaperMark(next, position.id, price, { markedAt: new Date(timestamp).toISOString() });
+    const result = recordPaperMark(next, position.id, price, {
+      markedAt: new Date(timestamp).toISOString(), now
+    });
     if (!result.accepted) { skippedSymbols.push(position.symbol); continue; }
     next = result.portfolio;
     markedSymbols.push(position.symbol);
@@ -206,15 +227,33 @@ export function updatePaperMarksFromBars(portfolio, barsBySymbol, { source = "Da
   return { accepted: true, portfolio: next, markedSymbols, skippedSymbols, source };
 }
 
-export function parseAsxDailyCsv(csvText) {
+export function parseAsxDailyCsv(csvText, { currency } = {}) {
+  if (currency !== "AUD") return { valid: false, reason: "CSV currency must be explicitly confirmed as AUD." };
   if (typeof csvText !== "string" || csvText.length > 5_000_000) return { valid: false, reason: "CSV must be text under 5 MB." };
-  const rows = []; let row = [], field = "", quoted = false;
+  const rows = []; let row = [], field = "", quoted = false, quoteClosed = false;
+  const pushField = () => { row.push(field.trim()); field = ""; quoteClosed = false; };
+  const pushRow = () => { pushField(); if (row.some(cell => cell !== "")) rows.push(row); row = []; };
   for (let i = 0; i < csvText.length; i++) {
     const ch = csvText[i];
-    if (quoted) { if (ch === '"' && csvText[i + 1] === '"') { field += '"'; i++; } else if (ch === '"') quoted = false; else field += ch; }
-    else if (ch === '"') quoted = true;
-    else if (ch === ",") { row.push(field.trim()); field = ""; }
-    else if (ch === "\n") { row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row); row = []; field = ""; }
+    if (quoted) {
+      if (ch === '"') {
+        if (csvText[i + 1] === '"') { field += '"'; i++; }
+        else { quoted = false; quoteClosed = true; }
+      } else field += ch;
+      continue;
+    }
+    if (quoteClosed) {
+      if (ch === ",") pushField();
+      else if (ch === "\n") pushRow();
+      else if (ch === "\r" || ch === " " || ch === "\t") continue;
+      else return { valid: false, reason: "CSV contains malformed quoting." };
+      continue;
+    }
+    if (ch === '"') {
+      if (field.trim() !== "") return { valid: false, reason: "CSV contains malformed quoting." };
+      field = ""; quoted = true;
+    } else if (ch === ",") pushField();
+    else if (ch === "\n") pushRow();
     else if (ch !== "\r") field += ch;
   }
   if (quoted) return { valid: false, reason: "CSV contains an unterminated quoted field." };
@@ -222,8 +261,10 @@ export function parseAsxDailyCsv(csvText) {
   if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
   const headers = rows.shift().map(x => x.replace(/^\uFEFF/, "").toLowerCase().replace(/[ _-]/g, ""));
   const index = (...names) => headers.findIndex(h => names.includes(h));
-  const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close","adjclose") };
-  if (Object.values(cols).some(v => v < 0)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
+  const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close") };
+  const requiredColumns = Object.values(cols);
+  if (requiredColumns.some(v => v < 0)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
+  if (new Set(requiredColumns).size !== requiredColumns.length) return { valid: false, reason: "CSV contains duplicate or ambiguous required columns." };
   const grouped = {};
   for (const cells of rows) {
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
@@ -264,7 +305,10 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   const proceeds = round2(exitValue - exitCost.totalAud);
   const pnl = round2(proceeds - position.debitAud);
   const nextCash = round2(portfolio.cashAud + proceeds);
-  if (!Number.isFinite(proceeds) || proceeds < 0 || !Number.isFinite(nextCash)) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
+  // A minimum brokerage fee can exceed a very small exit value. Record the
+  // resulting negative net proceeds rather than making the simulated trade
+  // impossible to close; the portfolio itself must never overdraw.
+  if (!Number.isFinite(proceeds) || !Number.isFinite(nextCash) || nextCash < 0) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
   const closed = { ...position, status: "CLOSED_PAPER", exitPrice: round2(price), exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
   const positions = portfolio.positions.slice(); positions[index] = closed;
   return { accepted: true, portfolio: { ...portfolio, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
@@ -284,7 +328,9 @@ export function markPaperPosition(position, markPrice, costs = {}) {
 
 // Persist a valuation-only mark for an open paper position. This never changes
 // cash or realized trade history; it only updates the position's last mark.
-export function recordPaperMark(portfolio, positionId, markPrice, { markedAt = new Date().toISOString(), costs = {} } = {}) {
+export function recordPaperMark(portfolio, positionId, markPrice, {
+  markedAt = new Date().toISOString(), costs = {}, now = Date.now(), maxFutureSkewMs = 5 * 60_000
+} = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) {
     return { accepted: false, reason: "Simulation-only portfolio required." };
   }
@@ -300,9 +346,11 @@ export function recordPaperMark(portfolio, positionId, markPrice, { markedAt = n
   const markedTimestamp = Date.parse(markedAt || "");
   const previousMarkTimestamp = position.lastMarkedAt ? Date.parse(position.lastMarkedAt) : openedTimestamp;
   if (!Number.isFinite(openedTimestamp) || !Number.isFinite(markedTimestamp) ||
-      !Number.isFinite(previousMarkTimestamp) || markedTimestamp < openedTimestamp ||
+      !Number.isFinite(previousMarkTimestamp) || !Number.isFinite(now) ||
+      !Number.isFinite(maxFutureSkewMs) || maxFutureSkewMs < 0 ||
+      markedTimestamp > now + maxFutureSkewMs || markedTimestamp < openedTimestamp ||
       markedTimestamp < previousMarkTimestamp) {
-    return { accepted: false, reason: "Paper mark timestamp is invalid or earlier than the previous mark." };
+    return { accepted: false, reason: "Paper mark timestamp is invalid, future-dated or earlier than the previous mark." };
   }
 
   const mark = markPaperPosition(position, markPrice, costs);
