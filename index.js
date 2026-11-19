@@ -395,23 +395,33 @@ async function runAutomatedCryptoPaper(env) {
   let account;
   try { account = normalizeAutoPaperAccount(JSON.parse(await env.EDGE_KV.get(key) || "null") || createAutoPaperAccount(now), now); }
   catch { account = createAutoPaperAccount(now); }
+  // Binance documents data-api.binance.vision for public market-data-only access.
+  // Keep alternate official API hosts as failover for regional routing or edge errors.
+  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/"];
   const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
-    try {
-      const base = "https://api.binance.com/api/v3/";
-      const urls = [base + "klines?symbol=" + symbol + "&interval=1h&limit=260", base + "ticker/price?symbol=" + symbol];
-      const responses = await Promise.all(urls.map(url => fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(9000) })));
-      if (responses.some(response => !response.ok)) throw Error("Public market data unavailable");
-      const raw = await responses[0].json(), quote = await responses[1].json();
-      if (!Array.isArray(raw) || raw.length < 220 || !Number.isFinite(Number(quote.price)) || Number(quote.price) <= 0) throw Error("Incomplete market response");
-      const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({ timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }));
-      if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) throw Error("Invalid hourly candles");
-      return { symbol, price: Number(quote.price), signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", latestClosedCandle: bars.at(-1).timestamp };
-    } catch { return { symbol, status: "UNAVAILABLE", message: "Market data request failed or returned invalid data." }; }
+    let lastError = "NO_PROVIDER_RESPONSE";
+    for (const base of hosts) {
+      try {
+        const urls = [base + "klines?symbol=" + symbol + "&interval=1h&limit=260", base + "ticker/price?symbol=" + symbol];
+        const responses = await Promise.all(urls.map(url => fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000) })));
+        const failed = responses.find(response => !response.ok);
+        if (failed) { lastError = "HTTP_" + failed.status; continue; }
+        const raw = await responses[0].json(), quote = await responses[1].json();
+        if (!Array.isArray(raw) || raw.length < 220 || !Number.isFinite(Number(quote.price)) || Number(quote.price) <= 0) { lastError = "INVALID_OR_INCOMPLETE_RESPONSE"; continue; }
+        const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({ timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }));
+        if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) { lastError = "INVALID_HOURLY_CANDLES"; continue; }
+        return { symbol, price: Number(quote.price), signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: bars.at(-1).timestamp };
+      } catch (error) {
+        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_OR_PARSE_ERROR";
+      }
+    }
+    return { symbol, status: "UNAVAILABLE", errorCode: lastError, message: "All configured public market-data endpoints failed." };
   }));
   const prices = Object.fromEntries(results.filter(x => x.price > 0).map(x => [x.symbol,x.price]));
   const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
   account = processAutoPaperSignals(account, { signals, prices, now });
-  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.message||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null })), lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public spot API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  const liveMarkets = results.filter(x => x.status === "LIVE_PUBLIC_DATA").length;
+  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
   await env.EDGE_KV.put(key, JSON.stringify(snapshot));
   return snapshot;
 }
