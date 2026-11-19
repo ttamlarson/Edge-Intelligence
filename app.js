@@ -57,20 +57,36 @@ renderPaper();
 function renderPaper(){const open=state.positions.filter(p=>!p.closed);$("paperBalance").textContent=money(state.balance,"AUD");$("paperPositions").textContent=open.length;$("paperRealized").textContent=money(state.realized,"AUD");$("paperReturn").textContent=((state.realized/10000)*100).toFixed(2)+"%";$("positionList").innerHTML=state.positions.length?state.positions.map((p,i)=>`<div class="position-card"><div><b>${esc(p.question)}</b><div class="market-meta">${esc(p.side)} | Entry ${Number(p.price).toFixed(1)}% YES | Stake ${esc(money(p.stake,"AUD"))} virtual AUD ${p.closed?"| CLOSED":"| SIMULATED"}${p.resolution?" | Resolved "+(p.resolution===1?"YES":"NO"):""}</div></div>${p.closed?"":`<div>${p.resolution?"":`<button class="small-btn" data-paper-outcome="1" data-paper-id="${i}">Resolve YES (simulated)</button> <button class="small-btn" data-paper-outcome="0" data-paper-id="${i}">Resolve NO (simulated)</button>`} <button class="small-btn" data-close="${i}">Close at entry</button></div>`}</div>`).join(""):`<div class="empty">No simulated positions yet.</div>`;document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.close)];if(!p||p.closed)return;p.closed=true;state.balance+=Number(p.stake)||0;save();render();toast("Closed at entry in the paper simulation; no profit or loss.")});document.querySelectorAll("[data-paper-outcome]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.paperId)];if(!p||p.closed)return;const result=paperSettlement({stake:Number(p.stake),side:p.side,entryProbability:Number(p.price),outcome:Number(b.dataset.paperOutcome)});if(!result){toast("Position data is invalid; it was not settled.");return}p.closed=true;p.resolution=Number(b.dataset.paperOutcome);p.profitLoss=result.profitLoss;p.payout=result.payout;state.balance+=result.payout;state.realized+=result.profitLoss;save();render();toast("Paper position resolved in a simulation only.")})}
 async function api(path,opts={}){if(!state.backend)throw new Error("No backend configured. Add your Worker URL in Settings.");const base=normalizeBackendUrl(state.backend);let r;try{r=await fetch(base+path,{credentials:"include",...opts,headers:{...((opts.method||"GET").toUpperCase()==="GET"?{}:{"Content-Type":"application/json"}),...(opts.headers||{})}})}catch(error){const detail=error?.message||"Network request blocked";throw new Error("Could not reach the Cloudflare Worker. This is a browser/network failure, not a CoinSpot credential rejection. Check the saved Worker URL, Cloudflare Access login/cookie, CORS origin and deployment. ("+detail+")")}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Backend request failed ("+r.status+")");return data}
 async function fetchBinanceHourlyHistory(symbol, days=365) {
- const end=Date.now(), start=end-days*86400000; let cursor=start, rows=[];
- while(cursor<end){
-  const url="https://api.binance.com/api/v3/klines?"+new URLSearchParams({symbol,interval:"1h",startTime:String(cursor),endTime:String(end),limit:"1000"});
-  const response=await fetch(url,{headers:{Accept:"application/json"}});
-  if(!response.ok)throw new Error("Binance history request for "+symbol+" failed (HTTP "+response.status+").");
-  const batch=await response.json(); if(!Array.isArray(batch))throw new Error("Binance returned invalid candle data for "+symbol+".");
-  if(!batch.length)break; rows.push(...batch); const last=Number(batch[batch.length-1][0]);
-  if(!Number.isFinite(last)||last<cursor)throw new Error("Binance returned unordered history for "+symbol+".");
-  cursor=last+3600000; if(batch.length<1000)break; if(rows.length>9000)throw new Error("History exceeded 9,000 candles.");
+ const end=Date.now(), start=end-days*86400000;
+ const hosts=["https://api.binance.com","https://data-api.binance.vision"];
+ const failures=[];
+ let rows=null, sourceHost=null;
+ for(const host of hosts){
+  try{
+   let cursor=start, collected=[];
+   while(cursor<end){
+    const url=host+"/api/v3/klines?"+new URLSearchParams({symbol,interval:"1h",startTime:String(cursor),endTime:String(end),limit:"1000"});
+    const response=await fetch(url,{headers:{Accept:"application/json"},cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const batch=await response.json();
+    if(!Array.isArray(batch))throw new Error("invalid candle response");
+    if(!batch.length)break;
+    collected.push(...batch);
+    const last=Number(batch[batch.length-1][0]);
+    if(!Number.isFinite(last)||last<cursor)throw new Error("unordered candle response");
+    cursor=last+3600000;
+    if(batch.length<1000)break;
+    if(collected.length>9000)throw new Error("history exceeded 9,000 candles");
+   }
+   if(collected.length<300)throw new Error("only "+collected.length+" candles returned");
+   rows=collected;sourceHost=host;break;
+  }catch(error){failures.push(host+": "+(error?.message||"request failed"))}
  }
+ if(!rows)throw new Error("Both Binance market-data endpoints failed for "+symbol+". "+failures.join("; ")+". If you are using the installed iPhone app, reopen it once to receive the latest update; otherwise try the CSV importer.");
  const candles=rows.filter(x=>Number(x[6])<end).map(x=>({timestamp:new Date(Number(x[0])).toISOString(),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])}));
  if(candles.length<300)throw new Error("Fewer than 300 completed hourly candles for "+symbol+".");
  for(let i=1;i<candles.length;i++)if(Date.parse(candles[i].timestamp)-Date.parse(candles[i-1].timestamp)<=0)throw new Error("Binance history contains duplicate or unordered candles for "+symbol+".");
- return {metadata:{source:"Binance public Spot API",exchange:"Binance",symbol,quoteAsset:symbol.endsWith("USDT")?"USDT":"UNKNOWN",timeframe:"1h",candleCount:candles.length,firstCandleAt:candles[0].timestamp,lastCandleAt:candles.at(-1).timestamp},quality:{missingIntervals:candles.slice(1).filter((x,i)=>Date.parse(x.timestamp)-Date.parse(candles[i].timestamp)!==3600000).length},candles};
+ return {metadata:{source:"Binance public Spot API ("+new URL(sourceHost).hostname+")",exchange:"Binance",symbol,quoteAsset:symbol.endsWith("USDT")?"USDT":"UNKNOWN",timeframe:"1h",candleCount:candles.length,firstCandleAt:candles[0].timestamp,lastCandleAt:candles.at(-1).timestamp},quality:{missingIntervals:candles.slice(1).filter((x,i)=>Date.parse(x.timestamp)-Date.parse(candles[i].timestamp)!==3600000).length},candles};
 }
 async function runCryptoCandlesBacktest(parsed,symbol,quoteAsset) {
  const result=backtestCoinSpotTrend({candles:parsed.candles,quoteCurrency:quoteAsset});
