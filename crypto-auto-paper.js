@@ -2,6 +2,7 @@
 export const AUTO_SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","BNBUSDT","DOGEUSDT","ADAUSDT","LINKUSDT","AVAXUSDT","LTCUSDT"];
 export const AUTO_CONFIG = Object.freeze({ startingCapital: 100, feeRate: .001, slippageBps: 15, spreadBps: 10, riskPct: .005, maxAllocationPct: 25, maxDailyLossPct: 2, stopAtr: 2.5, targetAtr: 5, maxHoldHours: 120 });
 const round = n => Math.round((n + Number.EPSILON) * 10000) / 10000;
+const roundQuantity = n => Math.floor(n * 1e8) / 1e8;
 const finite = n => Number.isFinite(Number(n)) ? Number(n) : null;
 function ema(values, period) { if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(const x of values.slice(period))v=x*k+v*(1-k);return v; }
 function rsi(values, period=14) { if(values.length<=period)return null;let up=0,down=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)up+=d;else down-=d;}return down===0?100:100-100/(1+up/down); }
@@ -48,7 +49,7 @@ export function processAutoPaperSignals(account,{signals,prices,now=new Date().t
   const equity=a.equity||a.cash+a.realizedPnl,riskBudget=equity*AUTO_CONFIG.riskPct,allocation=Math.min(equity*AUTO_CONFIG.maxAllocationPct/100,a.cash),quantity=Math.min(riskBudget/(entry-stop),allocation/(entry*(1+AUTO_CONFIG.feeRate)));
   const entryFee=quantity*entry*AUTO_CONFIG.feeRate,entryCost=quantity*entry+entryFee;
   if(quantity<=0||entryCost<5||entryCost>a.cash)continue;
-  a.cash=round(a.cash-entryCost);a.openPosition={id:symbol+"-"+s.timestamp,symbol,openedAt:now,signalAt:s.timestamp,entryPrice:round(entry),quantity:round(quantity),entryFee:round(entryFee),entryCost:round(entryCost),stopPrice:round(stop),trailingStop:round(stop),targetPrice:round(target),atr:s.atr,highestPrice:entry,strategy:"TREND_FOLLOWING_1H_V1",status:"OPEN_PAPER_ONLY"};a.lastProcessed[symbol]=s.timestamp;break;
+  a.cash=round(a.cash-entryCost);a.openPosition={id:symbol+"-"+s.timestamp,symbol,openedAt:now,signalAt:s.timestamp,entryPrice:round(entry),quantity:roundQuantity(quantity),entryFee:round(entryFee),entryCost:round(entryCost),stopPrice:round(stop),trailingStop:round(stop),targetPrice:round(target),atr:s.atr,highestPrice:entry,strategy:"TREND_FOLLOWING_1H_V1",status:"OPEN_PAPER_ONLY"};a.lastProcessed[symbol]=s.timestamp;break;
  }
  a.equity=round(a.cash+(a.openPosition?a.openPosition.quantity*(prices?.[a.openPosition.symbol]||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
 }
