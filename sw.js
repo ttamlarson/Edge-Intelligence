@@ -7,6 +7,7 @@ const SHELL = [
   "./app.js",
   "./domain.js",
   "./autonomous-engine.js",
+  "./crypto-csv.js",
   "./manifest.webmanifest",
   "./icon.svg",
   "./icon-192.png",
