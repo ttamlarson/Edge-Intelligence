@@ -27,14 +27,14 @@ test("rejects duplicate or out-of-order timestamps", () => {
   assert.throws(() => parseBinanceKlineCsv([header, row(start), row(start)].join("\n"), { symbol: "BTCUSDT", now: start + 999999999 }), /strictly ordered/);
 });
 test("rejects incomplete OHLCV schema", () => {
-  assert.throws(() => parseBinanceKlineCsv("timestamp,close\nnow,10", { symbol: "BTCUSDT" }), /missing required/);
+  assert.throws(() => parseBinanceKlineCsv("timestamp,close\nnow,10", { symbol: "BTCUSDT" }), /CSV header must include/);
 });
 
 test("accepts canonical timestamp OHLCV exports as well as Binance kline exports", () => {
   const start = Date.UTC(2026, 0, 1);
   const rows = ["timestamp,open,high,low,close,volume", ...Array.from({ length: 301 }, (_, i) =>
     `${new Date(start + i * 3600000).toISOString()},10,11,9,10,2`)];
-  const result = parseBinanceKlineCsv(rows.join("\\n"), {
+  const result = parseBinanceKlineCsv(rows.join("\n"), {
     symbol: "BTCUSDT", quoteAsset: "USDT", now: start + 302 * 3600000
   });
   assert.equal(result.candles.length, 301);
