@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseBinanceKlineCsv } from "../crypto-csv.js";
+import { parseBinanceKlineCsv, parseBinanceUsdtSymbols } from "../crypto-csv.js";
 
 const header = "open_time_ms,open,high,low,close,volume,close_time_ms,quote_asset_volume,number_of_trades,taker_buy_base_asset_volume,taker_buy_quote_asset_volume,ignore";
 function row(time, close = 10) { return `${time},10,11,9,${close},2,${time + 3599999},20,5,1,10,0`; }
@@ -40,4 +40,16 @@ test("accepts canonical timestamp OHLCV exports as well as Binance kline exports
   assert.equal(result.candles.length, 301);
   assert.equal(result.metadata.csvFormat, "timestamp OHLCV");
   assert.equal(result.metadata.priceCurrency, "USDT");
+});
+
+test("accepts the four example Binance USDT markets shown in Strategy Lab", () => {
+  assert.deepEqual(parseBinanceUsdtSymbols("BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT"), ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]);
+});
+test("normalizes symbol case, whitespace and duplicate markets", () => {
+  assert.deepEqual(parseBinanceUsdtSymbols(" btcusdt, ETHUSDT, BTCUSDT "), ["BTCUSDT", "ETHUSDT"]);
+});
+test("rejects empty, invalid and over-four-market batches", () => {
+  assert.throws(() => parseBinanceUsdtSymbols(""), /at least one/);
+  assert.throws(() => parseBinanceUsdtSymbols("BTCUSD"), /Invalid Binance/);
+  assert.throws(() => parseBinanceUsdtSymbols("BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT"), /no more than four/);
 });

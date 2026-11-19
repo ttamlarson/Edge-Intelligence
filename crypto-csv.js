@@ -74,3 +74,13 @@ export function parseBinanceKlineCsv(csv, {
     candles
   };
 }
+
+
+export function parseBinanceUsdtSymbols(value) {
+  const symbols = [...new Set(String(value ?? "").toUpperCase().split(",").map(item => item.trim()).filter(Boolean))];
+  if (!symbols.length) throw Error("Enter at least one Binance USDT symbol, e.g. BTCUSDT.");
+  if (symbols.length > 4) throw Error("Enter no more than four Binance USDT symbols per batch.");
+  const invalid = symbols.filter(symbol => !/^[A-Z0-9]{2,16}USDT$/.test(symbol) || symbol === "USDTUSDT");
+  if (invalid.length) throw Error("Invalid Binance USDT symbol(s): " + invalid.join(", ") + ". Use symbols such as BTCUSDT, ETHUSDT, SOLUSDT or XRPUSDT.");
+  return symbols;
+}
