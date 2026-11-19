@@ -401,7 +401,7 @@ async function handle(request, env, ctx) {
   // Access authentication first-party (including Safari/iOS).
   if (!requestUrl.pathname.startsWith("/api/")) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
-    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js", "/regime-adaptive-breakout.js"]);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js", "/regime-adaptive-breakout.js", "/trend-following-indicators.js"]);
     if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
     const assetPath = requestUrl.pathname === "/" ? "/" : requestUrl.pathname;
     const upstream = await fetch("https://edge-intelligence-486.pages.dev" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
