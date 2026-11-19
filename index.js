@@ -3,6 +3,7 @@ import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObse
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
+import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -388,6 +389,33 @@ async function marketSearch(request, env) {
   return { markets: data.markets.map(market => normalizePredictionMarket(market, data.as_of, retrievedAt)), next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : null, total_count: finiteNumber(data.total_count), as_of: typeof data.as_of === "string" ? data.as_of : null, retrieved_at: retrievedAt, source: "Prediction.com API", jurisdiction: "unverified" };
 }
 
+async function runAutomatedCryptoPaper(env) {
+  if (!env.EDGE_KV) return { status: "storage_unavailable" };
+  const key = "crypto-auto-paper-global-v1", now = isoNow();
+  let account;
+  try { account = normalizeAutoPaperAccount(JSON.parse(await env.EDGE_KV.get(key) || "null") || createAutoPaperAccount(now), now); }
+  catch { account = createAutoPaperAccount(now); }
+  const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
+    try {
+      const base = "https://api.binance.com/api/v3/";
+      const urls = [base + "klines?symbol=" + symbol + "&interval=1h&limit=260", base + "ticker/price?symbol=" + symbol];
+      const responses = await Promise.all(urls.map(url => fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(9000) })));
+      if (responses.some(response => !response.ok)) throw Error("Public market data unavailable");
+      const raw = await responses[0].json(), quote = await responses[1].json();
+      if (!Array.isArray(raw) || raw.length < 220 || !Number.isFinite(Number(quote.price)) || Number(quote.price) <= 0) throw Error("Incomplete market response");
+      const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({ timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }));
+      if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) throw Error("Invalid hourly candles");
+      return { symbol, price: Number(quote.price), signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", latestClosedCandle: bars.at(-1).timestamp };
+    } catch { return { symbol, status: "UNAVAILABLE", message: "Market data request failed or returned invalid data." }; }
+  }));
+  const prices = Object.fromEntries(results.filter(x => x.price > 0).map(x => [x.symbol,x.price]));
+  const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
+  account = processAutoPaperSignals(account, { signals, prices, now });
+  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.message||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null })), lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public spot API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  await env.EDGE_KV.put(key, JSON.stringify(snapshot));
+  return snapshot;
+}
+
 async function handle(request, env, ctx) {
   const requestUrl = new URL(request.url); const origin = request.headers.get("Origin");
   if (origin && origin !== requestUrl.origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
@@ -441,6 +469,16 @@ async function handle(request, env, ctx) {
     }
     return reply(data);
   }
+  if (requestUrl.pathname === "/api/crypto/auto-paper/account" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");
+    if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
+    const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
+    if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
+    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid."); }
+    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(502, "Automated paper ledger failed its safety validation.");
+    return reply(snapshot);
+  }
+
   if (requestUrl.pathname.startsWith("/api/crypto/coinspot/paper")) {
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
     const storageKey = await userKey("crypto-paper", principal.sub);
@@ -630,8 +668,8 @@ export default {
     }
   },
   async scheduled(_event, env, ctx) {
-    if (!env.PREDICTION_HUNT_API_KEY) return;
-    ctx.waitUntil((async () => {
+    if (env.EDGE_KV) ctx.waitUntil(runAutomatedCryptoPaper(env).catch(() => null));
+    if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
       const result = await scan(env, rules); await alertNew(env, result);
     })());
