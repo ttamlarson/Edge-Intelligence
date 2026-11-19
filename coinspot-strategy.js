@@ -59,7 +59,7 @@ function runSegment(candles, start, end, costs) {
         const gross = position.quantity * sell, fee = gross * costs.feeRate, proceeds = gross - fee;
         const pnl = proceeds - position.cost;
         cash += proceeds;
-        trades.push({ entryAt: position.openedAt, exitAt: bar.timestamp, entry: round(position.entry), exit: round(exit), pnlAud: round(pnl), reason });
+        trades.push({ entryAt: position.openedAt, exitAt: bar.timestamp, entry: round(position.entry), exit: round(exit), pnlQuote: round(pnl), reason });
         if (pnl < 0) dailyLoss += -pnl;
         position = null;
       }
@@ -76,18 +76,18 @@ function runSegment(candles, start, end, costs) {
     const equity = cash + (position ? position.quantity * bar.close : 0);
     peak = Math.max(peak, equity); maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak);
   }
-  const winners = trades.filter(t => t.pnlAud > 0), losers = trades.filter(t => t.pnlAud < 0);
-  const grossWins = winners.reduce((sum, t) => sum + t.pnlAud, 0), grossLosses = -losers.reduce((sum, t) => sum + t.pnlAud, 0);
+  const winners = trades.filter(t => t.pnlQuote > 0), losers = trades.filter(t => t.pnlQuote < 0);
+  const grossWins = winners.reduce((sum, t) => sum + t.pnlQuote, 0), grossLosses = -losers.reduce((sum, t) => sum + t.pnlQuote, 0);
   return { trades: trades.length, wins: winners.length, losses: losers.length,
     winRatePct: trades.length ? round(winners.length / trades.length * 100) : 0,
-    netPnlAud: round(trades.reduce((sum, t) => sum + t.pnlAud, 0)),
+    netPnlQuote: round(trades.reduce((sum, t) => sum + t.pnlQuote, 0)),
     endingEquityAud: round(cash + (position ? position.quantity * candles[end - 1].close : 0)),
     profitFactor: grossLosses ? Number((grossWins / grossLosses).toFixed(3)) : grossWins ? null : 0,
     maxDrawdownPct: round(maxDrawdown * 100), tradesDetail: trades };
 }
-export function backtestCoinSpotTrend({ candles, startingCapitalAud = 100, feeRate = .001, slippageBps = 15, spreadBps = 10, trainFraction = .7 } = {}) {
+export function backtestCoinSpotTrend({ candles, startingCapital = 100, startingCapitalAud, quoteCurrency = "AUD", feeRate = .001, slippageBps = 15, spreadBps = 10, trainFraction = .7 } = {}) {
   const validated = validateCoinSpotCandles(candles);
-  if (startingCapitalAud !== 100 || ![feeRate, slippageBps, spreadBps, trainFraction].every(Number.isFinite) ||
+  if ((startingCapitalAud !== undefined && startingCapitalAud !== 100) || startingCapital !== 100 || !/^[A-Z]{3,5}$/.test(quoteCurrency) || ![feeRate, slippageBps, spreadBps, trainFraction].every(Number.isFinite) ||
     feeRate < 0 || slippageBps < 0 || spreadBps < 0 || trainFraction < .5 || trainFraction > .85)
     throw Error("Invalid backtest assumptions.");
   const split = Math.floor(validated.length * trainFraction), costs = { feeRate, slippageBps, spreadBps };
@@ -95,6 +95,6 @@ export function backtestCoinSpotTrend({ candles, startingCapitalAud = 100, feeRa
   const assessment = outOfSample.trades < 30 ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
     outOfSample.netPnlAud > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
-  return { strategy: "COINSPOT_AUD_1H_EMA_PULLBACK_V1", marketDataSource: "user_supplied_historical_ohlcv",
+  return { strategy: "EMA_TREND_PULLBACK_1H_V1", marketDataSource: "user_supplied_historical_ohlcv",
     startingCapitalAud: 100, costs, splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
 }
