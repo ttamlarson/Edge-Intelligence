@@ -251,3 +251,20 @@ test("Cloudflare asset proxy serves the Crypto CSV module required by Strategy L
   assert.match(requested, /edge-intelligence-486\.pages\.dev\/crypto-csv\.js$/);
   assert.match(await response.text(), /parseBinanceKlineCsv/);
 });
+
+
+test("Cloudflare asset proxy serves the breakout strategy module required by Strategy Lab", async t => {
+  const originalFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async url => {
+    requested = String(url);
+    return new Response("export function backtestRegimeAdaptiveBreakout() {}", {
+      status: 200, headers: { "Content-Type": "text/javascript" }
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const response = await worker.fetch(new Request("https://edge.example.au/regime-adaptive-breakout.js"), baseEnv());
+  assert.equal(response.status, 200);
+  assert.match(requested, /edge-intelligence-486\\.pages\\.dev\\/regime-adaptive-breakout\\.js$/);
+  assert.match(await response.text(), /backtestRegimeAdaptiveBreakout/);
+});
