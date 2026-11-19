@@ -1,48 +1,123 @@
-name: Deploy EDGE to GitHub Pages
+name: Deploy EDGE frontend to Cloudflare Pages
 
 on:
   push:
     branches: ["main"]
+    paths:
+      - "index.html"
+      - "app.js"
+      - "domain.js"
+      - "au-sources.js"
+      - "autonomous-engine.js"
+      - "coinspot-strategy.js"
+      - "adaptive-regime-strategy.js"
+      - "crypto-csv.js"
+      - "styles.css"
+      - "manifest.webmanifest"
+      - "sw.js"
+      - "icon.svg"
+      - "icon-192.png"
+      - "icon-512.png"
+      - "_headers"
+      - "scripts/build-pages.js"
+      - "package.json"
+      - ".github/workflows/pages-deploy.yml"
+      - "tests/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages
+  group: edge-cloudflare-pages-production
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_ACCOUNT_ID: "3d6d1c93342d0a22c108dee320c2bf6e"
+      EDGE_PAGES_PROJECT: edge-intelligence
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
+
       - name: Run tests
         run: npm test
+
       - name: Check JavaScript syntax
         run: npm run check
-      - name: Build static site
-        run: npm run build:pages
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist/
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      pages: write
-      id-token: write
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Build static frontend
+        run: npm run build:pages
+
+      - name: Verify deployable output
+        run: |
+          test -s dist/index.html
+          test -s dist/app.js
+          test -s dist/styles.css
+          test -s dist/_headers
+          test -s dist/manifest.webmanifest
+          test -s dist/autonomous-engine.js
+          if grep -R -nE 'OPENAI_API_KEY|PREDICTION_HUNT_API_KEY|COINSPOT_READONLY_SECRET' dist; then
+            echo "A server-side credential name/value was found in the static output."
+            exit 1
+          fi
+
+      - name: Create Cloudflare Pages project if needed
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const name = process.env.EDGE_PAGES_PROJECT;
+          if (!account || !token || !name) throw new Error('Cloudflare account, API token, or Pages project name is missing.');
+          const base = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/pages/projects';
+          async function request(url, options = {}) {
+            const response = await fetch(url, {
+              ...options,
+              headers: {
+                Authorization: 'Bearer ' + token,
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+              }
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || body.success === false) {
+              const details = (body.errors || []).map(e => e.message).filter(Boolean).join('; ');
+              throw new Error('Cloudflare Pages API ' + response.status + ': ' + (details || response.statusText));
+            }
+            return body;
+          }
+          (async () => {
+            const listed = await request(base);
+            const existing = (listed.result || []).find(project => project.name === name);
+            if (existing) {
+              if (existing.source && existing.source.type && existing.source.type !== 'direct_upload') {
+                throw new Error('The Pages project is Git-integrated. Wrangler Direct Upload cannot be used for this project; choose a Direct Upload project or switch its deployment method deliberately.');
+              }
+              process.stdout.write('Using existing Cloudflare Pages project: ' + name + '\n');
+              return;
+            }
+            await request(base, {
+              method: 'POST',
+              body: JSON.stringify({ name, production_branch: 'main' })
+            });
+            process.stdout.write('Created Cloudflare Pages project: ' + name + '\n');
+          })().catch(error => { console.error(error.message); process.exit(1); });
+          NODE
+
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+
+      - name: Deploy frontend to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: wrangler pages deploy dist --project-name="$EDGE_PAGES_PROJECT" --branch=main --commit-dirty=false
