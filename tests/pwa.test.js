@@ -46,7 +46,7 @@ test("service-worker installation precaches every required shell resource", asyn
   let installPromise;
   handlers.get("install")({ waitUntil: promise => { installPromise = promise; } });
   await installPromise;
-  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./autonomous-engine.js", "./coinspot-strategy.js", "./crypto-csv.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
+  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./autonomous-engine.js", "./crypto-csv.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
   for (const path of cachedPaths) assert.equal(await exists(path.replace(/^\.\//, "") || "index.html"), true, path);
 });
 
