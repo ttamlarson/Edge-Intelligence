@@ -396,14 +396,15 @@ async function handle(request, env, ctx) {
     if (requestedHeaders.some(header => header !== "content-type")) return json({ error: "Requested headers are not allowed." }, 403, origin, env);
     return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin, env) } });
   }
-  // Proxy the static frontend from GitHub Pages through this Worker. The app and API
-  // then share the Worker origin, so Cloudflare Access uses a first-party Safari cookie.
+  // Proxy the static frontend from the Cloudflare Pages production site through
+  // this Worker. Browser requests stay on the Worker origin, keeping Cloudflare
+  // Access authentication first-party (including Safari/iOS).
   if (!requestUrl.pathname.startsWith("/api/")) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
-    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png"]);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js"]);
     if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
-    const assetPath = requestUrl.pathname === "/" ? "/Edge-Intelligence/" : "/Edge-Intelligence" + requestUrl.pathname;
-    const upstream = await fetch("https://ttamlarson.github.io" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
+    const assetPath = requestUrl.pathname === "/" ? "/" : requestUrl.pathname;
+    const upstream = await fetch("https://edge-intelligence-486.pages.dev" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
     const headers = new Headers(upstream.headers);
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("X-Frame-Options", "DENY");
