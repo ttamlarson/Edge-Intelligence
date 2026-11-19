@@ -4,6 +4,7 @@ export const AUTO_CONFIG = Object.freeze({ startingCapital: 100, feeRate: .001, 
 const round = n => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const roundQuantity = n => Math.floor(n * 1e8) / 1e8;
 const finite = n => Number.isFinite(Number(n)) ? Number(n) : null;
+const liquidationValue = (position, price) => position.quantity * price * (1 - (AUTO_CONFIG.slippageBps + AUTO_CONFIG.spreadBps / 2) / 10000) * (1 - AUTO_CONFIG.feeRate);
 function ema(values, period) { if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(const x of values.slice(period))v=x*k+v*(1-k);return v; }
 function rsi(values, period=14) { if(values.length<=period)return null;let up=0,down=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)up+=d;else down-=d;}return down===0?100:100-100/(1+up/down); }
 function atr(bars, period=14) { if(bars.length<=period)return null;let sum=0;for(let i=bars.length-period;i<bars.length;i++){const p=bars[i-1].close,b=bars[i];sum+=Math.max(b.high-b.low,Math.abs(b.high-p),Math.abs(b.low-p));}return sum/period; }
@@ -34,7 +35,7 @@ export function markAutoPaperAccount(account,{prices,now=new Date().toISOString(
    a.cash=round(a.cash+proceeds);a.realizedPnl=round(a.realizedPnl+pnl);a.closedTrades.push({id:p.id,symbol:p.symbol,openedAt:p.openedAt,closedAt:now,entryPrice:p.entryPrice,exitPrice:round(exit),quantity:p.quantity,pnl:round(pnl),reason,entryFee:p.entryFee,exitFee:round(fee),strategy:p.strategy});a.closedTrades=a.closedTrades.slice(-200);a.openPosition=null;a.unrealizedPnl=0;a.dailyLoss=round(a.closedTrades.filter(t=>String(t.closedAt||"").slice(0,10)===now.slice(0,10)).reduce((s,t)=>s+Math.max(0,-Number(t.pnl||0)),0));
   }
  }
- a.equity=round(a.cash+(a.openPosition?a.openPosition.quantity*(a.markPrice||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
+ a.equity=round(a.cash+(a.openPosition?liquidationValue(a.openPosition,a.markPrice||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
 }
 export function processAutoPaperSignals(account,{signals,prices,now=new Date().toISOString()}={}){
  let a=markAutoPaperAccount(normalizeAutoPaperAccount(account,now),{prices,now});
@@ -51,5 +52,5 @@ export function processAutoPaperSignals(account,{signals,prices,now=new Date().t
   if(quantity<=0||entryCost<5||entryCost>a.cash)continue;
   a.cash=round(a.cash-entryCost);a.openPosition={id:symbol+"-"+s.timestamp,symbol,openedAt:now,signalAt:s.timestamp,entryPrice:round(entry),quantity:roundQuantity(quantity),entryFee:round(entryFee),entryCost:round(entryCost),stopPrice:round(stop),trailingStop:round(stop),targetPrice:round(target),atr:s.atr,highestPrice:entry,strategy:"TREND_FOLLOWING_1H_V1",status:"OPEN_PAPER_ONLY"};a.lastProcessed[symbol]=s.timestamp;break;
  }
- a.equity=round(a.cash+(a.openPosition?a.openPosition.quantity*(prices?.[a.openPosition.symbol]||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
+ a.equity=round(a.cash+(a.openPosition?liquidationValue(a.openPosition,prices?.[a.openPosition.symbol]||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
 }
