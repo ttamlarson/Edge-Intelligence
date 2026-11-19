@@ -268,3 +268,8 @@ test("Cloudflare asset proxy serves the breakout strategy module required by Str
   assert.ok(requested.endsWith("edge-intelligence-486.pages.dev/regime-adaptive-breakout.js"));
   assert.match(await response.text(), /backtestRegimeAdaptiveBreakout/);
 });
+
+test("Cloudflare asset proxy allowlist includes trend-following strategy module", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../index.js", import.meta.url), "utf8");
+  assert.ok(source.includes('"/trend-following-indicators.js"'));
+});
