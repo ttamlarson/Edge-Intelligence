@@ -113,13 +113,13 @@ Updated after local implementation and automated verification on `edge-productio
 - [ ] Operator action required: create a free DataCedar API key and configure Cloudflare Worker secret `DATACEDAR_API_KEY`.
 - [ ] After the secret is configured, exercise a real ASX symbol request and verify current provider coverage before describing the integration as live.
 
-
 ## Cloudflare Pages frontend deployment (2026-11-19)
 
 | Task | Status | Evidence / remaining boundary |
 |---|---|---|
-| Replace GitHub Pages workflow with Cloudflare Pages Direct Upload workflow | Implemented on feature branch | `.github/workflows/pages-deploy.yml` runs tests, syntax checks and `npm run build:pages`, then deploys `dist/` with Wrangler to the `edge-intelligence` Pages project on `main`. |
-| Reuse existing Cloudflare deployment credentials | Requires external access or approval | Workflow reuses `CLOUDFLARE_API_TOKEN` and the existing account ID. Token must include Account / Cloudflare Pages / Edit plus the existing Worker/KV permissions. Token value is not accessible to this workflow author and was not inspected. |
-| Preserve Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and changes its configured frontend origin to `https://edge-intelligence.pages.dev`. Worker redeploy occurs separately when merged. |
-| Create/verify Cloudflare Pages project and production deployment | Requires external access or approval | Workflow creates the Direct Upload project if absent, then deploys on `main`. A Git-integrated project is detected and causes a safe failure rather than a deployment-mode switch. No production deployment was run from this branch. |
-| Verify Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and a successful deployment. |
+| Preserve the existing Cloudflare Pages Git integration | Complete | Cloudflare's GitHub App created a Pages preview check for PR #12, confirming the repository is already connected to the `edge-intelligence` Pages project. |
+| Ensure the repository validates the static frontend before merge | Complete | Existing `ci.yml` runs tests, syntax checks and `npm run build:pages`; CI passed on the initial PR commit. |
+| Keep the existing Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and sets its allowed frontend origin to `https://edge-intelligence.pages.dev`. Worker redeploy occurs separately after merge. |
+| Remove conflicting GitHub Pages / Direct Upload publishing workflow | Implemented on feature branch | Pages is already Git-integrated. Do not switch it to Wrangler Direct Upload; Cloudflare's GitHub App performs preview and production deployments. |
+| Verify production Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and successful production deployment. |
+| Cloudflare API token Pages permission | Not required for current deployment path | Pages deployment is authorized by the Cloudflare GitHub App. Existing `CLOUDFLARE_API_TOKEN` remains dedicated to the Worker deployment workflow. |
