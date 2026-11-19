@@ -46,7 +46,7 @@ export function processAutoPaperSignals(account,{signals,prices,now=new Date().t
   a.lastProcessed[symbol]=s.timestamp;
   const price=finite(prices?.[symbol]);if(!(price>0))continue;
   const entry=price*(1+(AUTO_CONFIG.slippageBps+AUTO_CONFIG.spreadBps/2)/10000),stop=entry-AUTO_CONFIG.stopAtr*s.atr,target=entry+AUTO_CONFIG.targetAtr*s.atr;
-  const equity=a.equity||a.cash+a.realizedPnl,riskBudget=equity*AUTO_CONFIG.riskPct,allocation=Math.min(equity*AUTO_CONFIG.maxAllocationPct/100,a.cash),quantity=Math.min(riskBudget/(entry-stop),allocation/(entry*(1+AUTO_CONFIG.feeRate)));
+  const equity=a.equity||a.cash+a.realizedPnl,riskBudget=equity*AUTO_CONFIG.riskPct,allocation=Math.min(equity*AUTO_CONFIG.maxAllocationPct/100,a.cash),quantity=roundQuantity(Math.min(riskBudget/(entry-stop),allocation/(entry*(1+AUTO_CONFIG.feeRate))));
   const entryFee=quantity*entry*AUTO_CONFIG.feeRate,entryCost=quantity*entry+entryFee;
   if(quantity<=0||entryCost<5||entryCost>a.cash)continue;
   a.cash=round(a.cash-entryCost);a.openPosition={id:symbol+"-"+s.timestamp,symbol,openedAt:now,signalAt:s.timestamp,entryPrice:round(entry),quantity:roundQuantity(quantity),entryFee:round(entryFee),entryCost:round(entryCost),stopPrice:round(stop),trailingStop:round(stop),targetPrice:round(target),atr:s.atr,highestPrice:entry,strategy:"TREND_FOLLOWING_1H_V1",status:"OPEN_PAPER_ONLY"};a.lastProcessed[symbol]=s.timestamp;break;
