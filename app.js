@@ -81,17 +81,27 @@ function renderCryptoBacktest(label, imported) {
  return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><p class="muted tiny">Data provenance: CryptoFetch export, Binance ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
 }
 $("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
- const files=[["BTCUSDT","BTC","USDT",$("btcHistoryFile")?.files?.[0]],["ETHUSDT","ETH","USDT",$("ethHistoryFile")?.files?.[0]]].filter(x=>x[3]);
+ const selected=[...($("cryptoHistoryFiles")?.files||[])];
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults");
- if(!files.length){status.textContent="Choose the BTCUSDT and/or ETHUSDT hourly CSV file first.";return}
- for(const [symbol,, ,file] of files)if(file.size>5*1024*1024){status.textContent=symbol+" CSV must be smaller than 5 MB.";return}
- const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing both markets…";
+ if(!selected.length){status.textContent="Choose one or more 1-hour OHLCV CSV files first.";return}
+ if(selected.length>10){status.textContent="Select no more than 10 markets per batch.";return}
+ const files=selected.map(file=>{
+  const stem=file.name.replace(/\\.csv$/i,"").toUpperCase();
+  const quote=["USDT","USDC","AUD","BTC","ETH"].find(q=>stem.endsWith(q));
+  if(!quote)throw new Error("Could not infer quote asset from "+file.name+". Name the file with its full symbol, e.g. SOLUSDT.csv.");
+  const symbol=stem.match(/[A-Z0-9]{5,20}$/)?.[0];
+  if(!symbol||!symbol.endsWith(quote))throw new Error("Could not infer market symbol from "+file.name+".");
+  return {symbol,quote,file};
+ });
+ if(new Set(files.map(x=>x.symbol)).size!==files.length){status.textContent="Remove duplicate market CSVs.";return}
+ for(const item of files)if(item.file.size>5*1024*1024){status.textContent=item.symbol+" CSV must be smaller than 5 MB.";return}
+ const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing markets…";
  try{
-  const results=await Promise.all(files.map(async([symbol,base,quote,file])=>({symbol,imported:await runCryptoDatasetBacktest(file,symbol,quote)})));
+  const results=await Promise.all(files.map(async item=>({symbol:item.symbol,imported:await runCryptoDatasetBacktest(item.file,item.symbol,item.quote)})));
   out.innerHTML=results.map(x=>renderCryptoBacktest(x.symbol,x.imported)).join("");
-  status.textContent="Completed "+results.map(x=>x.symbol).join(" and ")+". Each market was tested independently with a 70% chronological in-sample / 30% out-of-sample split. Open candle excluded; quote currency retained as USDT.";
+  status.textContent="Completed "+results.map(x=>x.symbol).join(", ")+". Each market uses its own 70% chronological in-sample / 30% out-of-sample split. The unfinished candle is excluded. No cross-market portfolio simulation is implied.";
  }catch(e){out.innerHTML="";status.textContent="Backtest rejected: "+e.message;}
- finally{b.disabled=false;b.textContent="Run BTC + ETH backtests";}
+ finally{b.disabled=false;b.textContent="Run multi-market strategy tests";}
 });
 
 async function loadCoinSpotMarkets(){
