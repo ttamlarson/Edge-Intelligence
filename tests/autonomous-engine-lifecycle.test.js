@@ -52,20 +52,20 @@ test("CSV parser rejects malformed OHLC, duplicate sessions and impossible ISO d
 
 
 test("CSV import requires explicit AUD confirmation and rejects adjusted-close-only data", () => {
-  const csv = "Symbol,Date,Open,High,Low,Close\\nBHP,2026-11-12,40,41,39,40.5";
+  const csv = "Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40.5";
   assert.equal(parseAsxDailyCsv(csv).valid, false);
   assert.match(parseAsxDailyCsv(csv).reason, /explicitly confirmed as AUD/);
   assert.equal(parseAsxDailyCsv(csv, { currency: "USD" }).valid, false);
   assert.equal(parseAsxDailyCsv(csv, { currency: "AUD" }).valid, true);
-  const adjusted = "Symbol,Date,Open,High,Low,Adj Close\\nBHP,2026-11-12,40,41,39,40.5";
+  const adjusted = "Symbol,Date,Open,High,Low,Adj Close\nBHP,2026-11-12,40,41,39,40.5";
   assert.match(parseCsv(adjusted).reason, /Required columns/);
 });
 
 test("CSV parser rejects malformed quotes and supports correctly quoted fields", () => {
-  const malformed = 'Symbol,Date,Open,High,Low,Close\\nBHP"oops,2026-11-12,40,41,39,40';
+  const malformed = 'Symbol,Date,Open,High,Low,Close\nBHP"oops,2026-11-12,40,41,39,40';
   assert.equal(parseCsv(malformed).valid, false);
   assert.match(parseCsv(malformed).reason, /malformed quoting/);
-  const quoted = '"Symbol","Date","Open","High","Low","Close"\\n"BHP","2026-11-12","40","41","39","40.5"';
+  const quoted = '"Symbol","Date","Open","High","Low","Close"\n"BHP","2026-11-12","40","41","39","40.5"';
   assert.equal(parseCsv(quoted).valid, true);
 });
 
