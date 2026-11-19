@@ -44,10 +44,13 @@ export function validateCoinSpotCandles(candles) {
 function runSegment(candles, start, end, costs) {
   let cash = 100, position = null, peak = 100, maxDrawdown = 0, dailyLoss = 0, activeDay = "";
   const trades = [];
+  const skipped = { positionOpen: 0, dailyLossLimit: 0, trendFilter: 0, rsiFilter: 0, volatilityFilter: 0, insufficientCapitalOrRisk: 0 };
+  let evaluatedBars = 0, eligibleSignals = 0;
   for (let i = Math.max(60, start); i < end; i++) {
     const history = candles.slice(0, i), closes = history.map(x => x.close);
     const fast = ema(closes.slice(-100), 20), slow = ema(closes.slice(-100), 50);
     const momentum = rsi(closes), volatility = atr(history), bar = candles[i], day = bar.timestamp.slice(0, 10);
+    evaluatedBars++;
     if (day !== activeDay) { activeDay = day; dailyLoss = 0; }
     if (position) {
       let exit = null, reason = null;
@@ -64,14 +67,20 @@ function runSegment(candles, start, end, costs) {
         position = null;
       }
     }
-    if (!position && i + 1 < end && dailyLoss < 3 && fast > slow && bar.close > fast &&
-      momentum >= 50 && momentum <= 68 && volatility > 0) {
+    if (position) { skipped.positionOpen++; }
+    else if (dailyLoss >= 3) { skipped.dailyLossLimit++; }
+    else if (!(fast > slow && bar.close > fast)) { skipped.trendFilter++; }
+    else if (!(momentum >= 50 && momentum <= 68)) { skipped.rsiFilter++; }
+    else if (!(volatility > 0)) { skipped.volatilityFilter++; }
+    else if (i + 1 < end) {
+      eligibleSignals++;
       const next = candles[i + 1], entry = next.open * (1 + (costs.slippageBps + costs.spreadBps / 2) / 10000);
       const riskBudget = Math.min(cash * 0.01, 3 - dailyLoss), spend = Math.min(50, Math.max(0, cash - 50));
       const stop = entry - 2 * volatility, target = entry + 3 * volatility;
       const quantity = Math.min(spend / (entry * (1 + costs.feeRate)), riskBudget / (entry - stop));
       const cost = quantity * entry * (1 + costs.feeRate);
       if (cost >= 10 && cost <= spend) { cash -= cost; position = { openedAt: next.timestamp, entry, quantity, cost, stop, target }; }
+      else skipped.insufficientCapitalOrRisk++;
     }
     const equity = cash + (position ? position.quantity * bar.close : 0);
     peak = Math.max(peak, equity); maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak);
@@ -83,7 +92,9 @@ function runSegment(candles, start, end, costs) {
     netPnlQuote: round(trades.reduce((sum, t) => sum + t.pnlQuote, 0)),
     endingEquityQuote: round(cash + (position ? position.quantity * candles[end - 1].close : 0)),
     profitFactor: grossLosses ? Number((grossWins / grossLosses).toFixed(3)) : grossWins ? null : 0,
-    maxDrawdownPct: round(maxDrawdown * 100), tradesDetail: trades };
+    maxDrawdownPct: round(maxDrawdown * 100), evaluatedBars, eligibleSignals,
+    skipped, dateRange: { from: candles[Math.max(60, start)]?.timestamp ?? null, to: candles[end - 1]?.timestamp ?? null },
+    tradesDetail: trades };
 }
 export function backtestCoinSpotTrend({ candles, startingCapital = 100, startingCapitalAud, quoteCurrency = "AUD", feeRate = .001, slippageBps = 15, spreadBps = 10, trainFraction = .7 } = {}) {
   const validated = validateCoinSpotCandles(candles);
@@ -92,9 +103,13 @@ export function backtestCoinSpotTrend({ candles, startingCapital = 100, starting
     throw Error("Invalid backtest assumptions.");
   const split = Math.floor(validated.length * trainFraction), costs = { feeRate, slippageBps, spreadBps };
   const inSample = runSegment(validated, 60, split, costs), outOfSample = runSegment(validated, split, validated.length, costs);
-  const assessment = outOfSample.trades < 30 ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
+  const minimumOutOfSampleTrades = 30;
+  const assessment = outOfSample.trades < minimumOutOfSampleTrades ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
     outOfSample.netPnlQuote > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
   return { strategy: "EMA_TREND_PULLBACK_1H_V1", marketDataSource: "user_supplied_historical_ohlcv",
-    startingCapital: 100, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs, splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
+    startingCapital: 100, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs,
+    sample: { totalCandles: validated.length, splitIndex: split, trainFraction, inSampleCandles: split - 60, outOfSampleCandles: validated.length - split,
+      minimumOutOfSampleTrades, assessmentRule: "At least 30 completed out-of-sample trades; then positive net P&L, profit factor > 1.2 and max drawdown < 10%." },
+    splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
 }
