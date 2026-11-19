@@ -55,7 +55,8 @@ function simulate(candles, start, end, config) {
   let bars = 0, signals = 0;
   for (let i = Math.max(220, start); i < end; i++) {
     const history = candles.slice(0, i), closes = history.map(x => x.close), bar = candles[i];
-    const regime = regimeAt(history), e20 = ema(closes.slice(-120), 20), e50 = ema(closes.slice(-160), 50);
+    const e20 = ema(closes.slice(-120), 20), e50 = ema(closes.slice(-160), 50);
+    const regime = config.active ? (e20 > e50 && bar.close > e50 ? "BULL" : e20 < e50 ? "BEAR" : "SIDEWAYS") : regimeAt(history);
     const momentum = rsi(closes), volatility = atr(history), next = candles[i + 1];
     bars++;
     if (cooldown > 0) cooldown--;
@@ -81,7 +82,9 @@ function simulate(candles, start, end, config) {
     if (position) skip.positionOpen++;
     else if (cooldown > 0) skip.cooldown++;
     else if (regime !== "BULL") skip.bullRegime++;
-    else if (!(bar.low <= e20 * config.pullbackTolerance && bar.close > e20)) skip.pullback++;
+    else if (!(config.active
+      ? bar.close > e20 && (bar.low <= e20 * config.pullbackTolerance || bar.close > Math.max(...history.slice(-4).map(x => x.high)))
+      : bar.low <= e20 * config.pullbackTolerance && bar.close > e20)) skip.pullback++;
     else if (!(momentum >= config.rsiMin && momentum <= config.rsiMax && volatility > 0)) skip.momentum++;
     else if (next && i + 1 < end) {
       signals++;
@@ -128,15 +131,25 @@ export function backtestAdaptiveRegime({ candles, market = "UNKNOWN", quoteCurre
     maxHoldBars: 72, lossCooldownBars: 8, minTrade: 5
   };
   const inSample = simulate(data, 220, split, config), outOfSample = simulate(data, split, data.length, config);
+  const activeConfig = { ...config, active: true, riskPct: .005, maxAllocationPct: .25, stopAtr: 1.8, trailingAtr: 2.2, pullbackTolerance: 1.025, rsiMin: 42, rsiMax: 75, maxHoldBars: 48, lossCooldownBars: 4 };
+  const activeInSample = simulate(data, 220, split, activeConfig), activeOutOfSample = simulate(data, split, data.length, activeConfig);
   const minimumTrades = 20;
-  const assessment = outOfSample.trades < minimumTrades ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
-    outOfSample.netPnlQuote > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
+  const assess = sample => sample.trades < minimumTrades ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
+    sample.netPnlQuote > 0 && sample.profitFactor > 1.2 && sample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
+  const assessment = assess(outOfSample), activeAssessment = assess(activeOutOfSample);
   return {
     strategy: "EDGE_ADAPTIVE_REGIME_1H_V1", market: String(market).toUpperCase(), quoteCurrency,
     methodology: "Bull regime (EMA20>EMA50>EMA100) + EMA20 pullback reclaim + RSI confirmation; ATR trailing stop, regime/time exits, loss cooldown.",
     costs: { feeRate, slippageBps, spreadBps }, risk: { perTradePct: .75, maxAllocationPct: 35, maxHoldHours: 72, lossCooldownHours: 8 },
     sample: { totalCandles: data.length, splitIndex: split, trainFraction, inSampleCandles: split - 220, outOfSampleCandles: data.length - split, minimumOutOfSampleTrades: minimumTrades },
-    inSample, outOfSample, assessment, liveTradingEnabled: false
+    inSample, outOfSample, assessment,
+    activeVariant: {
+      strategy: "EDGE_ACTIVE_MOMENTUM_1H_V1",
+      methodology: "Higher-frequency EMA20/50 trend filter with EMA20 reclaim or four-bar breakout, RSI 42–75, tighter ATR stop/trail and shorter cooldown.",
+      risk: { perTradePct: .5, maxAllocationPct: 25, maxHoldHours: 48, lossCooldownHours: 4 },
+      inSample: activeInSample, outOfSample: activeOutOfSample, assessment: activeAssessment
+    },
+    liveTradingEnabled: false
   };
 }
