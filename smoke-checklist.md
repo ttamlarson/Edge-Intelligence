@@ -21,7 +21,7 @@
 - [x] Service-worker shell now includes `autonomous-engine.js` for offline ASX paper-desk module loading.
 - [x] Service-worker cache version incremented to invalidate the previous shell.
 - [x] Manifest identity, start URL and scope are relative to support a project Pages path such as `/Edge-Intelligence/`.
-- [ ] Verify Pages serves the site over HTTPS and applies the intended security headers.
+- [ ] After the Cloudflare Pages workflow is merged and succeeds, verify https://edge-intelligence-486.pages.dev serves the site over HTTPS and applies the intended security headers.
 - [ ] Complete standalone install on supported desktop/mobile browsers.
 - [ ] Verify service-worker update activation and offline reload on a clean HTTPS browser profile.
 - [ ] Confirm existing `edge-intelligence-v1`, `edge-forecasts-v1` and `edge-alert-rules-v1` browser storage remains unchanged after deployment.
@@ -40,7 +40,7 @@
 
 ## Release boundary
 - This branch is research and paper simulation only. It does not connect to a broker, submit orders, or enable real-money trading.
-- GitHub Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
+- Cloudflare Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
 
 
 ## DataCedar ASX connector smoke checks

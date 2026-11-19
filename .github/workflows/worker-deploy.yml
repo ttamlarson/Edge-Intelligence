@@ -117,7 +117,7 @@ jobs:
           }
           const source = fs.readFileSync('wrangler.toml', 'utf8');
           const production = source.split('[env.staging]')[0]
-            .replace('https://REPLACE_WITH_YOUR_PAGES_DOMAIN', 'https://ttamlarson.github.io')
+            .replace('https://REPLACE_WITH_YOUR_PAGES_DOMAIN', 'https://edge-intelligence-486.pages.dev')
             .replace('REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com', process.env.CF_ACCESS_TEAM_DOMAIN)
             .replace('REPLACE_WITH_ACCESS_APPLICATION_AUD', accessAud)
             .replace('REPLACE_WITH_YOUR_KV_NAMESPACE_ID', process.env.EDGE_KV_NAMESPACE_ID);
