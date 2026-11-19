@@ -38,9 +38,9 @@ export function markAutoPaperAccount(account,{prices,now=new Date().toISOString(
 export function processAutoPaperSignals(account,{signals,prices,now=new Date().toISOString()}={}){
  let a=markAutoPaperAccount(normalizeAutoPaperAccount(account,now),{prices,now});
  if(a.day!==now.slice(0,10)){a.day=now.slice(0,10);a.dailyLoss=0;}
- if(a.openPosition||a.dailyLoss>=a.startingCapital*AUTO_CONFIG.maxDailyLossPct/100)return a;
  const candidates=Object.entries(signals||{}).filter(([symbol,s])=>AUTO_SYMBOLS.includes(symbol)&&s?.signal&&s.timestamp&&s.atr>0&&s.timestamp!==a.lastProcessed[symbol]).sort((x,y)=>(y[1].adx||0)-(x[1].adx||0));
  for(const [symbol,s] of candidates)a.lastProcessed[symbol]=s.timestamp;
+ if(a.openPosition||a.dailyLoss>=a.startingCapital*AUTO_CONFIG.maxDailyLossPct/100)return a;
  for(const [symbol,s] of candidates){
   a.lastProcessed[symbol]=s.timestamp;
   const price=finite(prices?.[symbol]);if(!(price>0))continue;
