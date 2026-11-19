@@ -10,12 +10,19 @@ function rsi(values, period=14) { if(values.length<=period)return null;let up=0,
 function atr(bars, period=14) { if(bars.length<=period)return null;let sum=0;for(let i=bars.length-period;i<bars.length;i++){const p=bars[i-1].close,b=bars[i];sum+=Math.max(b.high-b.low,Math.abs(b.high-p),Math.abs(b.low-p));}return sum/period; }
 function adx(bars,period=14){if(bars.length<period*2+2)return null;const dx=[];for(let end=bars.length-period+1;end<=bars.length;end++){let tr=0,plus=0,minus=0;for(let i=end-period;i<end;i++){const c=bars[i],p=bars[i-1];tr+=Math.max(c.high-c.low,Math.abs(c.high-p.close),Math.abs(c.low-p.close));const up=c.high-p.high,dn=p.low-c.low;if(up>dn&&up>0)plus+=up;if(dn>up&&dn>0)minus+=dn;}const pdi=tr?100*plus/tr:0,mdi=tr?100*minus/tr:0;dx.push(pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0);}return dx.reduce((s,x)=>s+x,0)/dx.length;}
 export function evaluateAutoSignal(bars) {
- if(!Array.isArray(bars)||bars.length<220) return {signal:false,reason:"WARMUP_REQUIRED"};
+ if(!Array.isArray(bars)||bars.length<220) return {signal:false,reason:"WARMUP_REQUIRED",checks:{warmup:{passed:false,value:Array.isArray(bars)?bars.length:0,required:220}},failedChecks:["WARMUP_REQUIRED"]};
  const last=bars.at(-1),closes=bars.map(x=>x.close),e20=ema(closes.slice(-100),20),e50=ema(closes.slice(-150),50),e200=ema(closes,200),momentum=rsi(closes),vol=atr(bars),strength=adx(bars);
  const macd=ema(closes,12)-ema(closes,26);
  const previousMacd=ema(closes.slice(0,-1),12)-ema(closes.slice(0,-1),26);
- const checks={trend:e20>e50&&e50>e200&&last.close>e20,rsi:momentum>=50&&momentum<=68,macd:macd>previousMacd,adx:strength>=18,atr:Number.isFinite(vol)&&vol>0};
- return {signal:Object.values(checks).every(Boolean),reason:Object.entries(checks).filter(([,v])=>!v).map(([k])=>k.toUpperCase()).join("_")||"TREND_FOLLOWING_CONFLUENCE",timestamp:last.timestamp,price:last.close,atr:vol,rsi:round(momentum),adx:round(strength),ema20:round(e20),ema50:round(e50),ema200:round(e200)};
+ const checks={
+  trend:{passed:e20>e50&&e50>e200&&last.close>e20,value:{close:round(last.close),ema20:round(e20),ema50:round(e50),ema200:round(e200)},required:"close > EMA20 > EMA50 > EMA200"},
+  rsi:{passed:momentum>=50&&momentum<=68,value:round(momentum),required:"50–68"},
+  macd:{passed:macd>previousMacd,value:{current:round(macd),previous:round(previousMacd)},required:"current MACD > previous MACD"},
+  adx:{passed:strength>=18,value:round(strength),required:"≥ 18"},
+  atr:{passed:Number.isFinite(vol)&&vol>0,value:round(vol),required:"valid positive ATR"}
+ };
+ const failedChecks=Object.entries(checks).filter(([,v])=>!v.passed).map(([k])=>k.toUpperCase());
+ return {signal:failedChecks.length===0,reason:failedChecks.join("_")||"TREND_FOLLOWING_CONFLUENCE",failedChecks,checks,timestamp:last.timestamp,price:last.close,atr:vol,rsi:round(momentum),adx:round(strength),ema20:round(e20),ema50:round(e50),ema200:round(e200)};
 }
 export function createAutoPaperAccount(now=new Date().toISOString()){return {mode:"AUTOMATED_PAPER_ONLY",quoteCurrency:"USDT",startingCapital:100,cash:100,realizedPnl:0,openPosition:null,closedTrades:[],lastProcessed:{},dailyLoss:0,day:now.slice(0,10),equity:100,peakEquity:100,maxDrawdownPct:0,liveTradingEnabled:false,updatedAt:now};}
 export function normalizeAutoPaperAccount(value,now=new Date().toISOString()){
