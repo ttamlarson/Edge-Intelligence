@@ -100,23 +100,21 @@ The proposed live account limits are AUD 100 maximum allocated capital, AUD 20 m
 
 Live trading remains disabled. The existing `COINSPOT_READONLY_KEY` and `COINSPOT_READONLY_SECRET` remain read-only and must not be repurposed. The `coinspot-execution-coordinator.js` Durable Object now provides per-Access-user monotonic nonce allocation and persistent idempotency reservations behind authenticated Worker routes (`/api/crypto/coinspot/execution/nonce`, `/idempotency/reserve`, `/idempotency/complete`). Configure `EDGE_COORDINATOR_TOKEN` as a Worker secret before those routes can be used. This coordinator does not submit orders or reconcile exchange fills. A future execution adapter must use a separate least-privilege trading key, never request withdrawal or transfer permissions, and must add order-status reconciliation, balance reservation, partial-fill handling, stale-quote rejection, a global server-side kill switch and end-to-end tests before any order route is enabled. Do not deploy a trading adapter or create live orders until the strategy has passed the documented validation gates and the user has explicitly activated live execution.
 
-
 ## Cloudflare Pages frontend deployment
 
 The browser application is deployed independently from the existing Cloudflare Worker API:
 
 - Pages project: `edge-intelligence`
-- Production URL: `https://edge-intelligence.pages.dev`
+- Expected production URL: `https://edge-intelligence.pages.dev`
 - Production branch: `main`
-- Build command: `npm run build:pages`
-- Build output: `dist/`
-- Deployment method: GitHub Actions + Wrangler Direct Upload
-- API origin: `https://edge-intelligence-api.ttamlarson.workers.dev`
+- Static build command: `npm run build:pages`
+- Build output directory: `dist/`
+- Frontend API origin: `https://edge-intelligence-api.ttamlarson.workers.dev`
 
-The Pages workflow runs the deterministic test suite, JavaScript syntax checks and static build before publishing. It creates the Pages project if it does not already exist. It deploys only from `main`; workflow dispatch from a non-production branch is intentionally blocked. The Worker remains a separate deployment and is not copied into the static Pages output.
+The repository is already connected to Cloudflare Pages through the Cloudflare Workers & Pages GitHub App. That integration automatically creates preview deployments for pull requests and deploys the production branch after merge. The repository's `ci.yml` independently runs `npm test`, `npm run check`, and `npm run build:pages` before changes are accepted. Keep the Cloudflare Pages build settings aligned with Node.js 22, root directory `/`, build command `npm run build:pages`, and output directory `dist`.
 
-GitHub Actions reuses the existing `CLOUDFLARE_API_TOKEN` secret and the account ID already used by the Worker deployment workflow. The token must include **Account / Cloudflare Pages / Edit** permission in addition to the existing permissions required by the Worker deployment (including Workers and KV operations). Do not paste the token into source files or workflow YAML. If the current token lacks Pages Edit, update its permissions in Cloudflare and replace the GitHub Actions secret value.
+The existing Git-integrated Pages project must remain Git-integrated. Cloudflare does not support switching an existing Git-integrated Pages project to Wrangler Direct Upload in place. Do not add a second Direct Upload workflow or attempt to publish with Wrangler to this project. Cloudflare's GitHub App handles Pages deployment authorization; no Pages permission needs to be added to `CLOUDFLARE_API_TOKEN` for this route. The existing token remains used by the separate Worker deployment workflow.
 
-The Worker deployment workflow sets the allowed frontend CORS origin to `https://edge-intelligence.pages.dev`. A Worker deployment is triggered by changes to its backend/configuration workflow paths; a frontend-only Pages deployment does not redeploy or replace the Worker. If a custom Pages domain is added later, update the Worker `FRONTEND_ORIGINS` configuration and redeploy the Worker.
+The Worker remains a separate deployment named `edge-intelligence-api`; its source is not copied into the Pages static output. Its deployment workflow configures the allowed frontend CORS origin as `https://edge-intelligence.pages.dev`. Frontend-only commits do not redeploy or replace the Worker. If a custom Pages domain is added later, update the Worker `FRONTEND_ORIGINS` configuration and redeploy the Worker.
 
-This workflow uses Cloudflare Pages Direct Upload. If the named Pages project already exists as a Git-integrated project, the workflow stops rather than silently changing deployment mode. No production deployment is considered verified until the GitHub Actions Pages workflow succeeds and the deployed URL and Worker API are smoke-tested.
+No production deployment is considered verified until the Cloudflare Pages production deployment succeeds and the deployed URL, security headers, CORS and Worker API are smoke-tested.
