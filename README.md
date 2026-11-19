@@ -105,7 +105,7 @@ Live trading remains disabled. The existing `COINSPOT_READONLY_KEY` and `COINSPO
 The browser application is deployed independently from the existing Cloudflare Worker API:
 
 - Pages project: `edge-intelligence`
-- Expected production URL: `https://edge-intelligence.pages.dev`
+- Expected production URL: `https://edge-intelligence-486.pages.dev`
 - Production branch: `main`
 - Static build command: `npm run build:pages`
 - Build output directory: `dist/`
@@ -115,6 +115,6 @@ The repository is already connected to Cloudflare Pages through the Cloudflare W
 
 The existing Git-integrated Pages project must remain Git-integrated. Cloudflare does not support switching an existing Git-integrated Pages project to Wrangler Direct Upload in place. Do not add a second Direct Upload workflow or attempt to publish with Wrangler to this project. Cloudflare's GitHub App handles Pages deployment authorization; no Pages permission needs to be added to `CLOUDFLARE_API_TOKEN` for this route. The existing token remains used by the separate Worker deployment workflow.
 
-The Worker remains a separate deployment named `edge-intelligence-api`; its source is not copied into the Pages static output. Its deployment workflow configures the allowed frontend CORS origin as `https://edge-intelligence.pages.dev`. Frontend-only commits do not redeploy or replace the Worker. If a custom Pages domain is added later, update the Worker `FRONTEND_ORIGINS` configuration and redeploy the Worker.
+The Worker remains a separate deployment named `edge-intelligence-api`; its source is not copied into the Pages static output. Its deployment workflow configures the allowed frontend CORS origin as `https://edge-intelligence-486.pages.dev`. Frontend-only commits do not redeploy or replace the Worker. If a custom Pages domain is added later, update the Worker `FRONTEND_ORIGINS` configuration and redeploy the Worker.
 
 No production deployment is considered verified until the Cloudflare Pages production deployment succeeds and the deployed URL, security headers, CORS and Worker API are smoke-tested.
