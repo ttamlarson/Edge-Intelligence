@@ -15,7 +15,7 @@ const SHELL = [
   "./icon-192.png",
   "./icon-512.png"
 ];
-const SHELL_PATHS = new Set(SHELL.map(path => new URL(path, self.registration.scope).pathname));
+const SHELL_PATHS = new Set(SHELL.map(path => new URL(path, self.location.origin).pathname));
 
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
