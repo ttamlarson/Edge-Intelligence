@@ -81,7 +81,7 @@ function runSegment(candles, start, end, costs) {
   return { trades: trades.length, wins: winners.length, losses: losers.length,
     winRatePct: trades.length ? round(winners.length / trades.length * 100) : 0,
     netPnlQuote: round(trades.reduce((sum, t) => sum + t.pnlQuote, 0)),
-    endingEquityAud: round(cash + (position ? position.quantity * candles[end - 1].close : 0)),
+    endingEquityQuote: round(cash + (position ? position.quantity * candles[end - 1].close : 0)),
     profitFactor: grossLosses ? Number((grossWins / grossLosses).toFixed(3)) : grossWins ? null : 0,
     maxDrawdownPct: round(maxDrawdown * 100), tradesDetail: trades };
 }
@@ -93,8 +93,8 @@ export function backtestCoinSpotTrend({ candles, startingCapital = 100, starting
   const split = Math.floor(validated.length * trainFraction), costs = { feeRate, slippageBps, spreadBps };
   const inSample = runSegment(validated, 60, split, costs), outOfSample = runSegment(validated, split, validated.length, costs);
   const assessment = outOfSample.trades < 30 ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES" :
-    outOfSample.netPnlAud > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
+    outOfSample.netPnlQuote > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
   return { strategy: "EMA_TREND_PULLBACK_1H_V1", marketDataSource: "user_supplied_historical_ohlcv",
-    startingCapitalAud: 100, costs, splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
+    startingCapital: 100, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs, splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
 }
