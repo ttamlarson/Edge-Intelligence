@@ -69,7 +69,7 @@ async function fetchBinanceHourlyHistory(symbol, days=365) {
  }
  const candles=rows.filter(x=>Number(x[6])<end).map(x=>({timestamp:new Date(Number(x[0])).toISOString(),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])}));
  if(candles.length<300)throw new Error("Fewer than 300 completed hourly candles for "+symbol+".");
- for(let i=1;i<candles.length;i++)if(Date.parse(candles[i].timestamp)-Date.parse(candles[i-1].timestamp)!==3600000){}
+ for(let i=1;i<candles.length;i++)if(Date.parse(candles[i].timestamp)-Date.parse(candles[i-1].timestamp)<=0)throw new Error("Binance history contains duplicate or unordered candles for "+symbol+".");
  return {metadata:{source:"Binance public Spot API",exchange:"Binance",symbol,quoteAsset:symbol.endsWith("USDT")?"USDT":"UNKNOWN",timeframe:"1h",candleCount:candles.length,firstCandleAt:candles[0].timestamp,lastCandleAt:candles.at(-1).timestamp},quality:{missingIntervals:candles.slice(1).filter((x,i)=>Date.parse(x.timestamp)-Date.parse(candles[i].timestamp)!==3600000).length},candles};
 }
 async function runCryptoCandlesBacktest(parsed,symbol,quoteAsset) {
