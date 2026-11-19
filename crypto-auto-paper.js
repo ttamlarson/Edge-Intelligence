@@ -6,7 +6,7 @@ const finite = n => Number.isFinite(Number(n)) ? Number(n) : null;
 function ema(values, period) { if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(const x of values.slice(period))v=x*k+v*(1-k);return v; }
 function rsi(values, period=14) { if(values.length<=period)return null;let up=0,down=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)up+=d;else down-=d;}return down===0?100:100-100/(1+up/down); }
 function atr(bars, period=14) { if(bars.length<=period)return null;let sum=0;for(let i=bars.length-period;i<bars.length;i++){const p=bars[i-1].close,b=bars[i];sum+=Math.max(b.high-b.low,Math.abs(b.high-p),Math.abs(b.low-p));}return sum/period; }
-function adx(bars,period=14){if(bars.length<period*2+2)return null;let tr=0,plus=0,minus=0;for(let i=bars.length-period;i<bars.length;i++){const c=bars[i],p=bars[i-1];tr+=Math.max(c.high-c.low,Math.abs(c.high-p.close),Math.abs(c.low-p.close));const up=c.high-p.high,dn=p.low-c.low;if(up>dn&&up>0)plus+=up;if(dn>up&&dn>0)minus+=dn;}const pdi=tr?100*plus/tr:0,mdi=tr?100*minus/tr:0;return pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0;}
+function adx(bars,period=14){if(bars.length<period*2+2)return null;const dx=[];for(let end=bars.length-period+1;end<=bars.length;end++){let tr=0,plus=0,minus=0;for(let i=end-period;i<end;i++){const c=bars[i],p=bars[i-1];tr+=Math.max(c.high-c.low,Math.abs(c.high-p.close),Math.abs(c.low-p.close));const up=c.high-p.high,dn=p.low-c.low;if(up>dn&&up>0)plus+=up;if(dn>up&&dn>0)minus+=dn;}const pdi=tr?100*plus/tr:0,mdi=tr?100*minus/tr:0;dx.push(pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0);}return dx.reduce((s,x)=>s+x,0)/dx.length;}
 export function evaluateAutoSignal(bars) {
  if(!Array.isArray(bars)||bars.length<220) return {signal:false,reason:"WARMUP_REQUIRED"};
  const last=bars.at(-1),closes=bars.map(x=>x.close),e20=ema(closes.slice(-100),20),e50=ema(closes.slice(-150),50),e200=ema(closes,200),momentum=rsi(closes),vol=atr(bars),strength=adx(bars);
@@ -30,7 +30,7 @@ export function markAutoPaperAccount(account,{prices,now=new Date().toISOString(
   const held=(Date.parse(now)-Date.parse(p.openedAt))/3600000;
   const reason=price<=p.trailingStop?"TRAILING_STOP":price>=p.targetPrice?"TAKE_PROFIT":held>=AUTO_CONFIG.maxHoldHours?"MAX_HOLD":null;
   if(reason){const exit=price*(1-(AUTO_CONFIG.slippageBps+AUTO_CONFIG.spreadBps/2)/10000),grossExit=p.quantity*exit,fee=grossExit*AUTO_CONFIG.feeRate,proceeds=grossExit-fee,pnl=proceeds-p.entryCost;
-   a.cash=round(a.cash+proceeds);a.realizedPnl=round(a.realizedPnl+pnl);a.closedTrades.push({id:p.id,symbol:p.symbol,openedAt:p.openedAt,closedAt:now,entryPrice:p.entryPrice,exitPrice:round(exit),quantity:p.quantity,pnl:round(pnl),reason,entryFee:p.entryFee,exitFee:round(fee),strategy:p.strategy});a.closedTrades=a.closedTrades.slice(-200);a.openPosition=null;a.unrealizedPnl=0;
+   a.cash=round(a.cash+proceeds);a.realizedPnl=round(a.realizedPnl+pnl);a.closedTrades.push({id:p.id,symbol:p.symbol,openedAt:p.openedAt,closedAt:now,entryPrice:p.entryPrice,exitPrice:round(exit),quantity:p.quantity,pnl:round(pnl),reason,entryFee:p.entryFee,exitFee:round(fee),strategy:p.strategy});a.closedTrades=a.closedTrades.slice(-200);a.openPosition=null;a.unrealizedPnl=0;a.dailyLoss=round(a.closedTrades.filter(t=>String(t.closedAt||"").slice(0,10)===now.slice(0,10)).reduce((s,t)=>s+Math.max(0,-Number(t.pnl||0)),0));
   }
  }
  a.equity=round(a.cash+(a.openPosition?a.openPosition.quantity*(a.markPrice||a.openPosition.entryPrice):0));a.peakEquity=Math.max(a.peakEquity||100,a.equity);a.maxDrawdownPct=round(Math.max(a.maxDrawdownPct||0,(a.peakEquity-a.equity)/a.peakEquity*100));a.updatedAt=now;return a;
@@ -40,6 +40,7 @@ export function processAutoPaperSignals(account,{signals,prices,now=new Date().t
  if(a.day!==now.slice(0,10)){a.day=now.slice(0,10);a.dailyLoss=0;}
  if(a.openPosition||a.dailyLoss>=a.startingCapital*AUTO_CONFIG.maxDailyLossPct/100)return a;
  const candidates=Object.entries(signals||{}).filter(([symbol,s])=>AUTO_SYMBOLS.includes(symbol)&&s?.signal&&s.timestamp&&s.atr>0&&s.timestamp!==a.lastProcessed[symbol]).sort((x,y)=>(y[1].adx||0)-(x[1].adx||0));
+ for(const [symbol,s] of candidates)a.lastProcessed[symbol]=s.timestamp;
  for(const [symbol,s] of candidates){
   a.lastProcessed[symbol]=s.timestamp;
   const price=finite(prices?.[symbol]);if(!(price>0))continue;
