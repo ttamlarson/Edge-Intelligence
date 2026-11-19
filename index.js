@@ -400,7 +400,7 @@ async function handle(request, env, ctx) {
   // then share the Worker origin, so Cloudflare Access uses a first-party Safari cookie.
   if (!requestUrl.pathname.startsWith("/api/")) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
-    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png"]);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png"]);
     if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
     const assetPath = requestUrl.pathname === "/" ? "/Edge-Intelligence/" : "/Edge-Intelligence" + requestUrl.pathname;
     const upstream = await fetch("https://ttamlarson.github.io" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
