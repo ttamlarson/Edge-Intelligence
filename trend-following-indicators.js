@@ -2,43 +2,35 @@
 const num = x => Number.isFinite(Number(x)) ? Number(x) : null;
 const round = x => Math.round((x + Number.EPSILON) * 10000) / 10000;
 const HOUR = 3600000;
-function ema(values, period) {
-  if (values.length < period) return null;
-  const a = 2 / (period + 1);
-  let v = values.slice(0, period).reduce((s, x) => s + x, 0) / period;
-  for (const x of values.slice(period)) v = a * x + (1 - a) * v;
-  return v;
+function emaSeries(values, period) {
+  const out = Array(values.length).fill(null);
+  if (values.length < period) return out;
+  const alpha = 2 / (period + 1);
+  let value = values.slice(0, period).reduce((s, x) => s + x, 0) / period;
+  out[period - 1] = value;
+  for (let i = period; i < values.length; i++) { value = alpha * values[i] + (1 - alpha) * value; out[i] = value; }
+  return out;
 }
-function rsi(values, period = 14) {
-  if (values.length <= period) return null;
-  let up = 0, down = 0;
-  for (let i = values.length - period; i < values.length; i++) {
-    const d = values[i] - values[i - 1]; if (d > 0) up += d; else down -= d;
+function rsiSeries(values, period = 14) {
+  const out = Array(values.length).fill(null);
+  for (let i = period; i < values.length; i++) {
+    let up = 0, down = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const d = values[j] - values[j - 1]; if (d > 0) up += d; else down -= d;
+    }
+    out[i] = down ? 100 - 100 / (1 + up / down) : 100;
   }
-  return down ? 100 - 100 / (1 + up / down) : 100;
+  return out;
 }
-function atr(bars, period = 14) {
-  if (bars.length <= period) return null;
-  let total = 0;
-  for (let i = bars.length - period; i < bars.length; i++) {
-    const b = bars[i], p = bars[i - 1].close;
-    total += Math.max(b.high - b.low, Math.abs(b.high - p), Math.abs(b.low - p));
-  }
-  return total / period;
+function atrSeries(bars, period = 14) {
+  const tr = bars.map((b, i) => i ? Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1].close), Math.abs(b.low - bars[i - 1].close)) : b.high - b.low);
+  const out = Array(bars.length).fill(null);
+  for (let i = period; i < bars.length; i++) out[i] = tr.slice(i - period + 1, i + 1).reduce((s, x) => s + x, 0) / period;
+  return out;
 }
-function macdHistogram(closes) {
-  if (closes.length < 35) return null;
-  const line = [];
-  for (let i = 25; i < closes.length; i++) {
-    const part = closes.slice(0, i + 1);
-    line.push(ema(part, 12) - ema(part, 26));
-  }
-  return line.at(-1) - ema(line, 9);
-}
-function adx(bars, period = 14) {
-  if (bars.length < period * 2 + 1) return null;
-  const dx = [];
-  for (let i = bars.length - period; i < bars.length; i++) {
+function adxSeries(bars, period = 14) {
+  const out = Array(bars.length).fill(null), dx = Array(bars.length).fill(null);
+  for (let i = period * 2; i < bars.length; i++) {
     let tr = 0, plus = 0, minus = 0;
     for (let j = i - period + 1; j <= i; j++) {
       const c = bars[j], p = bars[j - 1];
@@ -48,9 +40,19 @@ function adx(bars, period = 14) {
       if (dn > up && dn > 0) minus += dn;
     }
     const pdi = tr ? 100 * plus / tr : 0, mdi = tr ? 100 * minus / tr : 0;
-    dx.push(pdi + mdi ? 100 * Math.abs(pdi - mdi) / (pdi + mdi) : 0);
+    dx[i] = pdi + mdi ? 100 * Math.abs(pdi - mdi) / (pdi + mdi) : 0;
+    const vals = dx.slice(i - period + 1, i + 1);
+    if (vals.every(Number.isFinite)) out[i] = vals.reduce((s, x) => s + x, 0) / period;
   }
-  return dx.reduce((s, x) => s + x, 0) / dx.length;
+  return out;
+}
+function indicatorSeries(bars) {
+  const closes = bars.map(x => x.close), fast = emaSeries(closes, 12), slow = emaSeries(closes, 26);
+  const macd = closes.map((_, i) => fast[i] == null || slow[i] == null ? null : fast[i] - slow[i]);
+  const signalInput = macd.map(x => x ?? 0), signal = emaSeries(signalInput, 9);
+  return { e20: emaSeries(closes, 20), e50: emaSeries(closes, 50), e200: emaSeries(closes, 200),
+    rsi: rsiSeries(closes), macd: macd.map((x, i) => x == null || signal[i] == null ? null : x - signal[i]),
+    adx: adxSeries(bars), atr: atrSeries(bars) };
 }
 function validate(candles) {
   if (!Array.isArray(candles) || candles.length < 300 || candles.length > 50000)
@@ -81,28 +83,21 @@ export function aggregateTrendFourHourCandles(hourly) {
   }
   return out;
 }
-function indicators(bars, i) {
-  const h = bars.slice(0, i + 1), closes = h.map(x => x.close);
-  return { e20: ema(closes.slice(-260), 20), e50: ema(closes.slice(-320), 50),
-    e200: ema(closes.slice(-500), 200), rsi: rsi(closes), macd: macdHistogram(closes),
-    adx: adx(h), atr: atr(h) };
-}
 const VARIANTS = [
   { id: "FULL_CONFLUENCE", label: "Full indicator confluence", rsiMin: 50, rsiMax: 68, adxMin: 20, macdPositive: true },
   { id: "BALANCED_CONFIRMATION", label: "Balanced trend confirmation", rsiMin: 45, rsiMax: 72, adxMin: 18, macdPositive: false }
 ];
-function simulate(bars, start, end, cfg, variant) {
+function simulate(bars, ind, start, end, cfg, variant) {
   let cash = cfg.capital, position = null, peak = cfg.capital, maxDD = 0, cooldown = 0;
   const trades = [], skipped = { trendAlignment: 0, rsi: 0, macd: 0, adx: 0, volatility: 0, positionOpen: 0, cooldown: 0, riskSizing: 0 };
   let evaluatedBars = 0, eligibleSignals = 0;
   for (let i = Math.max(220, start); i < end; i++) {
-    const b = bars[i], ind = indicators(bars, i), next = bars[i + 1];
-    evaluatedBars++; if (cooldown > 0) cooldown--;
+    const b = bars[i]; evaluatedBars++; if (cooldown > 0) cooldown--;
     if (position) {
-      const stop = Math.max(position.stop, position.highWater - cfg.trailingAtr * ind.atr);
+      const stop = Math.max(position.stop, position.highWater - cfg.trailingAtr * ind.atr[i]);
       let exit = null, reason = null;
       if (b.low <= stop) { exit = stop; reason = "ATR_TRAILING_STOP"; }
-      else if (b.close < ind.e20 || (ind.macd < 0 && position.negativeMacd >= 1)) { exit = b.close; reason = "TREND_MOMENTUM_BREAK"; }
+      else if (b.close < ind.e20[i] || (ind.macd[i] < 0 && position.negativeMacd >= 1)) { exit = b.close; reason = "TREND_MOMENTUM_BREAK"; }
       else if (i - position.entryIndex >= cfg.maxHoldBars) { exit = b.close; reason = "TIME_EXIT"; }
       else if (i === end - 1) { exit = b.close; reason = "WINDOW_END"; }
       if (exit !== null) {
@@ -113,19 +108,19 @@ function simulate(bars, start, end, cfg, variant) {
         position = null;
       } else {
         position.highWater = Math.max(position.highWater, b.high);
-        position.negativeMacd = ind.macd < 0 ? position.negativeMacd + 1 : 0;
+        position.negativeMacd = ind.macd[i] < 0 ? position.negativeMacd + 1 : 0;
       }
     }
     if (position) skipped.positionOpen++;
     else if (cooldown > 0) skipped.cooldown++;
-    else if (!(ind.e20 > ind.e50 && ind.e50 > ind.e200 && b.close > ind.e200)) skipped.trendAlignment++;
-    else if (!(ind.rsi >= variant.rsiMin && ind.rsi <= variant.rsiMax)) skipped.rsi++;
-    else if (!(variant.macdPositive ? ind.macd > 0 : ind.macd > -Infinity)) skipped.macd++;
-    else if (!(ind.adx >= variant.adxMin)) skipped.adx++;
-    else if (!(ind.atr > 0)) skipped.volatility++;
-    else if (next && i + 1 < end) {
+    else if (!(ind.e20[i] > ind.e50[i] && ind.e50[i] > ind.e200[i] && b.close > ind.e200[i])) skipped.trendAlignment++;
+    else if (!(ind.rsi[i] >= variant.rsiMin && ind.rsi[i] <= variant.rsiMax)) skipped.rsi++;
+    else if (!(variant.macdPositive ? ind.macd[i] > 0 : ind.macd[i] > -Infinity)) skipped.macd++;
+    else if (!(ind.adx[i] >= variant.adxMin)) skipped.adx++;
+    else if (!(ind.atr[i] > 0)) skipped.volatility++;
+    else if (i + 1 < end) {
       eligibleSignals++;
-      const entry = next.open * (1 + cfg.entryCost), distance = cfg.stopAtr * ind.atr;
+      const next = bars[i + 1], entry = next.open * (1 + cfg.entryCost), distance = cfg.stopAtr * ind.atr[i];
       const risk = cash * cfg.riskPct, allocation = Math.min(cash, cash * cfg.maxAllocation);
       const qty = Math.min(allocation / (entry * (1 + cfg.fee)), risk / distance);
       const cost = qty * entry * (1 + cfg.fee);
@@ -153,12 +148,12 @@ function assessment(x, minimum) {
     ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
 }
 function timeframeResult(bars, timeframe, cfg) {
-  const split = Math.floor(bars.length * cfg.trainFraction);
+  const split = Math.floor(bars.length * cfg.trainFraction), ind = indicatorSeries(bars);
   return { timeframe, candleCount: bars.length, splitIndex: split,
     inSampleCandles: Math.max(0, split - 220), outOfSampleCandles: bars.length - split,
     variants: VARIANTS.map(v => {
-      const inSample = simulate(bars, 220, split, cfg, v);
-      const outOfSample = simulate(bars, split, bars.length, cfg, v);
+      const inSample = simulate(bars, ind, 220, split, cfg, v);
+      const outOfSample = simulate(bars, ind, split, bars.length, cfg, v);
       return { ...v, riskPct: cfg.riskPct * 100, allocationPct: cfg.maxAllocation * 100,
         inSample, outOfSample, assessment: assessment(outOfSample, cfg.minimum) };
     }) };
@@ -172,15 +167,14 @@ export function backtestTrendFollowingIndicators({ candles, market = "UNKNOWN", 
     feeRate < 0 || slippageBps < 0 || spreadBps < 0 || trainFraction < .5 || trainFraction > .85 ||
     !Number.isInteger(minimumOutOfSampleTrades) || minimumOutOfSampleTrades < 30 || minimumOutOfSampleTrades > 500)
     throw Error("Invalid trend-following backtest assumptions.");
-  const cfg = { capital: startingCapital, fee: feeRate,
-    entryCost: (slippageBps + spreadBps / 2) / 10000, exitCost: (slippageBps + spreadBps / 2) / 10000,
-    riskPct: .005, maxAllocation: .25, stopAtr: 2.5, trailingAtr: 3,
-    maxHoldBars: 120, cooldownBars: 6, minTrade: 5, trainFraction, minimum: minimumOutOfSampleTrades };
+  const cfg = { capital: startingCapital, fee: feeRate, entryCost: (slippageBps + spreadBps / 2) / 10000,
+    exitCost: (slippageBps + spreadBps / 2) / 10000, riskPct: .005, maxAllocation: .25,
+    stopAtr: 2.5, trailingAtr: 3, maxHoldBars: 120, cooldownBars: 6, minTrade: 5,
+    trainFraction, minimum: minimumOutOfSampleTrades };
   const fourHour = aggregateTrendFourHourCandles(hourly);
   return { strategy: "EDGE_TREND_FOLLOWING_INDICATORS_V2", market: String(market).toUpperCase(), quoteCurrency,
     methodology: "EMA20/50/200 trend alignment + RSI momentum + MACD histogram + ADX trend strength; 2.5 ATR initial stop, 3 ATR trailing stop, next-bar entries and trend/time exits.",
-    costs: { feeRate, slippageBps, spreadBps },
-    risk: { perTradePct: .5, maxAllocationPct: 25, initialStopAtr: 2.5, trailingStopAtr: 3, maximumHoldingBars: 120 },
+    costs: { feeRate, slippageBps, spreadBps }, risk: { perTradePct: .5, maxAllocationPct: 25, initialStopAtr: 2.5, trailingStopAtr: 3, maximumHoldingBars: 120 },
     sample: { totalHourlyCandles: hourly.length, trainFraction, minimumOutOfSampleTrades,
       assessmentRule: "At least 30 completed OOS trades; then positive net P&L, profit factor > 1.2 and max drawdown < 10%." },
     oneHour: timeframeResult(hourly, "1h", cfg),
