@@ -2,7 +2,7 @@ import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettleme
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
 import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
 import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
-import { parseBinanceKlineCsv } from "./crypto-csv.js";
+import { parseBinanceKlineCsv, parseBinanceUsdtSymbols } from "./crypto-csv.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -104,9 +104,9 @@ function renderCryptoBacktest(label, imported) {
 }
 $("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults"),button=$("fetchCryptoHistoryBtn");
- const symbols=[...new Set(($("cryptoHistorySymbols")?.value||"").toUpperCase().split(",").map(x=>x.trim()).filter(Boolean))];
+ let symbols; try { symbols=parseBinanceUsdtSymbols($("cryptoHistorySymbols")?.value||""); } catch(error) { status.textContent=error.message; return; }
  const days=Math.max(90,Math.min(365,Number($("cryptoHistoryDays")?.value)||365));
- if(!symbols.length||symbols.length>4||symbols.some(x=>!/^[A-Z0-9]{5,20}USDT$/.test(x))){status.textContent="Enter up to four Binance USDT symbols, e.g. BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT.";return}
+ 
  button.disabled=true;button.textContent="Fetching history…";status.textContent="Downloading "+days+" days of hourly Binance data for "+symbols.join(", ")+". This may take a minute.";out.innerHTML="";
  try{
   const results=await Promise.all(symbols.map(async symbol=>{const parsed=await fetchBinanceHourlyHistory(symbol,days);return {symbol,imported:await runCryptoCandlesBacktest(parsed,symbol,"USDT")};}));
