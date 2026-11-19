@@ -248,6 +248,6 @@ test("Cloudflare asset proxy serves the Crypto CSV module required by Strategy L
   t.after(() => { globalThis.fetch = originalFetch; });
   const response = await worker.fetch(new Request("https://edge.example.au/crypto-csv.js"), baseEnv());
   assert.equal(response.status, 200);
-  assert.match(requested, /ttamlarson\.github\.io\/Edge-Intelligence\/crypto-csv\.js$/);
+  assert.match(requested, /edge-intelligence-486\.pages\.dev\/crypto-csv\.js$/);
   assert.match(await response.text(), /parseBinanceKlineCsv/);
 });
