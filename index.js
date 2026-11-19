@@ -395,24 +395,35 @@ async function runAutomatedCryptoPaper(env) {
   let account;
   try { account = normalizeAutoPaperAccount(JSON.parse(await env.EDGE_KV.get(key) || "null") || createAutoPaperAccount(now), now); }
   catch { account = createAutoPaperAccount(now); }
-  // Binance documents data-api.binance.vision for public market-data-only access.
-  // Keep alternate official API hosts as failover for regional routing or edge errors.
-  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/"];
+  // Binance documents data-api.binance.vision for unauthenticated public market data.
+  // Use one klines request per host: the last closed candle supplies both the
+  // indicator inputs and current mark, avoiding a second endpoint that could
+  // fail independently and incorrectly mark an otherwise healthy market offline.
+  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/", "https://api4.binance.com/api/v3/"];
   const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
     let lastError = "NO_PROVIDER_RESPONSE";
     for (const base of hosts) {
       try {
-        const urls = [base + "klines?symbol=" + symbol + "&interval=1h&limit=260", base + "ticker/price?symbol=" + symbol];
-        const responses = await Promise.all(urls.map(url => fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000) })));
-        const failed = responses.find(response => !response.ok);
-        if (failed) { lastError = "HTTP_" + failed.status; continue; }
-        const raw = await responses[0].json(), quote = await responses[1].json();
-        if (!Array.isArray(raw) || raw.length < 220 || !Number.isFinite(Number(quote.price)) || Number(quote.price) <= 0) { lastError = "INVALID_OR_INCOMPLETE_RESPONSE"; continue; }
-        const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({ timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }));
-        if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) { lastError = "INVALID_HOURLY_CANDLES"; continue; }
-        return { symbol, price: Number(quote.price), signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: bars.at(-1).timestamp };
+        const response = await fetch(base + "klines?symbol=" + symbol + "&interval=1h&limit=260", {
+          headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000)
+        });
+        if (!response.ok) { lastError = "HTTP_" + response.status; continue; }
+        const body = await response.text();
+        let raw;
+        try { raw = JSON.parse(body); }
+        catch { lastError = "INVALID_JSON_RESPONSE"; continue; }
+        if (!Array.isArray(raw) || raw.length < 220) { lastError = "INVALID_OR_INCOMPLETE_RESPONSE"; continue; }
+        const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({
+          timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]),
+          high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5])
+        }));
+        if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) {
+          lastError = "INVALID_HOURLY_CANDLES"; continue;
+        }
+        const latest = bars.at(-1);
+        return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {
-        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_OR_PARSE_ERROR";
+        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";
       }
     }
     return { symbol, status: "UNAVAILABLE", errorCode: lastError, message: "All configured public market-data endpoints failed." };
