@@ -469,9 +469,10 @@ async function handle(request, env, ctx) {
     }
     return reply(data);
   }
-  if (requestUrl.pathname === "/api/crypto/auto-paper/account" && request.method === "GET") {
-    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");
+  if (requestUrl.pathname === "/api/crypto/auto-paper/account" && (request.method === "GET" || request.method === "POST")) {
+    await routeLimit(request.method === "POST" ? env.WRITE_LIMITER : env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
+    if (request.method === "POST") return reply(await runAutomatedCryptoPaper(env));
     const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
     if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
     let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid."); }
