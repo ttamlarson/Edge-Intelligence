@@ -11,6 +11,9 @@ test("adaptive regime strategy validates candles and returns chronological OOS a
   assert.equal(result.strategy,"EDGE_ADAPTIVE_REGIME_1H_V1");
   assert.equal(result.market,"SOLUSDT");
   assert.equal(result.liveTradingEnabled,false);
+  assert.equal(result.activeVariant.strategy,"EDGE_ACTIVE_MOMENTUM_1H_V1");
+  assert.ok(result.activeVariant.outOfSample.evaluatedBars>0);
+  assert.ok(["INSUFFICIENT_OUT_OF_SAMPLE_TRADES","NOT_PROVEN_PROFITABLE","CANDIDATE_FOR_FORWARD_PAPER_TEST"].includes(result.activeVariant.assessment));
   assert.equal(result.sample.totalCandles,520);
   assert.equal(result.sample.outOfSampleCandles,520-result.sample.splitIndex);
   assert.ok(result.inSample.evaluatedBars>0);
