@@ -421,7 +421,7 @@ async function runAutomatedCryptoPaper(env) {
   const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
   account = processAutoPaperSignals(account, { signals, prices, now });
   const liveMarkets = results.filter(x => x.status === "LIVE_PUBLIC_DATA").length;
-  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
   await env.EDGE_KV.put(key, JSON.stringify(snapshot));
   return snapshot;
 }
