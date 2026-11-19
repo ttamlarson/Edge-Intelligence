@@ -30,7 +30,7 @@ function atr(candles, period = 14) {
   return total / period;
 }
 function validate(candles) {
-  if (!Array.isArray(candles) || candles.length < 300 || candles.length > 20000) throw Error("At least 300 and no more than 20,000 hourly candles are required.");
+  if (!Array.isArray(candles) || candles.length < 300 || candles.length > 50000) throw Error("At least 300 and no more than 50,000 hourly candles are required.");
   let previous = -Infinity;
   return candles.map(bar => {
     const time = Date.parse(bar.timestamp), open = num(bar.open), high = num(bar.high), low = num(bar.low), close = num(bar.close), volume = num(bar.volume);

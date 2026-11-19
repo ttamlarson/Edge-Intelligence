@@ -27,8 +27,8 @@ function atr(candles, period = 14) {
   return total / period;
 }
 export function validateCoinSpotCandles(candles) {
-  if (!Array.isArray(candles) || candles.length < 300 || candles.length > 20000)
-    throw Error("At least 300 and no more than 20,000 hourly candles are required.");
+  if (!Array.isArray(candles) || candles.length < 300 || candles.length > 50000)
+    throw Error("At least 300 and no more than 50,000 hourly candles are required.");
   let last = -Infinity;
   return candles.map(c => {
     const timestamp = Date.parse(c.timestamp);
