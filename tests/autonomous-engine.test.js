@@ -89,3 +89,39 @@ test("DataCedar mark refresh skips absent and older marks without altering ledge
   assert.equal(result.portfolio.cashAud, 500);
   assert.equal(result.accepted, true);
 });
+
+test("daily-bar screening rejects stale or future bars even when source observation metadata is fresh", () => {
+  const base = makeBars();
+  const common = {
+    symbol: "TEST", source: "Synthetic test fixture only", currency: "AUD",
+    equityAud: 500, cashAud: 500, now, costs: { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 }
+  };
+
+  const staleBars = base.map(bar => ({ ...bar, timestamp: new Date(Date.parse(bar.timestamp) - 2 * 86400000).toISOString() }));
+  const stale = evaluateAsxSwingSetup({ ...common, bars: staleBars, observedAt: new Date(now).toISOString() });
+  assert.equal(stale.status, "REJECTED");
+  assert.match(stale.reason, /Latest daily bar is future-dated or stale/);
+
+  const futureBars = base.map(bar => ({ ...bar }));
+  futureBars.at(-1).timestamp = new Date(now + 60 * 60_000).toISOString();
+  const future = evaluateAsxSwingSetup({ ...common, bars: futureBars, observedAt: new Date(now).toISOString() });
+  assert.equal(future.status, "REJECTED");
+  assert.match(future.reason, /Latest daily bar is future-dated or stale/);
+
+  const lateBarBars = base.map(bar => ({ ...bar }));
+  lateBarBars.at(-1).timestamp = new Date(now - 60 * 60_000).toISOString();
+  const observationBeforeBar = validateDailyBars(lateBarBars, {
+    source: common.source, currency: "AUD",
+    observedAt: new Date(now - 2 * 60 * 60_000).toISOString(), now
+  });
+  assert.equal(observationBeforeBar.valid, false);
+  assert.match(observationBeforeBar.reason, /later than the source observation/);
+});
+
+test("daily-bar screening rejects invalid freshness clock configuration", () => {
+  const bars = makeBars();
+  const options = { source: "Synthetic test fixture only", currency: "AUD", observedAt: new Date(now).toISOString(), now };
+  assert.equal(validateDailyBars(bars, { ...options, now: Number.NaN }).valid, false);
+  assert.equal(validateDailyBars(bars, { ...options, maxAgeMs: Number.NaN }).valid, false);
+  assert.equal(validateDailyBars(bars, { ...options, maxAgeMs: -1 }).valid, false);
+});
