@@ -51,6 +51,7 @@ export function validateDailyBars(bars, { source, currency, observedAt, now = Da
   if (!Array.isArray(bars) || bars.length < 51) return { valid: false, reason: "At least 51 daily bars are required." };
   if (typeof source !== "string" || !source.trim()) return { valid: false, reason: "A named market-data source is required." };
   if (currency !== "AUD") return { valid: false, reason: "Only explicitly denominated AUD instruments are eligible." };
+  if (!Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) return { valid: false, reason: "Market-data clock or freshness limit is invalid." };
   const timestamp = Date.parse(observedAt || "");
   if (!Number.isFinite(timestamp) || timestamp > now + 5 * 60_000 || now - timestamp > maxAgeMs) return { valid: false, reason: "Market data is missing, future-dated or stale." };
   const clean = bars.map(bar => ({
@@ -63,6 +64,13 @@ export function validateDailyBars(bars, { source, currency, observedAt, now = Da
     .sort((a, b) => a.timestamp - b.timestamp);
   if (clean.length !== bars.length) return { valid: false, reason: "One or more daily bars failed OHLC validation." };
   for (let i = 1; i < clean.length; i++) if (clean[i].timestamp <= clean[i - 1].timestamp) return { valid: false, reason: "Daily bars must have unique increasing timestamps." };
+  const latestBarTimestamp = clean.at(-1).timestamp;
+  if (latestBarTimestamp > now + 5 * 60_000 || now - latestBarTimestamp > maxAgeMs) {
+    return { valid: false, reason: "Latest daily bar is future-dated or stale." };
+  }
+  if (latestBarTimestamp > timestamp + 5 * 60_000) {
+    return { valid: false, reason: "Latest daily bar is later than the source observation." };
+  }
   return { valid: true, bars: clean, source, currency, observedAt: new Date(timestamp).toISOString() };
 }
 
