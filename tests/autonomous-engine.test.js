@@ -232,7 +232,7 @@ test("ASX paper lifecycle preserves four-decimal prices, marks without cash move
   assert.equal(closed.accepted, true, closed.reason);
   assert.equal(closed.trade.exitPrice, 0.1495);
   assert.equal(closed.trade.exitValueAud, Math.round(opened.position.shares * 0.1495 * 100) / 100);
-  assert.equal(closed.trade.profitLossAud, closed.trade.proceedsAud - opened.position.debitAud);
+  assert.equal(closed.trade.profitLossAud, Math.round((closed.trade.proceedsAud - opened.position.debitAud) * 100) / 100);
   assert.equal(closed.portfolio.cashAud, 500 + closed.trade.profitLossAud);
   assert.equal(closed.portfolio.closedTrades.length, 1);
   assert.equal(closed.portfolio.positions[0].status, "CLOSED_PAPER");
