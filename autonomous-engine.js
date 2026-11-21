@@ -103,7 +103,7 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
   let shares = Math.min(Math.floor(riskBudget / perShareRisk), Math.floor(maxSpend / entryPrice));
   let notional = 0, buyCost = null, sellCost = null, targetSellCost = null, netStopLoss = 0, rawNetStopLoss = 0;
   while (shares >= 1) {
-    notional = round2(shares * entryPrice);
+    notional = shares * entryPrice;
     buyCost = estimateAsxSideCost(notional, costs);
     sellCost = estimateAsxSideCost(shares * stopPrice, costs);
     targetSellCost = estimateAsxSideCost(shares * targetPrice, costs);
@@ -137,18 +137,17 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   const symbol = candidate.symbol;
   const shares = num(candidate.shares), entryPrice = roundPrice(num(candidate.entryReference));
   const stopPrice = roundPrice(num(candidate.stopPrice)), targetPrice = roundPrice(num(candidate.targetPrice));
-  const notional = num(candidate.notionalAud), entryCosts = num(candidate.estimatedEntryCostsAud);
+  const reportedNotional = num(candidate.notionalAud), notional = shares * entryPrice, entryCosts = num(candidate.estimatedEntryCostsAud);
   const observedAt = Date.parse(candidate.observedAt || ""), openedTimestamp = Date.parse(openedAt || "");
   if (typeof symbol !== "string" || !/^[A-Z0-9.]{2,12}$/.test(symbol) || candidate.currency !== "AUD" ||
       typeof candidate.source !== "string" || !candidate.source.trim() ||
-      !Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now + 5 * 60_000 || now - observedAt > EDGE_MAX_DAILY_BAR_AGE_MS ||
-      openedTimestamp > now + 5 * 60_000) {
+      !Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now + 5 * 60_000 || now - observedAt > EDGE_MAX_DAILY_BAR_AGE_MS) {
     return { accepted: false, reason: "Candidate provenance or freshness is invalid." };
   }
   if (!Number.isFinite(openedTimestamp) || !Number.isInteger(shares) || shares < 1 ||
       entryPrice === null || entryPrice <= 0 || stopPrice === null || stopPrice <= 0 || stopPrice >= entryPrice ||
-      targetPrice === null || targetPrice <= entryPrice || notional === null || notional <= 0 ||
-      round2(shares * entryPrice) !== round2(notional) || notional > EDGE_MAX_POSITION_AUD ||
+      targetPrice === null || targetPrice <= entryPrice || reportedNotional === null || reportedNotional <= 0 ||
+      !Number.isFinite(notional) || round2(notional) !== round2(reportedNotional) || notional > EDGE_MAX_POSITION_AUD ||
       entryCosts === null || entryCosts < 0) {
     return { accepted: false, reason: "Candidate sizing or price levels are invalid." };
   }
