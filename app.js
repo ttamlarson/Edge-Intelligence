@@ -1,5 +1,5 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
-import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
+import { createPaperPortfolio, calculatePaperPortfolioEquity, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
 import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
 import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
 import { backtestRegimeAdaptiveBreakout } from "./regime-adaptive-breakout.js";
@@ -325,8 +325,8 @@ function renderAsxDesk(){
  const open=asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER");
  const realized=asxPortfolio.closedTrades.reduce((s,p)=>s+(Number(p.profitLossAud)||0),0);
  const unrealized=open.reduce((s,p)=>s+(markPaperPosition(p,p.lastMarkPrice||p.entryPrice)?.unrealizedProfitLossAud||0),0);
- const equity=asxPortfolio.cashAud+open.reduce((s,p)=>s+(Number(p.lastMarkPrice||p.entryPrice)*p.shares||0),0);
- $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=aud(equity);
+ const equity=calculatePaperPortfolioEquity(asxPortfolio);
+ $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=equity===null?"Unavailable":aud(equity);
  $("asxRealized").textContent=aud(realized);$("asxUnrealized").textContent=aud(unrealized);
  $("asxPositions").textContent=open.length;
  $("asxCandidates").innerHTML=asxCandidates.length?asxCandidates.map((c,i)=>`<div class="position-card"><div><b>${esc(c.symbol)} · ${esc(c.status)}</b><div class="market-meta">${esc(c.reason)} · ${esc(c.source||"")}</div>${c.status==="PAPER_CANDIDATE"?`<div class="market-meta">Ref ${aud(c.entryReference)} · ${c.shares} shares · stop ${aud(c.stopPrice)} · target ${aud(c.targetPrice)} · est. target net ${aud(c.estimatedNetTargetProfitAud)} · RR ${c.rewardRiskAfterCosts}:1</div>`:""}</div>${c.status==="PAPER_CANDIDATE"?`<button class="small-btn" data-asx-open="${i}">Open paper position</button>`:""}</div>`).join(""):'<div class="empty">Connect DataCedar historical daily bars or import an authorised ASX daily OHLC CSV to scan. No real-time ASX feed is connected.</div>';
@@ -345,7 +345,7 @@ $("asxImportBtn")?.addEventListener("click",()=>{
   if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;return}
   asxUniverse=parsed.barsBySymbol;
   const observedAt=parsed.latestBar;
-  asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
+  asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:calculatePaperPortfolioEquity(asxPortfolio)??0,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
   $("asxImportStatus").textContent=`Imported ${parsed.rows} daily bars for ${parsed.symbols.length} ASX tickers. Latest bar: ${formatDateTime(parsed.latestBar,"Australia/Perth")}. Source label is user-declared and has not been independently verified.`;
   renderAsxDesk();
  };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
@@ -362,7 +362,7 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
   if(markUpdate.markedSymbols.length){asxPortfolio=markUpdate.portfolio;saveAsx()}
   asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
    symbol,bars:asxUniverse[symbol],source:"DataCedar ASX historical daily bars",currency:"AUD",
-   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,
+   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:calculatePaperPortfolioEquity(asxPortfolio)??0,
    cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length
   }));
   const counts=Object.entries(data.rowsBySymbol||{}).map(([symbol,count])=>symbol+": "+count+" bars").join("; ");
