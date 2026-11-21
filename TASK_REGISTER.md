@@ -7,14 +7,15 @@ Updated for the autonomous ASX trading foundation. “Complete” describes code
 | Task | Status | Evidence / remaining boundary |
 |---|---|---|
 | Deterministic daily swing strategy foundation | Complete | 20/50-day trend filter, 20-session breakout, ATR-based stop/target; candidate only. Not validated as profitable. |
-| $500 portfolio risk configuration | Complete | 1% equity risk budget, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions, whole-share sizing. |
-| ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. |
+| $500 portfolio risk configuration | Complete | 1% of current net liquidation equity after estimated exit costs; fee-inclusive stop risk, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions and whole-share sizing. |
+| ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. Fee assumptions are retained with each paper position for consistent marking and closing. |
 | Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp and latest individual daily bar within 36 hours, latest bar no more than five minutes after the source observation, and 51 valid daily OHLC bars. |
 | Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; candidate shape, provenance and freshness validated; entry fees count toward the AUD 200 allocation cap; negative net exit proceeds are recorded when minimum fees exceed exit value; only currently open positions count toward concurrency limits. |
+| Default-cost candidate feasibility | Blocked pending operator decision | A 2×ATR stop and 4×ATR target are exactly 2:1 gross; positive round-trip fees make net reward/risk lower than the required 2:1. AUD 500 × 1% = AUD 5 risk budget versus AUD 5.50 minimum commission plus GST per side. Capital, risk, target and threshold assumptions remain unchanged. |
 | Licensed ASX daily data integration | Not implemented | No ASX feed or licence configured. No live scan can run. |
 | CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV only after an explicit AUD/data-rights user attestation; supports quoted fields, UTF-8 BOM headers, ISO dates and Australian DD/MM/YYYY; rejects malformed quoting, adjusted-close-only files, inconsistent OHLC, duplicate sessions and timezone-less/unsupported dates. Scheduled live scanning still not implemented. |
 | Broker read-only account/portfolio adapter | Not implemented | IBKR account and API permissions not configured or verified. |
-| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; no broker reconciliation or immutable server audit. |
+| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; net liquidation equity deducts estimated exit fees; four-decimal prices and per-position cost assumptions reconcile marks, closes and history. No broker reconciliation or immutable server audit. |
 | Out-of-sample backtest and walk-forward validation | Not implemented | Existing replay is descriptive only; no profitability claim. |
 | Live order execution | Disabled by design | No order routes, credentials or broker integration. Do not enable in this phase. |
 
