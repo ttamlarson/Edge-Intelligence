@@ -101,21 +101,23 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
   const maxSpend = Math.min(EDGE_MAX_POSITION_AUD, Math.max(0, cash - EDGE_MIN_CASH_RESERVE_AUD));
   const perShareRisk = entryPrice - stopPrice;
   let shares = Math.min(Math.floor(riskBudget / perShareRisk), Math.floor(maxSpend / entryPrice));
-  let notional = 0, buyCost = null, sellCost = null, targetSellCost = null, netStopLoss = 0;
+  let notional = 0, buyCost = null, sellCost = null, targetSellCost = null, netStopLoss = 0, rawNetStopLoss = 0;
   while (shares >= 1) {
     notional = round2(shares * entryPrice);
     buyCost = estimateAsxSideCost(notional, costs);
     sellCost = estimateAsxSideCost(shares * stopPrice, costs);
     targetSellCost = estimateAsxSideCost(shares * targetPrice, costs);
     if (!buyCost || !sellCost || !targetSellCost) return reject("Estimated transaction costs are invalid.");
-    netStopLoss = round2(notional - shares * stopPrice + buyCost.totalAud + sellCost.totalAud);
-    if (notional + buyCost.totalAud <= maxSpend + 0.01 && netStopLoss <= riskBudget + 0.01) break;
+    rawNetStopLoss = notional - shares * stopPrice + buyCost.totalAud + sellCost.totalAud;
+    netStopLoss = round2(rawNetStopLoss);
+    if (notional + buyCost.totalAud <= maxSpend + 0.01 && rawNetStopLoss <= riskBudget + 0.01) break;
     shares--;
   }
   if (shares < 1) return reject("No whole-share position fits the 1% net-equity risk budget and AUD 200 allocation cap after estimated fees.");
   const targetValue = shares * targetPrice;
-  const netTargetProfit = round2(targetValue - notional - buyCost.totalAud - targetSellCost.totalAud);
-  if (netStopLoss <= 0 || netTargetProfit <= 0 || netTargetProfit < 2 * netStopLoss) return reject("Expected net reward after estimated costs is below the 2:1 minimum.");
+  const rawNetTargetProfit = targetValue - notional - buyCost.totalAud - targetSellCost.totalAud;
+  const netTargetProfit = round2(rawNetTargetProfit);
+  if (rawNetStopLoss <= 0 || rawNetTargetProfit <= 0 || rawNetTargetProfit + 1e-9 < 2 * rawNetStopLoss) return reject("Expected net reward after estimated costs is below the 2:1 minimum.");
   return { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, strategy: "ASX_DAILY_TREND_BREAKOUT_V1", symbol: String(symbol).toUpperCase(), source: validated.source, currency: "AUD", observedAt: validated.observedAt, entryReference: entryPrice, stopPrice, targetPrice, shares, notionalAud: round2(notional), riskBudgetAud: round2(riskBudget), estimatedEntryCostsAud: buyCost.totalAud, estimatedNetTargetProfitAud: round2(netTargetProfit), estimatedNetStopLossAud: round2(netStopLoss), rewardRiskAfterCosts: round2(netTargetProfit / netStopLoss), assumptions: { commissionRate: costs.commissionRate ?? 0.0008, commissionMinimumAud: costs.minimumCommissionAud ?? EDGE_COMMISSION_MIN_AUD, gstRate: costs.gstRate ?? EDGE_GST_RATE, slippageBps: costs.slippageBps ?? EDGE_DEFAULT_SLIPPAGE_BPS, exitAtStopOrTarget: true }, reason: "Candidate passed deterministic screening; it is not an order or a prediction of profit." };
 }
 
@@ -177,9 +179,11 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
       round2(entryCosts) !== expectedEntryCost.totalAud) {
     return { accepted: false, reason: "Candidate entry costs do not match its declared fee assumptions." };
   }
-  const netTargetProfit = round2(shares * targetPrice - notional - expectedEntryCost.totalAud - expectedTargetCost.totalAud);
-  const netStopLoss = round2(notional - shares * stopPrice + expectedEntryCost.totalAud + expectedStopCost.totalAud);
-  if (netStopLoss <= 0 || netStopLoss > riskBudget + 0.01 || netTargetProfit < 2 * netStopLoss ||
+  const rawNetTargetProfit = shares * targetPrice - notional - expectedEntryCost.totalAud - expectedTargetCost.totalAud;
+  const rawNetStopLoss = notional - shares * stopPrice + expectedEntryCost.totalAud + expectedStopCost.totalAud;
+  const netTargetProfit = round2(rawNetTargetProfit);
+  const netStopLoss = round2(rawNetStopLoss);
+  if (rawNetStopLoss <= 0 || rawNetStopLoss > riskBudget + 0.01 || rawNetTargetProfit + 1e-9 < 2 * rawNetStopLoss ||
       round2(num(candidate.estimatedNetTargetProfitAud)) !== netTargetProfit ||
       round2(num(candidate.estimatedNetStopLossAud)) !== netStopLoss ||
       round2(num(candidate.rewardRiskAfterCosts)) !== round2(netTargetProfit / netStopLoss)) {
