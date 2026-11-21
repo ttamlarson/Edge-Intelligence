@@ -130,9 +130,11 @@ test("daily-bar screening rejects invalid freshness clock configuration", () => 
 const noCosts = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
 
 test("ASX CSV import requires AUD confirmation and handles BOM, quoted fields, Australian dates and multiple tickers", () => {
-  const csv = "\uFEFFSymbol,Date,Open,High,Low,Close,Adj Close,Volume\\r\\n" +
-    '"BHP","20/11/2026",10,11,9,10.5,10.4,1000\\r\\n' +
-    '"CBA","2026-11-20T16:10:00+08:00",100,102,99,101,100,500\\r\\n';
+  const csv = [
+    "\uFEFFSymbol,Date,Open,High,Low,Close,Adj Close,Volume",
+    '"BHP","20/11/2026",10,11,9,10.5,10.4,1000',
+    '"CBA","2026-11-20T16:10:00+08:00",100,102,99,101,100,500'
+  ].join(String.fromCharCode(13, 10));
   assert.equal(parseAsxDailyCsv(csv).valid, false);
   assert.equal(parseAsxDailyCsv(csv, { currency: "USD" }).valid, false);
   const parsed = parseAsxDailyCsv(csv, { currency: "AUD" });
@@ -142,8 +144,9 @@ test("ASX CSV import requires AUD confirmation and handles BOM, quoted fields, A
   assert.equal(parsed.barsBySymbol.BHP[0].timestamp, "2026-11-20T00:00:00.000Z");
   assert.equal(parsed.barsBySymbol.CBA[0].timestamp, "2026-11-20T08:10:00.000Z");
   assert.equal(parseAsxDailyCsv(csv.replace("Low,Close,Adj Close", "Low,Adj Close,Volume"), { currency: "AUD" }).valid, false);
-  assert.equal(parseAsxDailyCsv('Symbol,Date,Open,High,Low,Close\\n"BHP,20/11/2026,10,11,9,10.5', { currency: "AUD" }).valid, false);
-  const duplicate = "Symbol,Date,Open,High,Low,Close\\nBHP,20/11/2026,10,11,9,10.5\\nBHP,2026-11-20,10,11,9,10.5";
+  const malformed = ["Symbol,Date,Open,High,Low,Close", '"BHP,20/11/2026,10,11,9,10.5'].join(String.fromCharCode(10));
+  assert.equal(parseAsxDailyCsv(malformed, { currency: "AUD" }).valid, false);
+  const duplicate = ["Symbol,Date,Open,High,Low,Close", "BHP,20/11/2026,10,11,9,10.5", "BHP,2026-11-20,10,11,9,10.5"].join(String.fromCharCode(10));
   assert.equal(parseAsxDailyCsv(duplicate, { currency: "AUD" }).valid, false);
 });
 
@@ -262,7 +265,7 @@ test("paper close reconciles entry and exit fees and records negative net procee
   assert.equal(closed.accepted, true, closed.reason);
   assert.equal(closed.trade.exitCostsAud, exitCost.totalAud);
   assert.equal(closed.trade.proceedsAud, Math.round((120 - exitCost.totalAud) * 100) / 100);
-  assert.equal(closed.trade.profitLossAud, closed.trade.proceedsAud - position.debitAud);
+  assert.equal(closed.trade.profitLossAud, Math.round((closed.trade.proceedsAud - position.debitAud) * 100) / 100);
   assert.equal(closed.portfolio.cashAud, capital + closed.trade.profitLossAud);
   assert.equal(closed.portfolio.closedTrades.length, 1);
 
