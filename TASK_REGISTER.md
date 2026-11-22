@@ -124,3 +124,12 @@ Updated after local implementation and automated verification on `edge-productio
 | Remove conflicting GitHub Pages / Direct Upload publishing workflow | Implemented on feature branch | Pages is already Git-integrated. Do not switch it to Wrangler Direct Upload; Cloudflare's GitHub App performs preview and production deployments. |
 | Verify production Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and successful production deployment. |
 | Cloudflare API token Pages permission | Not required for current deployment path | Pages deployment is authorized by the Cloudflare GitHub App. Existing `CLOUDFLARE_API_TOKEN` remains dedicated to the Worker deployment workflow. |
+
+
+## ASX explainable research scoring (2026-11-22)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Deterministic ASX setup scoring | Implemented on feature branch | New `asx-analysis.js` computes trend, breakout, RSI, ATR and optional relative-volume components; reports factor-level evidence and score coverage. It is not an AI model, probability forecast or trade recommendation. |
+| ASX scan ranking integration | Implemented on feature branch | CSV and DataCedar scan results are ranked by technical setup score while preserving the existing independent paper eligibility gate. No localStorage keys or portfolio schema changed. |
+| Test and production verification | Pending | CI must pass on the feature branch. No production deployment is authorised by this change. |
