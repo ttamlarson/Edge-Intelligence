@@ -28,7 +28,7 @@ test("ASX analysis rejects stale, malformed, non-AUD and insufficient input", ()
   assert.equal(analyzeAsxDailySetup({ ...args, bars: malformed }).status, "REJECTED");
 });
 test("missing volume is excluded from score coverage rather than fabricated", () => {
-  const data = bars().map(({ volume, ...bar }) => bar);
+  const data = bars().map(({ volume, ...bar }) => ({ ...bar, volume: null }));
   const result = analyzeAsxDailySetup({ symbol: "CBA", bars: data, source: "Test fixture", currency: "AUD", observedAt: data.at(-1).timestamp, now });
   assert.equal(result.status, "REVIEW");
   assert.equal(result.scoreCoverage, 85);
