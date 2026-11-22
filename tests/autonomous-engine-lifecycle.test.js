@@ -186,7 +186,7 @@ test("opening rechecks the AUD 200 allocation cap including entry fees", () => {
     rewardRiskAfterCosts: netTarget / netStop,
     assumptions: { commissionRate: costs.commissionRate, commissionMinimumAud: costs.minimumCommissionAud, gstRate: costs.gstRate, slippageBps: costs.slippageBps }
   };
-  const result = openPaperPosition(createPaperPortfolio(), candidate, { id: "entry-fees-over-cap", now });
+  const result = openPaperPosition(createPaperPortfolio(), candidate, { id: "entry-fees-over-cap", openedAt: new Date(now).toISOString(), now });
   assert.equal(result.accepted, false);
   assert.match(result.reason, /AUD 200 paper allocation cap/);
 });
@@ -257,7 +257,7 @@ test("paper opening revalidates risk budget and fee assumptions against candidat
     estimatedNetStopLossAud: 0,
     rewardRiskAfterCosts: 0
   };
-  const riskResult = openPaperPosition(portfolio, excessiveRisk, { id: "risk-bypass", now });
+  const riskResult = openPaperPosition(portfolio, excessiveRisk, { id: "risk-bypass", openedAt: new Date(now).toISOString(), now });
   assert.equal(riskResult.accepted, false);
   assert.match(riskResult.reason, /risk budget/);
 
@@ -265,7 +265,7 @@ test("paper opening revalidates risk budget and fee assumptions against candidat
     ...candidate,
     assumptions: { ...candidate.assumptions, commissionRate: 0.0008 }
   };
-  const feeResult = openPaperPosition(portfolio, alteredFees, { id: "fee-bypass", now });
+  const feeResult = openPaperPosition(portfolio, alteredFees, { id: "fee-bypass", openedAt: new Date(now).toISOString(), now });
   assert.equal(feeResult.accepted, false);
   assert.match(feeResult.reason, /entry costs/);
   assert.equal(portfolio.cashAud, 500);
