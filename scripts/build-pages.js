@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const output = join(root, "dist");
 const assets = [
-  "index.html", "app.js", "domain.js", "au-sources.js", "autonomous-engine.js", "coinspot-strategy.js", "adaptive-regime-strategy.js", "regime-adaptive-breakout.js", "trend-following-indicators.js", "crypto-csv.js", "styles.css",
+  "index.html", "app.js", "domain.js", "au-sources.js", "autonomous-engine.js", "asx-analysis.js", "coinspot-strategy.js", "adaptive-regime-strategy.js", "regime-adaptive-breakout.js", "trend-following-indicators.js", "crypto-csv.js", "styles.css",
   "manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png", "_headers"
 ];
 
@@ -25,5 +25,6 @@ const app = await readFile(join(output, "app.js"), "utf8");
 if (app.includes('from "./autonomous-engine.js"') && !(await stat(join(output, "autonomous-engine.js")).catch(() => null))) {
   throw new Error("The ASX paper engine import is missing from the Pages output.");
 }
+if (app.includes('from "./asx-analysis.js"') && !(await stat(join(output, "asx-analysis.js")).catch(() => null))) throw new Error("The ASX analysis import is missing from the Pages output.");
 console.log(`Built ${assets.length} static assets into ${output}`);
 console.log("Configure the Worker API URL in EDGE Settings; no secrets or Worker source are copied to Pages.");
