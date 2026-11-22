@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createPaperPortfolio, closePaperPosition, estimateAsxSideCost, evaluateAsxSwingSetup, markPaperPosition,
+  createPaperPortfolio, calculatePaperPortfolioEquity, closePaperPosition, estimateAsxSideCost, evaluateAsxSwingSetup, markPaperPosition,
   openPaperPosition, parseAsxDailyCsv, recordPaperMark, updatePaperMarksFromBars
 } from "../autonomous-engine.js";
 
@@ -200,6 +200,24 @@ test("paper portfolio rejects stale candidate data at the time of opening", () =
   assert.match(result.reason, /provenance or freshness/);
 });
 
+test("paper opening rejects backdated and future-dated opening timestamps", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const portfolio = createPaperPortfolio();
+  const backdated = openPaperPosition(portfolio, candidate, {
+    id: "backdated-open", openedAt: new Date(now - 2 * 86_400_000).toISOString(), now
+  });
+  assert.equal(backdated.accepted, false);
+  assert.match(backdated.reason, /Opening timestamp/);
+
+  const future = openPaperPosition(portfolio, candidate, {
+    id: "future-open", openedAt: new Date(now + 10 * 60_000).toISOString(), now
+  });
+  assert.equal(future.accepted, false);
+  assert.match(future.reason, /Opening timestamp/);
+  assert.equal(portfolio.cashAud, 500);
+  assert.equal(portfolio.positions.length, 0);
+});
+
 
 test("marking rejects corrupt position quantities and accounting values", () => {
   const valid = { id: "mark-1", status: "OPEN_PAPER", shares: 2, debitAud: 20 };
@@ -290,6 +308,43 @@ test("saving a paper mark persists the latest valuation without changing cash or
   assert.equal(outOfOrder.accepted, false);
   assert.match(outOfOrder.reason, /earlier than the previous mark/);
   assert.equal(secondMark.portfolio.positions[0].lastMarkPrice, 15.25);
+});
+
+test("paper marks and closed history retain the exact fee assumptions and component breakdowns", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "fee-audit-1", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  assert.deepEqual(opened.position.entryCostBreakdown, {
+    commissionAud: 0, gstAud: 0, slippageAud: 0, totalAud: 0
+  });
+
+  const markCosts = { commissionRate: 0, minimumCommissionAud: 1, gstRate: 0, slippageBps: 0 };
+  const marked = recordPaperMark(opened.portfolio, "fee-audit-1", 15, {
+    markedAt: new Date(now + 60_000).toISOString(), costs: markCosts
+  });
+  assert.equal(marked.accepted, true, marked.reason);
+  assert.deepEqual(marked.position.lastMarkCostAssumptions, markCosts);
+  assert.equal(markPaperPosition(marked.position, 15).estimatedExitCostsAud, 1);
+  const mark = markPaperPosition(marked.position, 15);
+  assert.equal(calculatePaperPortfolioEquity(marked.portfolio),
+    Math.round((marked.portfolio.cashAud + mark.marketValueAud - mark.estimatedExitCostsAud) * 100) / 100);
+
+  const exitCosts = { commissionRate: 0, minimumCommissionAud: 2, gstRate: 0.1, slippageBps: 0 };
+  const closed = closePaperPosition(marked.portfolio, "fee-audit-1", 15, {
+    closedAt: new Date(now + 120_000).toISOString(), costs: exitCosts
+  });
+  assert.equal(closed.accepted, true, closed.reason);
+  assert.deepEqual(closed.trade.exitCostAssumptions, exitCosts);
+  assert.deepEqual(closed.trade.exitCostBreakdown, {
+    commissionAud: 2, gstAud: 0.2, slippageAud: 0, totalAud: 2.2
+  });
+  assert.equal(closed.trade.exitCostsAud, 2.2);
+  assert.equal(closed.trade.proceedsAud, 72.8);
+  assert.equal(closed.trade.profitLossAud, -0.7);
+  assert.equal(closed.portfolio.cashAud, 499.3);
+  assert.equal(closed.portfolio.closedTrades[0].id, "fee-audit-1");
 });
 
 
