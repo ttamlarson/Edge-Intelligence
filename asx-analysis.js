@@ -20,7 +20,7 @@ export function analyzeAsxDailySetup({ symbol, bars, source, currency, observedA
     const volume = number(bar?.volume);
     if (![open, high, low, close, timestamp].every(Number.isFinite) || open <= 0 || low <= 0 ||
         high < Math.max(open, close) || low > Math.min(open, close) || high < low ||
-        (bar?.volume !== undefined && (volume === null || volume < 0))) {
+        (bar?.volume != null && (volume === null || volume < 0))) {
       return fail("REJECTED", "One or more daily bars failed OHLCV validation.");
     }
     clean.push({ open, high, low, close, timestamp, volume });
