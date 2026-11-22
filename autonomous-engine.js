@@ -8,9 +8,19 @@ export const EDGE_COMMISSION_MIN_AUD = 5;
 export const EDGE_GST_RATE = 0.10;
 export const EDGE_DEFAULT_SLIPPAGE_BPS = 10;
 export const EDGE_MAX_DAILY_BAR_AGE_MS = 36 * 60 * 60 * 1000;
+const DEFAULT_ASX_COMMISSION_RATE = 0.0008;
 const num = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const round2 = value => Math.round((value + Number.EPSILON) * 100) / 100;
 const roundPrice = value => Number.isFinite(value) ? Math.round((value + Number.EPSILON) * 10000) / 10000 : value;
+const resolveAsxCostAssumptions = costs => {
+  const supplied = costs ?? {};
+  return {
+    commissionRate: supplied.commissionRate === undefined ? DEFAULT_ASX_COMMISSION_RATE : supplied.commissionRate,
+    minimumCommissionAud: supplied.minimumCommissionAud === undefined ? EDGE_COMMISSION_MIN_AUD : supplied.minimumCommissionAud,
+    gstRate: supplied.gstRate === undefined ? EDGE_GST_RATE : supplied.gstRate,
+    slippageBps: supplied.slippageBps === undefined ? EDGE_DEFAULT_SLIPPAGE_BPS : supplied.slippageBps
+  };
+};
 
 // Parse only deterministic market-data date formats. Date-only CSV values use
 // ISO YYYY-MM-DD or Australian DD/MM/YYYY; timestamps must carry an explicit
@@ -39,7 +49,7 @@ function parseAsxCsvDate(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-export function estimateAsxSideCost(tradeValueAud, { commissionRate = 0.0008, minimumCommissionAud = EDGE_COMMISSION_MIN_AUD, gstRate = EDGE_GST_RATE, slippageBps = EDGE_DEFAULT_SLIPPAGE_BPS } = {}) {
+export function estimateAsxSideCost(tradeValueAud, { commissionRate = DEFAULT_ASX_COMMISSION_RATE, minimumCommissionAud = EDGE_COMMISSION_MIN_AUD, gstRate = EDGE_GST_RATE, slippageBps = EDGE_DEFAULT_SLIPPAGE_BPS } = {}) {
   const value = num(tradeValueAud);
   if (value === null || value <= 0 || ![commissionRate, minimumCommissionAud, gstRate, slippageBps].every(v => Number.isFinite(v) && v >= 0)) return null;
   const commission = Math.max(minimumCommissionAud, value * commissionRate);
@@ -144,7 +154,10 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
       !Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now + 5 * 60_000 || now - observedAt > EDGE_MAX_DAILY_BAR_AGE_MS) {
     return { accepted: false, reason: "Candidate provenance or freshness is invalid." };
   }
-  if (!Number.isFinite(openedTimestamp) || !Number.isInteger(shares) || shares < 1 ||
+  if (!Number.isFinite(openedTimestamp) || openedTimestamp > now + 5 * 60_000 || openedTimestamp < observedAt - 5 * 60_000) {
+    return { accepted: false, reason: "Opening timestamp must follow the source observation and cannot be future-dated." };
+  }
+  if (!Number.isInteger(shares) || shares < 1 ||
       entryPrice === null || entryPrice <= 0 || stopPrice === null || stopPrice <= 0 || stopPrice >= entryPrice ||
       targetPrice === null || targetPrice <= entryPrice || reportedNotional === null || reportedNotional <= 0 ||
       !Number.isFinite(notional) || round2(notional) !== round2(reportedNotional) || notional > EDGE_MAX_POSITION_AUD ||
@@ -200,7 +213,7 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   const debit = round2(notional + entryCosts);
   if (debit > EDGE_MAX_POSITION_AUD) return { accepted: false, reason: "Position plus entry costs exceeds the AUD 200 paper allocation cap." };
   if (debit > portfolio.cashAud - EDGE_MIN_CASH_RESERVE_AUD) return { accepted: false, reason: "Insufficient cash after preserving the minimum reserve." };
-  const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), debitAud: debit, costAssumptions: costs, openedAt, status: "OPEN_PAPER" };
+  const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), entryCostBreakdown: { ...expectedEntryCost }, debitAud: debit, costAssumptions: costs, openedAt, status: "OPEN_PAPER" };
   return {
     accepted: true,
     portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position], closedTrades: portfolio.closedTrades || [] },
@@ -324,7 +337,8 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   }
   if (price === null || price <= 0) return { accepted: false, reason: "Exit price must be positive." };
   const normalizedPrice = roundPrice(price);
-  const exitValue = position.shares * normalizedPrice, exitCost = estimateAsxSideCost(exitValue, costs ?? position.costAssumptions ?? {});
+  const exitCostAssumptions = resolveAsxCostAssumptions(costs ?? position.costAssumptions ?? {});
+  const exitValue = position.shares * normalizedPrice, exitCost = estimateAsxSideCost(exitValue, exitCostAssumptions);
   if (!Number.isFinite(exitValue) || !exitCost) return { accepted: false, reason: "Exit costs could not be calculated." };
   const proceeds = round2(exitValue - exitCost.totalAud);
   const pnl = round2(proceeds - position.debitAud);
@@ -333,18 +347,18 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   // resulting negative net proceeds rather than making the simulated trade
   // impossible to close; the portfolio itself must never overdraw.
   if (!Number.isFinite(proceeds) || !Number.isFinite(nextCash) || nextCash < 0) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
-  const closed = { ...position, status: "CLOSED_PAPER", exitPrice: normalizedPrice, exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
+  const closed = { ...position, status: "CLOSED_PAPER", exitPrice: normalizedPrice, exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, exitCostBreakdown: { ...exitCost }, exitCostAssumptions, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
   const positions = portfolio.positions.slice(); positions[index] = closed;
   return { accepted: true, portfolio: { ...portfolio, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
 }
 
-export function markPaperPosition(position, markPrice, costs = position?.costAssumptions ?? {}) {
+export function markPaperPosition(position, markPrice, costs = position?.lastMarkCostAssumptions ?? position?.costAssumptions ?? {}) {
   const price = num(markPrice);
   if (!position || position.status !== "OPEN_PAPER" || price === null || price <= 0 ||
       !Number.isInteger(position.shares) || position.shares < 1 ||
       !Number.isFinite(position.debitAud) || position.debitAud < 0) return null;
   const normalizedPrice = roundPrice(price);
-  const value = position.shares * normalizedPrice, sellCost = estimateAsxSideCost(value, costs);
+  const value = position.shares * normalizedPrice, sellCost = estimateAsxSideCost(value, resolveAsxCostAssumptions(costs));
   if (!Number.isFinite(value) || !sellCost) return null;
   const unrealizedProfitLossAud = round2(value - sellCost.totalAud - position.debitAud);
   if (!Number.isFinite(unrealizedProfitLossAud)) return null;
@@ -391,12 +405,14 @@ export function recordPaperMark(portfolio, positionId, markPrice, {
     return { accepted: false, reason: "Paper mark timestamp is invalid, future-dated or earlier than the previous mark." };
   }
 
-  const mark = markPaperPosition(position, markPrice, costs ?? position.costAssumptions ?? {});
+  const markCostAssumptions = resolveAsxCostAssumptions(costs ?? position.lastMarkCostAssumptions ?? position.costAssumptions ?? {});
+  const mark = markPaperPosition(position, markPrice, markCostAssumptions);
   if (!mark) return { accepted: false, reason: "Paper mark price or position accounting is invalid." };
   const updatedPosition = {
     ...position,
     lastMarkPrice: mark.markPrice,
-    lastMarkedAt: new Date(markedTimestamp).toISOString()
+    lastMarkedAt: new Date(markedTimestamp).toISOString(),
+    lastMarkCostAssumptions: markCostAssumptions
   };
   const positions = portfolio.positions.slice();
   positions[index] = updatedPosition;
