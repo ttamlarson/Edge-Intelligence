@@ -105,11 +105,16 @@ function validateSnapshot(value) {
 export async function readAsxAutopilot(env) {
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", configured: false, liveTradingEnabled: false };
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
-  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
+  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
   const snapshot = validateSnapshot(parsed);
   return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+}
+
+function isAutopilotConfigured(env) {
+  return env?.ASX_AUTOPILOT_ENABLED === "true" && Boolean(env?.DATACEDAR_API_KEY) &&
+    Boolean(env?.EDGE_KV) && configuredSymbols(env).length > 0;
 }
 
 function configuredSymbols(env) {
