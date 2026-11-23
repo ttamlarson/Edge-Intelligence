@@ -137,3 +137,5 @@ The account remains `PAPER_ONLY` and `liveTradingEnabled=false`. Daily OHLC bars
 
 
 The automated ASX paper desk also reports realized-only performance metrics: closed trade count, win rate, gross profit/loss, profit factor, average win/loss, expectancy, and realized-equity drawdown. Metrics exclude malformed trade records and disclose the excluded count. Samples below 30 trades are labelled `INSUFFICIENT_SAMPLE`; 30–99 are labelled `EARLY_SAMPLE`; 100+ is labelled `LARGER_SAMPLE_NOT_PROOF`. These are descriptive accounting statistics, not evidence of future returns. Open/unrealized P&L is deliberately not mixed into realized performance.
+
+Provider failures are persisted as `DATA_PROVIDER_ERROR` with a bounded, sanitized message and failure count. The last successful scan timestamp/candle cursor is not advanced on provider errors, and the dashboard shows the last provider error. A successful later scan clears the displayed error without erasing the historical failure count.
