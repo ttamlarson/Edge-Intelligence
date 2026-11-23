@@ -115,7 +115,19 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
     return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
   }
-  const data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
+  let data;
+  try {
+    data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
+  } catch (error) {
+    const lastError = String(error?.message || "DataCedar request failed.").slice(0, 240);
+    const failed = {
+      ...snapshot, status: "DATA_PROVIDER_ERROR", liveTradingEnabled: false,
+      lastAttemptAt: scannedAt, lastError,
+      failedScanCount: (Number.isInteger(snapshot.failedScanCount) ? snapshot.failedScanCount : 0) + 1
+    };
+    await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(failed));
+    return { ...failed, configured: true, symbols, performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  }
 
   let portfolio = snapshot.portfolio;
   const signals = [];
@@ -188,7 +200,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   const next = {
     ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
-    status: "SCAN_COMPLETED", portfolio, lastScanAt: scannedAt,
+    status: data.rows > 0 ? "SCAN_COMPLETED" : "NO_DATA", portfolio, lastScanAt: scannedAt,\n    lastAttemptAt: scannedAt, lastError: null,
     lastBarBySymbol: processed,
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
     scanCount: snapshot.scanCount + 1,
