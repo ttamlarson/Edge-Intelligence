@@ -8,6 +8,26 @@ const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
 const MIN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+function sydneyClock(timestamp) {
+  const ms = typeof timestamp === "number" ? timestamp : Date.parse(timestamp);
+  if (!Number.isFinite(ms)) return null;
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date(ms));
+  const fields = Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+  return { date: `${fields.year}-${fields.month}-${fields.day}`, minutes: Number(fields.hour) * 60 + Number(fields.minute) };
+}
+
+export function isAsxDailyBarComplete(timestamp, now = Date.now()) {
+  const barClock = sydneyClock(timestamp);
+  const currentClock = sydneyClock(now);
+  if (!barClock || !currentClock) return false;
+  // DataCedar's ts_ms is the bar OPEN time. Do not use a bar whose Sydney
+  // session date is today until 17:00 Sydney time (16:00 close + publication buffer).
+  return barClock.date !== currentClock.date || currentClock.minutes >= 17 * 60;
+}
+
 function iso(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) throw new TypeError("A valid scan clock is required.");
@@ -136,11 +156,16 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   for (const symbol of symbols) {
     const bars = data.barsBySymbol?.[symbol] || [];
-    if (bars.length < 51) {
-      signals.push({ symbol, status: "INSUFFICIENT_HISTORY", bars: bars.length, reason: "At least 51 validated daily bars are required." });
+    if (bars.length && !isAsxDailyBarComplete(bars.at(-1).timestamp, nowMs)) {
+      incompleteSessionBars++;
+      signals.push({ symbol, status: "INCOMPLETE_CURRENT_SESSION_BAR_IGNORED", reason: "DataCedar timestamp maps to today's Sydney session; the daily candle is ignored until 17:00 Sydney time." });
+    }
+    const completedBars = bars.filter(bar => isAsxDailyBarComplete(bar.timestamp, nowMs));
+    if (completedBars.length < 51) {
+      signals.push({ symbol, status: "INSUFFICIENT_COMPLETED_HISTORY", bars: completedBars.length, reason: "At least 51 completed daily bars are required; current-session bars are excluded." });
       continue;
     }
-    const latest = bars.at(-1);
+    const latest = completedBars.at(-1);
     const latestMs = Date.parse(latest.timestamp);
     if (!Number.isFinite(latestMs) || latestMs > nowMs + 5 * 60_000 || nowMs - latestMs > 36 * 60 * 60 * 1000) {
       signals.push({ symbol, status: "STALE_DATA_REJECTED", reason: "Latest daily bar is outside the 36-hour freshness limit." });
@@ -176,7 +201,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
     if (!openSymbols().has(symbol) && !exitedThisBar.has(symbol)) {
       const candidate = evaluateAsxSwingSetup({
-        symbol, bars, source: data.source, currency: data.currency, observedAt: latest.timestamp,
+        symbol, bars: completedBars, source: data.source, currency: data.currency, observedAt: latest.timestamp,
         equityAud: calculatePaperPortfolioEquity(portfolio) ?? 0,
         cashAud: portfolio.cashAud,
         openPositions: portfolio.positions.filter(p => p.status === "OPEN_PAPER").length,
@@ -189,18 +214,18 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
         });
         if (opened.accepted) {
           portfolio = opened.portfolio;
-          signals.push({ symbol, status: "OPENED_PAPER", reason: candidate.reason, entryReference: candidate.entryReference, shares: candidate.shares, openedAt: scannedAt });
-        } else signals.push({ symbol, status: "OPEN_REJECTED", reason: opened.reason });
+          signals.push({ symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt, reason: candidate.reason, entryReference: candidate.entryReference, shares: candidate.shares, openedAt: scannedAt });
+        } else signals.push({ symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt, reason: opened.reason });
       } else {
-        signals.push({ symbol, status: candidate.status, reason: candidate.reason });
+        signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
       }
     }
-    processed[symbol] = latest.timestamp;
+    processed[symbol] = latest.timestamp;\n    processedBarsThisScan++;
   }
 
   const next = {
     ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
-    status: data.rows > 0 ? "SCAN_COMPLETED" : "NO_DATA", portfolio, lastScanAt: scannedAt,
+    status: data.rows === 0 ? "NO_DATA" : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR", portfolio, lastScanAt: scannedAt,
     lastAttemptAt: scannedAt, lastError: null,
     lastBarBySymbol: processed,
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
