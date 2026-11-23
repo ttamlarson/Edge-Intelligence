@@ -54,8 +54,7 @@ test("ASX autopilot validates DataCedar data, records a paper-only scan and neve
   assert.equal(result.mode, "AUTOMATED_ASX_PAPER_ONLY");
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.portfolio.mode, "PAPER_ONLY");
-  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 0);
-  assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
+  assert.equal(result.portfolio.positions.length, 0);
   assert.equal(result.scanCount, 1);
   assert.ok(result.signals.some(signal => signal.symbol === "BHP" && signal.status === "REJECTED"));
   const persisted = JSON.parse(store.values.get(__test.STORAGE_KEY));
@@ -129,7 +128,8 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
     ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
     DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
   }, { now: new Date(nextNow), fetchImpl });
-  assert.equal(result.portfolio.positions.length, 0);
+  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 0);
+  assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
   assert.equal(result.portfolio.closedTrades.length, 1);
   assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
   assert.ok(result.signals.some(signal => signal.status === "POSITION_CLOSED_PAPER" && /stop-first.*gap-aware/i.test(signal.reason)));
