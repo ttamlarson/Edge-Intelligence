@@ -185,6 +185,11 @@ test("ASX autopilot status exposes performance without mutating the persisted pa
   assert.equal(status.performance.tradeCount, 1);
   assert.equal(status.performance.totalRealizedProfitLossAud, 12.5);
   assert.equal(status.performance.status, "INSUFFICIENT_SAMPLE");
+  assert.equal(status.configured, false);
+  const configured = await readAsxAutopilot({
+    EDGE_KV: store.binding, ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "server-secret"
+  });
+  assert.equal(configured.configured, true);
   assert.equal(JSON.parse(store.values.get(__test.STORAGE_KEY)).portfolio.closedTrades.length, 1);
 });
 
