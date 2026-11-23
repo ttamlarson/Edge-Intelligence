@@ -27,6 +27,11 @@ test("daily bars reject malformed OHLC and duplicate timestamps", () => {
 test("portfolio starts with $500 virtual cash and permanently disables live trading", () => {
   const portfolio = createPaperPortfolio(); assert.equal(portfolio.cashAud, 500); assert.equal(portfolio.mode, "PAPER_ONLY"); assert.equal(portfolio.liveTradingEnabled, false);
 });
+
+test("paper capital cannot round down to a zero-cash portfolio", () => {
+  assert.throws(() => createPaperPortfolio({ capitalAud: 0.004 }), /positive AUD after cent rounding/);
+  assert.equal(createPaperPortfolio({ capitalAud: 0.01 }).cashAud, 0.01);
+});
 test("paper position cannot be opened from an unvalidated or executable candidate", () => {
   assert.equal(openPaperPosition(createPaperPortfolio(), { status: "PAPER_CANDIDATE", executable: true, simulatedOnly: true }).accepted, false);
 });
