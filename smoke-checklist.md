@@ -84,3 +84,5 @@
 - [ ] Verify Worker scheduled logs and the deployed UI only after approved merge/deployment.
 
 - [ ] Simulate a DataCedar timeout, 401 or 429; confirm `DATA_PROVIDER_ERROR`, bounded error text and incremented failure count are persisted without advancing the successful scan cursor.
+
+- [ ] During ASX trading hours, confirm the current Sydney-date daily bar is excluded until 17:00 Sydney time (including daylight-saving changes); verify the scanner uses only the latest completed bar.
