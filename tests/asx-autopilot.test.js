@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runAsxAutopilot, readAsxAutopilot, __test } from "../asx-autopilot.js";
+import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition } from "../autonomous-engine.js";
 
 function kv(seed = null) {
   const values = new Map(seed ? [[__test.STORAGE_KEY, seed]] : []);
@@ -84,4 +85,52 @@ test("ASX autopilot status is explicitly unconfigured without Worker KV", async 
   const status = await readAsxAutopilot({});
   assert.equal(status.status, "BLOCKED_STORAGE_NOT_CONFIGURED");
   assert.equal(status.liveTradingEnabled, false);
+});
+
+
+test("ASX autopilot exits at a gap-worse open, resolves stop before target and does not re-enter on the same bar", async () => {
+  const firstNow = Date.parse("2026-11-23T02:00:00Z");
+  const firstRows = bars(firstNow);
+  const firstBars = firstRows.map(row => ({
+    timestamp: new Date(row.ts_ms).toISOString(), open: row.open, high: row.high,
+    low: row.low, close: row.close, volume: row.volume
+  }));
+  const candidate = evaluateAsxSwingSetup({
+    symbol: "BHP", bars: firstBars, source: "DataCedar ASX historical daily bars",
+    currency: "AUD", observedAt: new Date(firstNow).toISOString(),
+    equityAud: 5000, cashAud: 5000, now: firstNow
+  });
+  assert.equal(candidate.status, "PAPER_CANDIDATE", candidate.reason);
+  const openedAt = firstNow + 1000;
+  const opened = openPaperPosition(createPaperPortfolio({ capitalAud: 5000 }), candidate, {
+    id: "asx-auto-BHP-2026-11-23", openedAt: new Date(openedAt).toISOString(), now: openedAt
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  const initial = {
+    ...__test.initialSnapshot(),
+    portfolio: opened.portfolio,
+    lastScanAt: new Date(openedAt).toISOString(),
+    lastBarBySymbol: { BHP: new Date(firstNow).toISOString() },
+    scanCount: 1
+  };
+  const store = kv(JSON.stringify(initial));
+  const nextNow = firstNow + 2 * 86_400_000;
+  const nextRows = bars(nextNow);
+  const latest = nextRows.at(-1);
+  latest.open = opened.position.stopPrice - 0.2;
+  latest.low = latest.open - 0.1;
+  latest.close = opened.position.targetPrice + 0.1;
+  latest.high = latest.close + 0.1;
+  const fetchImpl = async () => new Response(JSON.stringify({ data: { "asx:BHP": nextRows } }), {
+    headers: { "Content-Type": "application/json" }
+  });
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
+  }, { now: new Date(nextNow), fetchImpl });
+  assert.equal(result.portfolio.positions.length, 0);
+  assert.equal(result.portfolio.closedTrades.length, 1);
+  assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
+  assert.ok(result.signals.some(signal => signal.status === "POSITION_CLOSED_PAPER" && /stop-first.*gap-aware/i.test(signal.reason)));
+  assert.equal(result.signals.some(signal => signal.status === "OPEN_REJECTED" || signal.status === "OPENED_PAPER"), false);
 });
