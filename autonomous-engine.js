@@ -86,7 +86,7 @@ export function validateDailyBars(bars, { source, currency, observedAt, now = Da
 }
 
 export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observedAt, equityAud = EDGE_STARTING_CAPITAL_AUD, cashAud = equityAud, openPositions = 0, now = Date.now(), costs = {} } = {}) {
-  const reject = reason => ({ status: "REJECTED", executable: false, simulatedOnly: true, symbol: String(symbol || "").toUpperCase(), reason });
+  const reject = reason => ({ status: "REJECTED", executable: false, simulatedOnly: true, symbol: String(symbol || "").toUpperCase(), observedAt: typeof observedAt === "string" ? observedAt : null, reason });
   if (!/^[A-Z0-9.]{2,12}$/.test(String(symbol || "").toUpperCase())) return reject("A valid ASX ticker is required.");
   const validated = validateDailyBars(bars, { source, currency, observedAt, now });
   if (!validated.valid) return reject(validated.reason);
@@ -102,7 +102,7 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
     return Math.max(bar.high - bar.low, Math.abs(bar.high - previousClose), Math.abs(bar.low - previousClose));
   });
   const atr14 = ranges.slice(-14).reduce((a, b) => a + b, 0) / 14;
-  if (!(last > sma20 && sma20 > sma50 && last > priorHigh20)) return { status: "NO_SIGNAL", executable: false, simulatedOnly: true, symbol: String(symbol).toUpperCase(), reason: "Daily trend and 20-session breakout conditions are not all satisfied." };
+  if (!(last > sma20 && sma20 > sma50 && last > priorHigh20)) return { status: "NO_SIGNAL", executable: false, simulatedOnly: true, symbol: String(symbol).toUpperCase(), observedAt: validated.observedAt, reason: "Daily trend and 20-session breakout conditions are not all satisfied." };
   const entryPrice = roundPrice(last);
   const stopPrice = roundPrice(entryPrice - 2 * atr14);
   if (stopPrice <= 0 || stopPrice >= entryPrice) return reject("Volatility-based stop is invalid.");
