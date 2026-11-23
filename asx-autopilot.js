@@ -6,6 +6,7 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 
 const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
+const MIN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 function iso(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -63,11 +64,15 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   try { symbols = normalizeDataCedarSymbols(env.ASX_AUTOPILOT_SYMBOLS || ""); }
   catch (error) { return { status: "BLOCKED_SYMBOL_CONFIGURATION", scannedAt, liveTradingEnabled: false, message: error.message }; }
 
-  const data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
   let snapshot;
   try { snapshot = raw ? validateSnapshot(JSON.parse(raw)) : initialSnapshot(); }
   catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
+  const previousScanMs = Date.parse(snapshot.lastScanAt || "");
+  if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
+    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
+  }
+  const data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
 
   let portfolio = snapshot.portfolio;
   const signals = [];
