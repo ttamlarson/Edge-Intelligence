@@ -8,10 +8,10 @@ function kv(seed = null) {
 }
 function bars(now) {
   return Array.from({ length: 55 }, (_, i) => {
-    const close = 10 + i * 0.08;
+    const close = i === 54 ? 15.8 : 10 + i * 0.08;
     return {
       sid: "asx:BHP", timeframe: "1Day", ts_ms: now - (54 - i) * 86_400_000,
-      open: close, high: close + 0.2, low: close - 0.2, close, volume: 1000
+      open: close - 0.1, high: close + 0.2, low: close - 0.2, close, volume: 1000
     };
   });
 }
