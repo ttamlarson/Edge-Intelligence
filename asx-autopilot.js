@@ -109,7 +109,7 @@ export async function readAsxAutopilot(env) {
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
   const snapshot = validateSnapshot(parsed);
-  return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  return { ...snapshot, configured: isAutopilotConfigured(env), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
 }
 
 function isAutopilotConfigured(env) {
