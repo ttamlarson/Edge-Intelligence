@@ -200,7 +200,8 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   const next = {
     ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
-    status: data.rows > 0 ? "SCAN_COMPLETED" : "NO_DATA", portfolio, lastScanAt: scannedAt,\n    lastAttemptAt: scannedAt, lastError: null,
+    status: data.rows > 0 ? "SCAN_COMPLETED" : "NO_DATA", portfolio, lastScanAt: scannedAt,
+    lastAttemptAt: scannedAt, lastError: null,
     lastBarBySymbol: processed,
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
     scanCount: snapshot.scanCount + 1,
