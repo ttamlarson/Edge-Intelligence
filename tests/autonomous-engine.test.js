@@ -167,8 +167,16 @@ test("signal screening includes entry and stop-exit fees inside the 1% net-equit
   assert.equal(noFeeCandidate.status, "PAPER_CANDIDATE", noFeeCandidate.reason);
   assert.ok(noFeeCandidate.estimatedNetStopLossAud <= noFeeCandidate.riskBudgetAud + 0.01);
   const largerAccount = evaluateAsxSwingSetup({ ...common, equityAud: 5000, costs: undefined });
-  assert.equal(largerAccount.status, "REJECTED");
-  assert.match(largerAccount.reason, /2:1 minimum/);
+  assert.equal(largerAccount.status, "PAPER_CANDIDATE", largerAccount.reason);
+  assert.ok(largerAccount.rewardRiskAfterCosts >= 2);
+  assert.ok(largerAccount.targetPrice > largerAccount.entryReference + 2 * (largerAccount.entryReference - largerAccount.stopPrice));
+  assert.equal(largerAccount.strategy, "ASX_DAILY_TREND_BREAKOUT_NET_RR_V2");
+  const fundedPortfolio = createPaperPortfolio({ capitalAud: 5000 });
+  const opened = openPaperPosition(fundedPortfolio, largerAccount, {
+    id: "fee-aware-net-target", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  assert.ok(opened.portfolio.cashAud >= 100);
 });
 
 test("paper equity is net of estimated exit fees and opening risk is checked against current equity", () => {
