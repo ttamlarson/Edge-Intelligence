@@ -120,3 +120,17 @@ The existing Git-integrated Pages project must remain Git-integrated. Cloudflare
 The Worker remains a separate deployment named `edge-intelligence-api`; its source is not copied into the Pages static output. Its deployment workflow configures the allowed frontend CORS origin as `https://edge-intelligence-486.pages.dev`. Frontend-only commits do not redeploy or replace the Worker. If a custom Pages domain is added later, update the Worker `FRONTEND_ORIGINS` configuration and redeploy the Worker.
 
 No production deployment is considered verified until the Cloudflare Pages production deployment succeeds and the deployed URL, security headers, CORS and Worker API are smoke-tested.
+
+
+## Automated ASX paper autopilot (three-day delivery sprint)
+
+The Worker now includes an opt-in scheduled ASX paper scanner in `asx-autopilot.js`. It uses the existing DataCedar daily-bar adapter and the existing deterministic ASX paper engine. It is disabled by default and only runs when all operator configuration is present:
+
+- `ASX_AUTOPILOT_ENABLED=true`
+- `ASX_AUTOPILOT_SYMBOLS=BHP,CBA,CSL` (one to three unique tickers; select only symbols covered by the account and permitted by the data licence)
+- `DATACEDAR_API_KEY` Worker secret
+- `EDGE_KV` Worker binding
+
+The Worker cron invokes the scanner, with a six-hour minimum provider-call interval to avoid repeatedly downloading unchanged daily history. The scanner records source-attributed signals, marks open positions from newer daily closes, and applies daily-bar stop/target simulation using stop-first handling when both levels occur in one candle. It persists a separate operator-wide AUD 500 virtual paper account under `asx-auto-paper-v1`; this does not import, overwrite or merge the existing device-local `edge-asx-paper-v1` ledger. Authenticated status and on-demand scan routes are `GET /api/asx/autopilot` and `POST /api/asx/autopilot/scan`.
+
+The account remains `PAPER_ONLY` and `liveTradingEnabled=false`. Daily OHLC bars are historical observations, not executable prices. Stop/target prices are simulation assumptions; same-candle ambiguity is resolved conservatively. The current AUD 500 / 1% risk / minimum commission policy can reject every otherwise qualifying setup after costs. The scanner does not relax this gate or force trades. A scheduled code path is not proof of live DataCedar access: configure the key, confirm rights, run a real symbol request and verify the returned bars before relying on it. Never put the DataCedar key in browser code or GitHub.
