@@ -460,13 +460,13 @@ test("closing cannot predate a previously saved manual paper mark", () => {
 
 test("CSV parser rejects rows with missing or unlabelled extra columns", () => {
   const headerWithVolume = "Symbol,Date,Open,High,Low,Close,Volume";
-  const missingOptionalValue = headerWithVolume + "\\nBHP,2026-11-12,40,41,39,40.5";
-  const extraUnlabelledValue = "Symbol,Date,Open,High,Low,Close\\nBHP,2026-11-12,40,41,39,40.5,999999";
+  const missingOptionalValue = headerWithVolume + "\nBHP,2026-11-12,40,41,39,40.5";
+  const extraUnlabelledValue = "Symbol,Date,Open,High,Low,Close\nBHP,2026-11-12,40,41,39,40.5,999999";
   assert.equal(parseCsv(missingOptionalValue).valid, false);
   assert.match(parseCsv(missingOptionalValue).reason, /column count/);
   assert.equal(parseCsv(extraUnlabelledValue).valid, false);
   assert.match(parseCsv(extraUnlabelledValue).reason, /column count/);
-  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,\\nBHP,2026-11-12,40,41,39,40.5,").valid, false);
-  assert.match(parseCsv("Symbol,Date,Open,High,Low,Close,\\nBHP,2026-11-12,40,41,39,40.5,").reason, /empty or duplicate header/);
-  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,Close\\nBHP,2026-11-12,40,41,39,40.5,40.5").valid, false);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,\nBHP,2026-11-12,40,41,39,40.5,").valid, false);
+  assert.match(parseCsv("Symbol,Date,Open,High,Low,Close,\nBHP,2026-11-12,40,41,39,40.5,").reason, /empty or duplicate header/);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,Close\nBHP,2026-11-12,40,41,39,40.5,40.5").valid, false);
 });
