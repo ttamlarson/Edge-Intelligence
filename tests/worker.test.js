@@ -273,3 +273,26 @@ test("Cloudflare asset proxy allowlist includes trend-following strategy module"
   const source = await (await import("node:fs/promises")).readFile(new URL("../index.js", import.meta.url), "utf8");
   assert.ok(source.includes('"/trend-following-indicators.js"'));
 });
+
+
+test("ASX autopilot status and on-demand scan remain opt-in and paper-only", async () => {
+  const store = kv();
+  const env = baseEnv({ EDGE_KV: store.binding });
+  const status = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot"), env, access("user-1"));
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).status, "WAITING_FOR_FIRST_SCAN");
+  const disabled = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), env, access("user-1"));
+  assert.equal(disabled.status, 200);
+  const result = await disabled.json();
+  assert.equal(result.status, "DISABLED");
+  assert.equal(result.liveTradingEnabled, false);
+});
+
+test("ASX autopilot API reports missing KV or DataCedar configuration without upstream calls", async () => {
+  const noStorage = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), baseEnv({ ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP" }), access("user-1"));
+  assert.equal(noStorage.status, 200);
+  assert.equal((await noStorage.json()).status, "BLOCKED_STORAGE_NOT_CONFIGURED");
+  const noKey = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), baseEnv({ ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", EDGE_KV: kv().binding }), access("user-1"));
+  assert.equal(noKey.status, 200);
+  assert.equal((await noKey.json()).status, "BLOCKED_DATACEDAR_KEY_MISSING");
+});
