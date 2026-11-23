@@ -196,7 +196,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     symbols, rowsBySymbol: data.rowsBySymbol
   };
   await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(next));
-  return next;
+  return { ...next, performance: calculateAsxPaperPerformance(portfolio) };
 }
 
 export const __test = { STORAGE_KEY, initialSnapshot, validateSnapshot, configuredSymbols };
