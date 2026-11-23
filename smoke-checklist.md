@@ -82,3 +82,5 @@
 - [ ] Confirm the automated KV ledger is separate from the device-local `edge-asx-paper-v1` account and that both remain paper-only.
 - [ ] Confirm default fees/risk gates are not bypassed when candidates are rejected; no forced entries or real-money order routes exist.
 - [ ] Verify Worker scheduled logs and the deployed UI only after approved merge/deployment.
+
+- [ ] Simulate a DataCedar timeout, 401 or 429; confirm `DATA_PROVIDER_ERROR`, bounded error text and incremented failure count are persisted without advancing the successful scan cursor.
