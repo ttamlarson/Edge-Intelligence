@@ -155,3 +155,6 @@ Updated after local implementation and automated verification on `edge-productio
 
 | Completed-session data guard | Implemented on feature branch | Uses exchange-local Sydney date/time, excludes the current session's daily candle until 17:00 Sydney time, and records the last completed bar only. |
 | Provider failure visibility | Implemented on feature branch | Bounded DataCedar error and failure count are persisted; failed requests do not advance the successful scan cursor. |
+
+| Next-session/intraday entry fill model | Outstanding | Current paper entry reference is the last completed daily close. It is not an executable next-session fill; implement and validate an intraday/next-session model before treating results as executable forward paper trading. |
+| Walk-forward ASX out-of-sample validation | Outstanding | Collect source-verified history and run chronological out-of-sample tests with fees, slippage, corporate-action handling and adequate trade counts; no profitability claim until evidence supports it. |
