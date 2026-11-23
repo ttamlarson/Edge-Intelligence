@@ -380,6 +380,10 @@ async function loadAsxAutopilotStatus(){
   status.textContent=configured
    ? "AUTOMATED PAPER SCANNER "+(a.status||"CONFIGURED")+" · "+a.symbols.join(", ")+" · scans "+(a.scanCount||0)+" · last scan "+(a.lastScanAt?formatDateTime(a.lastScanAt,"Australia/Perth"):"not yet run")+" · open positions "+(a.portfolio?.positions||[]).filter(p=>p.status==="OPEN_PAPER").length
    : "AUTOMATION NOT ENABLED · Configure ASX_AUTOPILOT_ENABLED, ASX_AUTOPILOT_SYMBOLS, DataCedar key and Worker KV before running.";
+  const p=a.performance||{};
+  const metric=(label,value,detail)=>'<article class="metric-card"><span>'+label+'</span><strong>'+value+'</strong><small>'+detail+'</small></article>';
+  $("asxAutoPerformance").innerHTML=metric("CLOSED TRADES",String(p.tradeCount??0),"Realized sample only")+metric("WIN RATE",p.winRatePct==null?"—":p.winRatePct.toFixed(1)+"%","Wins / all closed trades")+metric("PROFIT FACTOR",p.profitFactor==null?"—":p.profitFactor.toFixed(2),"Gross profit / gross loss")+metric("NET REALIZED P&amp;L",p.totalRealizedProfitLossAud==null?"—":aud(p.totalRealizedProfitLossAud),"After simulated fees")+metric("MAX DRAWDOWN",p.maxRealizedDrawdownAud==null?"—":aud(p.maxRealizedDrawdownAud)+" · "+(p.maxRealizedDrawdownPct??0).toFixed(2)+"%","Realized equity curve only");
+  $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
   $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b> · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
  }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
 }
