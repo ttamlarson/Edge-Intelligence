@@ -66,7 +66,7 @@ test("ASX autopilot processes each daily bar only once", async () => {
   const store = kv();
   const config = { ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "secret", EDGE_KV: store.binding };
   await runAsxAutopilot(config, { now: new Date(now), fetchImpl: provider(now, []) });
-  const second = await runAsxAutopilot(config, { now: new Date(now + 15 * 60_000), fetchImpl: provider(now, []) });
+  const second = await runAsxAutopilot(config, { now: new Date(now + 6 * 60 * 60_000 + 60_000), fetchImpl: provider(now, []) });
   assert.equal(second.scanCount, 2);
   assert.equal(second.signals.length, 1);
 });
