@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, __test } from "../asx-autopilot.js";
+import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, isAsxDailyBarComplete, __test } from "../asx-autopilot.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition } from "../autonomous-engine.js";
 
 function kv(seed = null) {
@@ -26,7 +26,7 @@ function provider(now, calls) {
 test("ASX autopilot stays disabled unless the operator explicitly enables it", async () => {
   let called = false;
   const result = await runAsxAutopilot({ ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "secret", EDGE_KV: kv().binding }, {
-    now: new Date("2026-11-23T02:00:00Z"), fetchImpl: async () => { called = true; }
+    now: new Date("2026-11-23T07:00:00Z"), fetchImpl: async () => { called = true; }
   });
   assert.equal(result.status, "DISABLED");
   assert.equal(result.liveTradingEnabled, false);
@@ -41,7 +41,7 @@ test("ASX autopilot reports missing key and storage without calling DataCedar", 
 });
 
 test("ASX autopilot validates DataCedar data, records a paper-only scan and never forces an uneconomic entry", async () => {
-  const now = Date.parse("2026-11-23T02:00:00Z");
+  const now = Date.parse("2026-11-23T07:00:00Z");
   const store = kv();
   const calls = [];
   const result = await runAsxAutopilot({
@@ -63,7 +63,7 @@ test("ASX autopilot validates DataCedar data, records a paper-only scan and neve
 });
 
 test("ASX autopilot processes each daily bar only once", async () => {
-  const now = Date.parse("2026-11-23T02:00:00Z");
+  const now = Date.parse("2026-11-23T07:00:00Z");
   const store = kv();
   const config = { ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "secret", EDGE_KV: store.binding };
   await runAsxAutopilot(config, { now: new Date(now), fetchImpl: provider(now, []) });
@@ -77,7 +77,7 @@ test("ASX autopilot refuses to overwrite a corrupt paper ledger", async () => {
   const before = store.values.get(__test.STORAGE_KEY);
   await assert.rejects(() => runAsxAutopilot({
     ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "secret", EDGE_KV: store.binding
-  }, { now: new Date("2026-11-23T02:00:00Z"), fetchImpl: provider(Date.parse("2026-11-23T02:00:00Z"), []) }), /corrupt|invalid JSON/i);
+  }, { now: new Date("2026-11-23T07:00:00Z"), fetchImpl: provider(Date.parse("2026-11-23T07:00:00Z"), []) }), /corrupt|invalid JSON/i);
   assert.equal(store.values.get(__test.STORAGE_KEY), before);
 });
 
@@ -89,9 +89,9 @@ test("ASX autopilot status is explicitly unconfigured without Worker KV", async 
 
 
 test("ASX autopilot exits at a gap-worse open, resolves stop before target and does not re-enter on the same bar", async () => {
-  const firstNow = Date.parse("2026-11-23T02:00:00Z");
+  const firstNow = Date.parse("2026-11-23T07:00:00Z");
   const firstRows = bars(firstNow);
-  const firstBars = firstRows.map(row => ({
+  const firstBars = firstRows.slice(0, -1).map(row => ({
     timestamp: new Date(row.ts_ms).toISOString(), open: row.open, high: row.high,
     low: row.low, close: row.close, volume: row.volume
   }));
@@ -110,7 +110,7 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
     ...__test.initialSnapshot(),
     portfolio: opened.portfolio,
     lastScanAt: new Date(openedAt).toISOString(),
-    lastBarBySymbol: { BHP: new Date(firstNow).toISOString() },
+    lastBarBySymbol: { BHP: candidate.observedAt },
     scanCount: 1
   };
   const store = kv(JSON.stringify(initial));
@@ -192,7 +192,7 @@ test("ASX autopilot persists bounded provider failures without advancing the suc
   const result = await runAsxAutopilot({
     ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
     DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
-  }, { now: new Date("2026-11-23T02:00:00Z"), fetchImpl: async () => { throw new Error("DataCedar rate limit reached."); } });
+  }, { now: new Date("2026-11-23T07:00:00Z"), fetchImpl: async () => { throw new Error("DataCedar rate limit reached."); } });
   assert.equal(result.status, "DATA_PROVIDER_ERROR");
   assert.equal(result.lastError, "DataCedar rate limit reached.");
   assert.equal(result.failedScanCount, 1);
@@ -201,4 +201,32 @@ test("ASX autopilot persists bounded provider failures without advancing the suc
   const persisted = JSON.parse(store.values.get(__test.STORAGE_KEY));
   assert.equal(persisted.status, "DATA_PROVIDER_ERROR");
   assert.equal(persisted.lastError, result.lastError);
+});
+
+
+test("ASX daily bars are excluded until the Sydney session is complete", () => {
+  const currentSessionBar = "2026-11-23T02:00:00.000Z"; // 13:00 Sydney during daylight time
+  assert.equal(isAsxDailyBarComplete(currentSessionBar, Date.parse("2026-11-23T02:00:00Z")), false);
+  assert.equal(isAsxDailyBarComplete(currentSessionBar, Date.parse("2026-11-23T06:00:00Z")), true);
+  const winterSessionBar = "2026-06-01T02:00:00.000Z"; // 12:00 Sydney during standard time
+  assert.equal(isAsxDailyBarComplete(winterSessionBar, Date.parse("2026-06-01T02:00:00Z")), false);
+  assert.equal(isAsxDailyBarComplete(winterSessionBar, Date.parse("2026-06-01T07:00:00Z")), true);
+});
+
+test("ASX autopilot ignores the current unfinished daily candle and processes the last completed one", async () => {
+  const now = Date.parse("2026-11-23T02:00:00Z");
+  const rows = bars(now);
+  const store = kv();
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "secret", EDGE_KV: store.binding
+  }, { now: new Date(now), fetchImpl: provider(now, []) });
+  const completed = new Date(rows.at(-2).ts_ms).toISOString();
+  const unfinished = new Date(rows.at(-1).ts_ms).toISOString();
+  assert.equal(result.status, "SCAN_COMPLETED");
+  assert.ok(result.signals.some(signal => signal.status === "INCOMPLETE_CURRENT_SESSION_BAR_IGNORED"));
+  assert.equal(result.lastBarBySymbol.BHP, completed);
+  assert.notEqual(result.lastBarBySymbol.BHP, unfinished);
+  const decision = result.signals.find(signal => signal.observedAt);
+  assert.equal(decision.observedAt, completed);
 });
