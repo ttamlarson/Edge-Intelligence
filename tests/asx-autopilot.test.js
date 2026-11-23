@@ -185,3 +185,20 @@ test("ASX autopilot status exposes performance without mutating the persisted pa
   assert.equal(status.performance.status, "INSUFFICIENT_SAMPLE");
   assert.equal(JSON.parse(store.values.get(__test.STORAGE_KEY)).portfolio.closedTrades.length, 1);
 });
+
+
+test("ASX autopilot persists bounded provider failures without advancing the successful scan cursor", async () => {
+  const store = kv();
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
+  }, { now: new Date("2026-11-23T02:00:00Z"), fetchImpl: async () => { throw new Error("DataCedar rate limit reached."); } });
+  assert.equal(result.status, "DATA_PROVIDER_ERROR");
+  assert.equal(result.lastError, "DataCedar rate limit reached.");
+  assert.equal(result.failedScanCount, 1);
+  assert.equal(result.scanCount, 0);
+  assert.equal(result.lastScanAt, null);
+  const persisted = JSON.parse(store.values.get(__test.STORAGE_KEY));
+  assert.equal(persisted.status, "DATA_PROVIDER_ERROR");
+  assert.equal(persisted.lastError, result.lastError);
+});
