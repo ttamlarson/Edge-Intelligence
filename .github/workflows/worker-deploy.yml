@@ -9,6 +9,7 @@ on:
       - "domain.js"
       - "au-sources.js"
       - "datacedar.js"
+      - "asx-autopilot.js"
       - "crypto-engine.js"
       - "coinspot.js"
       - "coinspot-paper.js"
