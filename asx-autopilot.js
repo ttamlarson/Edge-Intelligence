@@ -87,7 +87,8 @@ export async function readAsxAutopilot(env) {
   if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
-  const snapshot = validateSnapshot(parsed);\n  return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  const snapshot = validateSnapshot(parsed);
+  return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
 }
 
 function configuredSymbols(env) {
