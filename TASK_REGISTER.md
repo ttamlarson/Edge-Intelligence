@@ -124,3 +124,12 @@ Updated after local implementation and automated verification on `edge-productio
 | Remove conflicting GitHub Pages / Direct Upload publishing workflow | Implemented on feature branch | Pages is already Git-integrated. Do not switch it to Wrangler Direct Upload; Cloudflare's GitHub App performs preview and production deployments. |
 | Verify production Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and successful production deployment. |
 | Cloudflare API token Pages permission | Not required for current deployment path | Pages deployment is authorized by the Cloudflare GitHub App. Existing `CLOUDFLARE_API_TOKEN` remains dedicated to the Worker deployment workflow. |
+
+
+## ASX paper workflow integrity hardening (2026-11-23)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Reject ambiguous or inconsistent CSV import shape | Implemented on feature branch | CSV import now rejects empty/duplicate headers and rows whose field count differs from the header, preventing ignored extra values or silently missing declared fields. Regression tests cover missing optional values, unlabelled extra cells and ambiguous headers. |
+| Preserve positive cent-denominated paper capital | Implemented on feature branch | Portfolio creation now rejects positive inputs that round to AUD 0.00, rather than creating a zero-cash account. Regression tests cover sub-cent and one-cent inputs. |
+| Repository verification and release | Pending | Branch CI must pass tests, syntax checks and Pages build before merge. No live trading or external data access is introduced. |
