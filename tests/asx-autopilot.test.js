@@ -66,10 +66,11 @@ test("ASX autopilot processes each daily bar only once", async () => {
   const now = Date.parse("2026-11-23T07:00:00Z");
   const store = kv();
   const config = { ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", DATACEDAR_API_KEY: "secret", EDGE_KV: store.binding };
-  await runAsxAutopilot(config, { now: new Date(now), fetchImpl: provider(now, []) });
+  const first = await runAsxAutopilot(config, { now: new Date(now), fetchImpl: provider(now, []) });
   const second = await runAsxAutopilot(config, { now: new Date(now + 6 * 60 * 60_000 + 60_000), fetchImpl: provider(now, []) });
   assert.equal(second.scanCount, 2);
-  assert.equal(second.signals.length, 1);
+  assert.equal(second.signals.length, first.signals.length);
+  assert.deepEqual(second.lastBarBySymbol, first.lastBarBySymbol);
 });
 
 test("ASX autopilot refuses to overwrite a corrupt paper ledger", async () => {
@@ -117,7 +118,8 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
   const nextNow = firstNow + 2 * 86_400_000;
   const nextRows = bars(nextNow);
   const latest = nextRows.at(-1);
-  latest.open = opened.position.stopPrice - 0.2;
+  latest.open = Math.max(0.01, opened.position.stopPrice * 0.5);
+  assert.ok(latest.open < opened.position.stopPrice);
   latest.low = latest.open - 0.1;
   latest.close = opened.position.targetPrice + 0.1;
   latest.high = latest.close + 0.1;
