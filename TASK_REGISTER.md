@@ -133,3 +133,17 @@ Updated after local implementation and automated verification on `edge-productio
 | Reject ambiguous or inconsistent CSV import shape | Implemented on feature branch | CSV import now rejects empty/duplicate headers and rows whose field count differs from the header, preventing ignored extra values or silently missing declared fields. Regression tests cover missing optional values, unlabelled extra cells and ambiguous headers. |
 | Preserve positive cent-denominated paper capital | Implemented on feature branch | Portfolio creation now rejects positive inputs that round to AUD 0.00, rather than creating a zero-cash account. Regression tests cover sub-cent and one-cent inputs. |
 | Repository verification and release | Pending | Branch CI must pass tests, syntax checks and Pages build before merge. No live trading or external data access is introduced. |
+
+
+## Three-day ASX automation sprint (2026-11-23)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Scheduled server-side ASX daily scanner | Implemented on `edge-production-remediation-3day` | Opt-in Worker cron path uses the existing DataCedar adapter; symbols limited to 1–3; six-hour provider-call throttle; each new daily bar is processed once. |
+| Automated server-side paper account | Implemented on feature branch | Separate operator-wide AUD 500 paper ledger in KV; daily OHLC mark updates and conservative stop-first stop/target exits; no merge with device-local `edge-asx-paper-v1`. |
+| On-demand scan and status API | Implemented on feature branch | Authenticated `GET /api/asx/autopilot` and `POST /api/asx/autopilot/scan`, with rate limits. |
+| ASX Autopilot UI | Implemented on feature branch | Status, last scan, open paper position count, recent signal outcomes and manual scan trigger. |
+| Safety and deterministic regression tests | Implemented on feature branch; CI pending | Disabled-by-default, missing key/storage, secret stays server-side, persistence, idempotent daily bars, corrupt-ledger non-overwrite and default-cost rejection. |
+| Live DataCedar verification | Blocked on operator configuration | Must configure Worker secret, symbols, KV and data-use rights; then verify an actual API response. |
+| Economically viable paper position sizing | Blocked pending operator decision | Existing AUD 500 capital, 1% risk and minimum AUD 5.50 commission plus GST per side remain unchanged. No strategy/risk gates were weakened. |
+| Production deployment | Pending explicit approval | Feature branch only; no merge or deployment performed. |
