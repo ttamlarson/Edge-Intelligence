@@ -466,4 +466,7 @@ test("CSV parser rejects rows with missing or unlabelled extra columns", () => {
   assert.match(parseCsv(missingOptionalValue).reason, /column count/);
   assert.equal(parseCsv(extraUnlabelledValue).valid, false);
   assert.match(parseCsv(extraUnlabelledValue).reason, /column count/);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,\\nBHP,2026-11-12,40,41,39,40.5,").valid, false);
+  assert.match(parseCsv("Symbol,Date,Open,High,Low,Close,\\nBHP,2026-11-12,40,41,39,40.5,").reason, /empty or duplicate header/);
+  assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,Close\\nBHP,2026-11-12,40,41,39,40.5,40.5").valid, false);
 });
