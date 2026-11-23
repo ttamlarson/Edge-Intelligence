@@ -133,8 +133,9 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
 
 export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } = {}) {
   const capital = num(capitalAud);
-  if (capital === null || capital <= 0) throw new TypeError("Paper capital must be positive AUD.");
-  return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: round2(capital), cashAud: round2(capital), positions: [], closedTrades: [], liveTradingEnabled: false };
+  const roundedCapital = capital === null ? null : round2(capital);
+  if (capital === null || capital <= 0 || roundedCapital <= 0) throw new TypeError("Paper capital must be positive AUD after cent rounding.");
+  return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: roundedCapital, cashAud: roundedCapital, positions: [], closedTrades: [], liveTradingEnabled: false };
 }
 
 export function openPaperPosition(portfolio, candidate, { id, openedAt = new Date().toISOString(), now = Date.now() } = {}) {
@@ -296,6 +297,7 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row);
   if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
   const headers = rows.shift().map(x => x.replace(/^\uFEFF/, "").toLowerCase().replace(/[ _-]/g, ""));
+  if (headers.some(header => !header) || new Set(headers).size !== headers.length) return { valid: false, reason: "CSV contains an empty or duplicate header column." };
   const index = (...names) => headers.findIndex(h => names.includes(h));
   const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close") };
   const requiredColumns = Object.values(cols);
@@ -303,6 +305,7 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   if (new Set(requiredColumns).size !== requiredColumns.length) return { valid: false, reason: "CSV contains duplicate or ambiguous required columns." };
   const grouped = {};
   for (const cells of rows) {
+    if (cells.length !== headers.length) return { valid: false, reason: "CSV row has an inconsistent column count." };
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
     const dateRaw = String(cells[cols.date] || "").trim();
     const date = parseAsxCsvDate(dateRaw);
