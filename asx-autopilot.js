@@ -111,7 +111,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
         if (closed.accepted) {
           portfolio = closed.portfolio;
           exitedThisBar.add(symbol);
-          signals.push({ symbol, status: "POSITION_CLOSED_PAPER", reason: stopHit && targetHit ? "Stop and target touched; conservative stop-first resolution." : stopHit && latest.open < position.stopPrice ? "Price gapped below the stop; simulated exit uses the worse daily open." : stopHit ? "Daily low reached the paper stop." : "Daily high reached the paper target.", exitPrice, profitLossAud: closed.trade.profitLossAud, closedAt: latest.timestamp });
+          signals.push({ symbol, status: "POSITION_CLOSED_PAPER", reason: stopHit && targetHit && latest.open < position.stopPrice ? "Stop and target touched; stop-first, with a gap-aware worse-open exit." : stopHit && targetHit ? "Stop and target touched; conservative stop-first resolution." : stopHit && latest.open < position.stopPrice ? "Price gapped below the stop; simulated exit uses the worse daily open." : stopHit ? "Daily low reached the paper stop." : "Daily high reached the paper target.", exitPrice, profitLossAud: closed.trade.profitLossAud, closedAt: latest.timestamp });
         }
       } else {
         const marked = recordPaperMark(portfolio, position.id, latest.close, { markedAt: latest.timestamp, now: nowMs });
