@@ -147,3 +147,8 @@ Updated after local implementation and automated verification on `edge-productio
 | Live DataCedar verification | Blocked on operator configuration | Must configure Worker secret, symbols, KV and data-use rights; then verify an actual API response. |
 | Economically viable paper position sizing | Blocked pending operator decision | Existing AUD 500 capital, 1% risk and minimum AUD 5.50 commission plus GST per side remain unchanged. No strategy/risk gates were weakened. |
 | Production deployment | Pending explicit approval | Feature branch only; no merge or deployment performed. |
+
+
+| Realized paper performance dashboard | Implemented on feature branch | Reports net realized P&L, win rate, profit factor, expectancy, average win/loss, realized drawdown and evidence-sample status; does not imply profitability. |
+| Net reward/risk target correction | Implemented on feature branch | Targets are solved to meet the 2:1 net reward/risk gate after modeled entry/exit fees; strategy version is now `ASX_DAILY_TREND_BREAKOUT_NET_RR_V2`. |
+| Conservative daily-bar exits | Implemented on feature branch | Stop gaps use the worse daily open, stop wins ambiguous stop/target candles, and the same symbol cannot re-enter on that candle. |
