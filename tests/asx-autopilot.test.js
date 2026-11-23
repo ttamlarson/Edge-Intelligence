@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAsxAutopilot, readAsxAutopilot, __test } from "../asx-autopilot.js";
+import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, __test } from "../asx-autopilot.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition } from "../autonomous-engine.js";
 
 function kv(seed = null) {
@@ -134,4 +134,37 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
   assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
   assert.ok(result.signals.some(signal => signal.status === "POSITION_CLOSED_PAPER" && /stop-first.*gap-aware/i.test(signal.reason)));
   assert.equal(result.signals.some(signal => signal.status === "OPEN_REJECTED" || signal.status === "OPENED_PAPER"), false);
+});
+
+
+test("ASX paper performance reports realized net metrics and never treats a small sample as proof", () => {
+  const portfolio = {
+    ...createPaperPortfolio(),
+    closedTrades: [
+      { id: "a", status: "CLOSED_PAPER", closedAt: "2026-11-01T00:00:00.000Z", profitLossAud: 20 },
+      { id: "b", status: "CLOSED_PAPER", closedAt: "2026-11-02T00:00:00.000Z", profitLossAud: -10 },
+      { id: "c", status: "CLOSED_PAPER", closedAt: "2026-11-03T00:00:00.000Z", profitLossAud: 5 },
+      { id: "d", status: "CLOSED_PAPER", closedAt: "2026-11-04T00:00:00.000Z", profitLossAud: -30 },
+      { id: "bad", status: "CLOSED_PAPER", closedAt: "invalid", profitLossAud: 999 }
+    ]
+  };
+  const metrics = calculateAsxPaperPerformance(portfolio);
+  assert.equal(metrics.status, "INSUFFICIENT_SAMPLE");
+  assert.equal(metrics.tradeCount, 4);
+  assert.equal(metrics.invalidTradeCount, 1);
+  assert.equal(metrics.winRatePct, 50);
+  assert.equal(metrics.totalRealizedProfitLossAud, -15);
+  assert.equal(metrics.profitFactor, 0.63);
+  assert.equal(metrics.expectancyAud, -3.75);
+  assert.equal(metrics.maxRealizedDrawdownAud, 35);
+  assert.equal(metrics.maxRealizedDrawdownPct, 6.73);
+  assert.equal(metrics.basis, "CLOSED_TRADES_REALIZED_PNL_ONLY");
+  const enoughForEarlySample = calculateAsxPaperPerformance({
+    ...createPaperPortfolio(),
+    closedTrades: Array.from({ length: 30 }, (_, i) => ({
+      id: String(i), status: "CLOSED_PAPER", closedAt: new Date(Date.UTC(2026, 0, i + 1)).toISOString(), profitLossAud: 1
+    }))
+  });
+  assert.equal(enoughForEarlySample.status, "EARLY_SAMPLE");
+  assert.equal(enoughForEarlySample.tradeCount, 30);
 });
