@@ -133,8 +133,9 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
 
 export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } = {}) {
   const capital = num(capitalAud);
-  if (capital === null || capital <= 0) throw new TypeError("Paper capital must be positive AUD.");
-  return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: round2(capital), cashAud: round2(capital), positions: [], closedTrades: [], liveTradingEnabled: false };
+  const roundedCapital = capital === null ? null : round2(capital);
+  if (capital === null || capital <= 0 || roundedCapital <= 0) throw new TypeError("Paper capital must be positive AUD after cent rounding.");
+  return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: roundedCapital, cashAud: roundedCapital, positions: [], closedTrades: [], liveTradingEnabled: false };
 }
 
 export function openPaperPosition(portfolio, candidate, { id, openedAt = new Date().toISOString(), now = Date.now() } = {}) {
