@@ -94,7 +94,9 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     if (processed[symbol] && Date.parse(processed[symbol]) >= latestMs) continue;
 
     // Daily OHLC exits use conservative stop-first handling when both levels
-    // are touched in the same candle. The close is never treated as a fill.
+    // are touched in the same candle. A gap below the stop uses the worse open.
+    // The close is never treated as a fill.
+    const exitedThisBar = new Set();
     for (const position of portfolio.positions.filter(p => p.status === "OPEN_PAPER" && p.symbol === symbol)) {
       const openedMs = Date.parse(position.openedAt || "");
       const markedMs = Date.parse(position.lastMarkedAt || position.openedAt || "");
@@ -102,13 +104,14 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       const stopHit = latest.low <= position.stopPrice;
       const targetHit = latest.high >= position.targetPrice;
       if (stopHit || targetHit) {
-        const exitPrice = stopHit ? position.stopPrice : position.targetPrice;
+        const exitPrice = stopHit ? Math.min(position.stopPrice, latest.open) : position.targetPrice;
         const closed = closePaperPosition(portfolio, position.id, exitPrice, {
           closedAt: latest.timestamp, now: nowMs
         });
         if (closed.accepted) {
           portfolio = closed.portfolio;
-          signals.push({ symbol, status: "POSITION_CLOSED_PAPER", reason: stopHit && targetHit ? "Stop and target touched; conservative stop-first resolution." : stopHit ? "Daily low reached the paper stop." : "Daily high reached the paper target.", exitPrice, profitLossAud: closed.trade.profitLossAud, closedAt: latest.timestamp });
+          exitedThisBar.add(symbol);
+          signals.push({ symbol, status: "POSITION_CLOSED_PAPER", reason: stopHit && targetHit ? "Stop and target touched; conservative stop-first resolution." : stopHit && latest.open < position.stopPrice ? "Price gapped below the stop; simulated exit uses the worse daily open." : stopHit ? "Daily low reached the paper stop." : "Daily high reached the paper target.", exitPrice, profitLossAud: closed.trade.profitLossAud, closedAt: latest.timestamp });
         }
       } else {
         const marked = recordPaperMark(portfolio, position.id, latest.close, { markedAt: latest.timestamp, now: nowMs });
@@ -116,7 +119,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       }
     }
 
-    if (!openSymbols().has(symbol)) {
+    if (!openSymbols().has(symbol) && !exitedThisBar.has(symbol)) {
       const candidate = evaluateAsxSwingSetup({
         symbol, bars, source: data.source, currency: data.currency, observedAt: latest.timestamp,
         equityAud: calculatePaperPortfolioEquity(portfolio) ?? 0,
