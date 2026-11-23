@@ -152,3 +152,6 @@ Updated after local implementation and automated verification on `edge-productio
 | Realized paper performance dashboard | Implemented on feature branch | Reports net realized P&L, win rate, profit factor, expectancy, average win/loss, realized drawdown and evidence-sample status; does not imply profitability. |
 | Net reward/risk target correction | Implemented on feature branch | Targets are solved to meet the 2:1 net reward/risk gate after modeled entry/exit fees; strategy version is now `ASX_DAILY_TREND_BREAKOUT_NET_RR_V2`. |
 | Conservative daily-bar exits | Implemented on feature branch | Stop gaps use the worse daily open, stop wins ambiguous stop/target candles, and the same symbol cannot re-enter on that candle. |
+
+| Completed-session data guard | Implemented on feature branch | Uses exchange-local Sydney date/time, excludes the current session's daily candle until 17:00 Sydney time, and records the last completed bar only. |
+| Provider failure visibility | Implemented on feature branch | Bounded DataCedar error and failure count are persisted; failed requests do not advance the successful scan cursor. |
