@@ -7,14 +7,15 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
 const MIN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const SYDNEY_FORMATTER = new Intl.DateTimeFormat("en-AU", {
+  timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+});
 
 function sydneyClock(timestamp) {
   const ms = typeof timestamp === "number" ? timestamp : Date.parse(timestamp);
   if (!Number.isFinite(ms)) return null;
-  const parts = new Intl.DateTimeFormat("en-AU", {
-    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
-  }).formatToParts(new Date(ms));
+  const parts = SYDNEY_FORMATTER.formatToParts(new Date(ms));
   const fields = Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, part.value]));
   return { date: `${fields.year}-${fields.month}-${fields.day}`, minutes: Number(fields.hour) * 60 + Number(fields.minute) };
 }
