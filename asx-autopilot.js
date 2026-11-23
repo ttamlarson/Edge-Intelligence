@@ -28,6 +28,48 @@ function initialSnapshot() {
   };
 }
 
+export function calculateAsxPaperPerformance(portfolio) {
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      !Number.isFinite(portfolio.startingCapitalAud) || portfolio.startingCapitalAud <= 0 ||
+      !Array.isArray(portfolio.closedTrades)) {
+    return { status: "INVALID_PAPER_LEDGER", tradeCount: 0 };
+  }
+  const rows = portfolio.closedTrades.filter(trade =>
+    trade?.status === "CLOSED_PAPER" && Number.isFinite(trade.profitLossAud) &&
+    Number.isFinite(Date.parse(trade.closedAt || "")));
+  const trades = rows.slice().sort((a, b) => Date.parse(a.closedAt) - Date.parse(b.closedAt));
+  const wins = trades.filter(trade => trade.profitLossAud > 0);
+  const losses = trades.filter(trade => trade.profitLossAud < 0);
+  const grossProfitAud = wins.reduce((sum, trade) => sum + trade.profitLossAud, 0);
+  const grossLossAud = -losses.reduce((sum, trade) => sum + trade.profitLossAud, 0);
+  const totalRealizedProfitLossAud = trades.reduce((sum, trade) => sum + trade.profitLossAud, 0);
+  let equity = portfolio.startingCapitalAud;
+  let peak = equity;
+  let maxDrawdownAud = 0;
+  for (const trade of trades) {
+    equity += trade.profitLossAud;
+    peak = Math.max(peak, equity);
+    maxDrawdownAud = Math.max(maxDrawdownAud, peak - equity);
+  }
+  const tradeCount = trades.length;
+  return {
+    status: tradeCount < 30 ? "INSUFFICIENT_SAMPLE" : tradeCount < 100 ? "EARLY_SAMPLE" : "LARGER_SAMPLE_NOT_PROOF",
+    tradeCount, invalidTradeCount: portfolio.closedTrades.length - tradeCount,
+    wins: wins.length, losses: losses.length,
+    winRatePct: tradeCount ? Math.round((wins.length / tradeCount) * 10000) / 100 : null,
+    totalRealizedProfitLossAud: Math.round((totalRealizedProfitLossAud + Number.EPSILON) * 100) / 100,
+    grossProfitAud: Math.round((grossProfitAud + Number.EPSILON) * 100) / 100,
+    grossLossAud: Math.round((grossLossAud + Number.EPSILON) * 100) / 100,
+    profitFactor: grossLossAud > 0 ? Math.round((grossProfitAud / grossLossAud) * 100) / 100 : null,
+    averageWinAud: wins.length ? Math.round((grossProfitAud / wins.length + Number.EPSILON) * 100) / 100 : null,
+    averageLossAud: losses.length ? Math.round((grossLossAud / losses.length + Number.EPSILON) * 100) / 100 : null,
+    expectancyAud: tradeCount ? Math.round((totalRealizedProfitLossAud / tradeCount + Number.EPSILON) * 100) / 100 : null,
+    maxRealizedDrawdownAud: Math.round((maxDrawdownAud + Number.EPSILON) * 100) / 100,
+    maxRealizedDrawdownPct: peak > 0 ? Math.round((maxDrawdownAud / peak) * 10000) / 100 : null,
+    basis: "CLOSED_TRADES_REALIZED_PNL_ONLY"
+  };
+}
+
 function validateSnapshot(value) {
   if (!value || value.schemaVersion !== 1 || value.mode !== "AUTOMATED_ASX_PAPER_ONLY" ||
       value.liveTradingEnabled !== false || value.portfolio?.mode !== "PAPER_ONLY" ||
@@ -42,10 +84,10 @@ function validateSnapshot(value) {
 export async function readAsxAutopilot(env) {
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", configured: false, liveTradingEnabled: false };
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
-  if (!raw) return { ...initialSnapshot(), configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env) };
+  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
-  return { ...validateSnapshot(parsed), configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env) };
+  const snapshot = validateSnapshot(parsed);\n  return { ...snapshot, configured: env.ASX_AUTOPILOT_ENABLED === "true", symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
 }
 
 function configuredSymbols(env) {
@@ -70,7 +112,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
   const previousScanMs = Date.parse(snapshot.lastScanAt || "");
   if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
-    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
+    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
   }
   const data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
 
