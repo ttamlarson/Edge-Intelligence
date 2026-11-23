@@ -54,7 +54,8 @@ test("ASX autopilot validates DataCedar data, records a paper-only scan and neve
   assert.equal(result.mode, "AUTOMATED_ASX_PAPER_ONLY");
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.portfolio.mode, "PAPER_ONLY");
-  assert.equal(result.portfolio.positions.length, 0);
+  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 0);
+  assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
   assert.equal(result.scanCount, 1);
   assert.ok(result.signals.some(signal => signal.symbol === "BHP" && signal.status === "REJECTED"));
   const persisted = JSON.parse(store.values.get(__test.STORAGE_KEY));
