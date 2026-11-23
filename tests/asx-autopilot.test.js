@@ -168,3 +168,20 @@ test("ASX paper performance reports realized net metrics and never treats a smal
   assert.equal(enoughForEarlySample.status, "EARLY_SAMPLE");
   assert.equal(enoughForEarlySample.tradeCount, 30);
 });
+
+
+test("ASX autopilot status exposes performance without mutating the persisted paper ledger", async () => {
+  const snapshot = {
+    ...__test.initialSnapshot(),
+    portfolio: {
+      ...createPaperPortfolio(),
+      closedTrades: [{ id: "one", status: "CLOSED_PAPER", closedAt: "2026-11-20T00:00:00.000Z", profitLossAud: 12.5 }]
+    }
+  };
+  const store = kv(JSON.stringify(snapshot));
+  const status = await readAsxAutopilot({ EDGE_KV: store.binding, ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP" });
+  assert.equal(status.performance.tradeCount, 1);
+  assert.equal(status.performance.totalRealizedProfitLossAud, 12.5);
+  assert.equal(status.performance.status, "INSUFFICIENT_SAMPLE");
+  assert.equal(JSON.parse(store.values.get(__test.STORAGE_KEY)).portfolio.closedTrades.length, 1);
+});
