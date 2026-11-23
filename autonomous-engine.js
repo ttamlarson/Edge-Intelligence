@@ -296,6 +296,7 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   row.push(field.trim()); if (row.some(cell => cell !== "")) rows.push(row);
   if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
   const headers = rows.shift().map(x => x.replace(/^\uFEFF/, "").toLowerCase().replace(/[ _-]/g, ""));
+  if (headers.some(header => !header) || new Set(headers).size !== headers.length) return { valid: false, reason: "CSV contains an empty or duplicate header column." };
   const index = (...names) => headers.findIndex(h => names.includes(h));
   const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close") };
   const requiredColumns = Object.values(cols);
@@ -303,6 +304,7 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   if (new Set(requiredColumns).size !== requiredColumns.length) return { valid: false, reason: "CSV contains duplicate or ambiguous required columns." };
   const grouped = {};
   for (const cells of rows) {
+    if (cells.length !== headers.length) return { valid: false, reason: "CSV row has an inconsistent column count." };
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
     const dateRaw = String(cells[cols.date] || "").trim();
     const date = parseAsxCsvDate(dateRaw);
