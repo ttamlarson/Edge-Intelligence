@@ -152,6 +152,8 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   let portfolio = snapshot.portfolio;
   const signals = [];
   const processed = { ...snapshot.lastBarBySymbol };
+  let processedBarsThisScan = 0;
+  let incompleteSessionBars = 0;
   const openSymbols = () => new Set(portfolio.positions.filter(p => p.status === "OPEN_PAPER").map(p => p.symbol));
 
   for (const symbol of symbols) {
@@ -220,7 +222,8 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
         signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
       }
     }
-    processed[symbol] = latest.timestamp;\n    processedBarsThisScan++;
+    processed[symbol] = latest.timestamp;
+    processedBarsThisScan++;
   }
 
   const next = {
