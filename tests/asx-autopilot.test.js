@@ -128,7 +128,7 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
     ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
     DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
   }, { now: new Date(nextNow), fetchImpl });
-  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 0);
+  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 0, JSON.stringify({ status: result.status, signals: result.signals, position: result.portfolio.positions[0], latest, now: nextNow }));
   assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
   assert.equal(result.portfolio.closedTrades.length, 1);
   assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
