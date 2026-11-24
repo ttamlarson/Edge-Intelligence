@@ -35,9 +35,9 @@ export function validateAutoPaperAccount(value) {
   typeof p.id === "string" && validDate(p.openedAt) &&
   validNumber(p.entryPrice, 0.00000001) && validNumber(p.quantity, 0.00000001) &&
   validNumber(p.entryCost, 0.00000001) && validNumber(p.entryFee, 0) &&
-  validNumber(p.stopPrice, 0.00000001) && p.stopPrice < p.entryPrice &&
+  validNumber(p.stopPrice, 0.00000001) && Number(p.stopPrice) < Number(p.entryPrice) &&
   validNumber(p.trailingStop, 0.00000001) && validNumber(p.targetPrice, 0.00000001) &&
-  p.targetPrice > p.entryPrice && validNumber(p.atr, 0.00000001) &&
+  Number(p.targetPrice) > Number(p.entryPrice) && validNumber(p.atr, 0.00000001) &&
   validNumber(p.highestPrice, 0.00000001)
  );
  if (!value || value.mode !== "AUTOMATED_PAPER_ONLY" || value.quoteCurrency !== "USDT" ||
@@ -49,7 +49,7 @@ export function validateAutoPaperAccount(value) {
      !validNumber(value.cash, 0) || !validNumber(value.realizedPnl) ||
      !validNumber(value.equity, 0) || !validNumber(value.peakEquity, 0.00000001) ||
      !validNumber(value.maxDrawdownPct, 0) || !validNumber(value.dailyLoss, 0) ||
-     !validDate(value.updatedAt) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.day || "") ||
+     !validDate(value.updatedAt) || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value.day || "") ||
      !Number.isFinite(Date.parse(value.day + "T00:00:00.000Z")) || !validPosition) {
   throw new Error("Automated crypto paper ledger failed validation; existing data must be preserved.");
  }
