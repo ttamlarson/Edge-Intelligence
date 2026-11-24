@@ -25,8 +25,38 @@ export function evaluateAutoSignal(bars) {
  return {signal:failedChecks.length===0,reason:failedChecks.join("_")||"TREND_FOLLOWING_CONFLUENCE",failedChecks,checks,timestamp:last.timestamp,price:last.close,atr:vol,rsi:round(momentum),adx:round(strength),ema20:round(e20),ema50:round(e50),ema200:round(e200)};
 }
 export function createAutoPaperAccount(now=new Date().toISOString()){return {mode:"AUTOMATED_PAPER_ONLY",quoteCurrency:"USDT",startingCapital:100,cash:100,realizedPnl:0,openPosition:null,closedTrades:[],lastProcessed:{},dailyLoss:0,day:now.slice(0,10),equity:100,peakEquity:100,maxDrawdownPct:0,liveTradingEnabled:false,updatedAt:now};}
+export function validateAutoPaperAccount(value) {
+ const validDate = input => typeof input === "string" && Number.isFinite(Date.parse(input));
+ const validNumber = (input, min = -Infinity) => input !== null && input !== undefined && input !== "" && Number.isFinite(Number(input)) && Number(input) >= min;
+ const validTrade = trade => trade && typeof trade === "object" && validDate(trade.closedAt) && validNumber(trade.pnl);
+ const p = value?.openPosition;
+ const validPosition = p === null || (
+  p && typeof p === "object" && AUTO_SYMBOLS.includes(p.symbol) &&
+  typeof p.id === "string" && validDate(p.openedAt) &&
+  validNumber(p.entryPrice, 0.00000001) && validNumber(p.quantity, 0.00000001) &&
+  validNumber(p.entryCost, 0.00000001) && validNumber(p.entryFee, 0) &&
+  validNumber(p.stopPrice, 0.00000001) && p.stopPrice < p.entryPrice &&
+  validNumber(p.trailingStop, 0.00000001) && validNumber(p.targetPrice, 0.00000001) &&
+  p.targetPrice > p.entryPrice && validNumber(p.atr, 0.00000001) &&
+  validNumber(p.highestPrice, 0.00000001)
+ );
+ if (!value || value.mode !== "AUTOMATED_PAPER_ONLY" || value.quoteCurrency !== "USDT" ||
+     value.startingCapital !== 100 || value.liveTradingEnabled !== false ||
+     !Array.isArray(value.closedTrades) || value.closedTrades.length > 200 ||
+     !value.closedTrades.every(validTrade) || !value.lastProcessed ||
+     typeof value.lastProcessed !== "object" || Array.isArray(value.lastProcessed) ||
+     !Object.values(value.lastProcessed).every(validDate) ||
+     !validNumber(value.cash, 0) || !validNumber(value.realizedPnl) ||
+     !validNumber(value.equity, 0) || !validNumber(value.peakEquity, 0.00000001) ||
+     !validNumber(value.maxDrawdownPct, 0) || !validNumber(value.dailyLoss, 0) ||
+     !validDate(value.updatedAt) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value.day || "") ||
+     !Number.isFinite(Date.parse(value.day + "T00:00:00.000Z")) || !validPosition) {
+  throw new Error("Automated crypto paper ledger failed validation; existing data must be preserved.");
+ }
+ return true;
+}
 export function normalizeAutoPaperAccount(value,now=new Date().toISOString()){
- if(!value||value.mode!=="AUTOMATED_PAPER_ONLY"||value.quoteCurrency!=="USDT"||value.startingCapital!==100||value.liveTradingEnabled!==false||!Array.isArray(value.closedTrades)||!value.lastProcessed||typeof value.lastProcessed!=="object")return createAutoPaperAccount(now);
+ validateAutoPaperAccount(value);
  const day=now.slice(0,10),dailyLoss=round(value.closedTrades.filter(t=>String(t.closedAt||"").slice(0,10)===day).reduce((s,t)=>s+Math.max(0,-Number(t.pnl||0)),0));
  return {...value,day,dailyLoss,updatedAt:now};
 }
