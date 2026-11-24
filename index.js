@@ -4,7 +4,8 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
-import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -324,7 +325,7 @@ async function research(env, input) {
   }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST", headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
+    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6.2-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
   });
   if (response.url && new URL(response.url).hostname !== "api.openai.com") throw new HttpError(502, "AI provider redirected to an unexpected host.");
   const text = await readLimitedText(response, 1_000_000, () => new HttpError(502, "OpenAI response exceeded the size limit.")); let data;
@@ -340,7 +341,7 @@ async function research(env, input) {
   if (report.probability != null && (report.probability < 0 || report.probability > 100) || report.market_price != null && (report.market_price < 0 || report.market_price > 100)) throw new HttpError(502, "Research response probability was outside the 0–100 range.");
   report.market_price = validated.marketPrice;
   report.edge_points = validated.marketPrice === null || report.probability === null || report.probability === undefined ? null : report.probability - validated.marketPrice;
-  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6-astra", classification: "model_generated_research_probability" };
+  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6.2-astra", classification: "model_generated_research_probability" };
 }
 
 async function backtest(env, input) {
@@ -393,9 +394,17 @@ async function marketSearch(request, env) {
 async function runAutomatedCryptoPaper(env) {
   if (!env.EDGE_KV) return { status: "storage_unavailable" };
   const key = "crypto-auto-paper-global-v1", now = isoNow();
+  const stored = await env.EDGE_KV.get(key);
   let account;
-  try { account = normalizeAutoPaperAccount(JSON.parse(await env.EDGE_KV.get(key) || "null") || createAutoPaperAccount(now), now); }
-  catch { account = createAutoPaperAccount(now); }
+  if (stored === null || stored === undefined || stored === "") {
+    account = createAutoPaperAccount(now);
+  } else {
+    let parsed;
+    try { parsed = JSON.parse(stored); }
+    catch { return { status: "LEDGER_INVALID_JSON", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger is invalid JSON; no existing data was overwritten." }; }
+    try { account = normalizeAutoPaperAccount(parsed, now); }
+    catch { return { status: "LEDGER_VALIDATION_FAILED", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger failed validation; no existing data was overwritten." }; }
+  }
   // Binance documents data-api.binance.vision for unauthenticated public market data.
   // Use one klines request per host: the last closed candle supplies both the
   // indicator inputs and current mark, avoiding a second endpoint that could
@@ -413,14 +422,9 @@ async function runAutomatedCryptoPaper(env) {
         let raw;
         try { raw = JSON.parse(body); }
         catch { lastError = "INVALID_JSON_RESPONSE"; continue; }
-        if (!Array.isArray(raw) || raw.length < 220) { lastError = "INVALID_OR_INCOMPLETE_RESPONSE"; continue; }
-        const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({
-          timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]),
-          high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5])
-        }));
-        if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) {
-          lastError = "INVALID_HOURLY_CANDLES"; continue;
-        }
+        const normalized = normalizeBinanceHourlyKlines(raw, { now: Date.now() });
+        if (!normalized.valid) { lastError = normalized.reason; continue; }
+        const bars = normalized.bars;
         const latest = bars.at(-1);
         return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {
@@ -468,7 +472,7 @@ async function handle(request, env, ctx) {
 
   if (requestUrl.pathname === "/api/health" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "health");
-    return reply({ status: "worker_responding", providers: { coinSpotReadOnly: Boolean(env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET), datacedar: env.DATACEDAR_API_KEY ? "key configured; retrieval not verified" : "requires DATACEDAR_API_KEY Worker secret", marketData: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: env.DATACEDAR_API_KEY ? "DataCedar key configured; historical bars require a successful retrieval" : "DataCedar ASX historical adapter requires DATACEDAR_API_KEY Worker secret", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; execution requires provider secret and KV", realMoneyTrading: false, retrieved_at: isoNow() });
+    return reply({ status: "worker_responding", providers: { coinSpotReadOnly: Boolean(env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET), datacedar: env.DATACEDAR_API_KEY ? "key configured; retrieval not verified" : "requires DATACEDAR_API_KEY Worker secret", marketData: true, marketDataSource: "Binance public market-data API; no API key required; scanner retrieval is reported by the automated paper account", predictionMarkets: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, asxAutopilot: { enabled: env.ASX_AUTOPILOT_ENABLED === "true", dataCedarKeyConfigured: Boolean(env.DATACEDAR_API_KEY), aiKeyConfigured: Boolean(env.OPENAI_API_KEY), symbolsConfigured: Boolean(env.ASX_AUTOPILOT_SYMBOLS), configured: env.ASX_AUTOPILOT_ENABLED === "true" && Boolean(env.DATACEDAR_API_KEY && env.OPENAI_API_KEY && env.ASX_AUTOPILOT_SYMBOLS && env.EDGE_KV) }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: env.DATACEDAR_API_KEY ? "DataCedar key configured; historical bars require a successful retrieval" : "DataCedar ASX historical adapter requires DATACEDAR_API_KEY Worker secret", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; crypto paper scanning uses public Binance data and KV; ASX paper autopilot is separately opt-in", realMoneyTrading: false, retrieved_at: isoNow() });
   }
   if (requestUrl.pathname === "/api/asx/datacedar/status" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "datacedar-status");
@@ -505,8 +509,9 @@ async function handle(request, env, ctx) {
     if (request.method === "POST") return reply(await runAutomatedCryptoPaper(env));
     const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
     if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
-    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid."); }
-    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(502, "Automated paper ledger failed its safety validation.");
+    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid JSON; stored data was preserved."); }
+    try { validateAutoPaperAccount(snapshot); } catch { throw new HttpError(409, "Automated paper ledger failed validation; stored data was preserved."); }
+    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(409, "Automated paper ledger failed its safety validation; stored data was preserved.");
     return reply(snapshot);
   }
 
@@ -708,5 +713,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

@@ -3,7 +3,7 @@ main = "index.js"
 compatibility_date = "2026-11-01"
 
 [vars]
-OPENAI_MODEL = "gpt-6-astra"
+OPENAI_MODEL = "gpt-6.2-astra"
 FRONTEND_ORIGINS = "https://REPLACE_WITH_YOUR_PAGES_DOMAIN"
 CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
 CF_ACCESS_AUD = "REPLACE_WITH_ACCESS_APPLICATION_AUD"
@@ -54,7 +54,7 @@ name = "edge-intelligence-api-staging"
 workers_dev = true
 
 [env.staging.vars]
-OPENAI_MODEL = "gpt-6-astra"
+OPENAI_MODEL = "gpt-6.2-astra"
 FRONTEND_ORIGINS = "https://REPLACE_WITH_YOUR_STAGING_PAGES_DOMAIN"
 CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
 CF_ACCESS_AUD = "REPLACE_WITH_STAGING_ACCESS_APPLICATION_AUD"

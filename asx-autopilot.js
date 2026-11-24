@@ -219,7 +219,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (candidate.status === "PAPER_CANDIDATE") {
         const ai = await evaluateAsxAiDecision({
           candidate, bars: completedBars, apiKey: env.OPENAI_API_KEY,
-          model: env.OPENAI_MODEL || "gpt-6-astra", fetchImpl
+          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl
         });
         const aiSummary = {
           status: ai.status, decision: ai.decision || null, confidence: ai.confidence ?? null,

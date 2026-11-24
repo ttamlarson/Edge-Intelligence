@@ -42,7 +42,7 @@ function validateDecision(value) {
 }
 
 export async function evaluateAsxAiDecision({
-  candidate, bars, apiKey, model = "gpt-6-astra", fetchImpl = fetch, timeoutMs = 12000
+  candidate, bars, apiKey, model = "gpt-6.2-astra", fetchImpl = fetch, timeoutMs = 12000
 } = {}) {
   if (!apiKey) return { status: "AI_BLOCKED_NOT_CONFIGURED", approved: false, reason: "OPENAI_API_KEY is not configured." };
   if (!candidate || candidate.status !== "PAPER_CANDIDATE" || candidate.executable !== false ||
@@ -72,6 +72,8 @@ export async function evaluateAsxAiDecision({
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
+        reasoning: { effort: "high" },
+        max_output_tokens: 1200,
         input: [{
           role: "system",
           content: "You are EDGE's conservative ASX paper-trading risk reviewer. Evaluate only the supplied source observations and deterministic candidate. Do not invent facts, prices, news, fundamentals or market data. Do not calculate or change entry, stop, target, quantity, fees, capital or risk limits. Treat this as a research veto layer, not an order instruction. Return JSON only with decision (APPROVE, REJECT or REVIEW), confidence (0-100), thesis (string), counter_thesis (string), risk_flags (array of strings). APPROVE only when evidence is coherent and risks are acceptably bounded; otherwise REJECT or REVIEW. Confidence is subjective model confidence, not probability of profit."
