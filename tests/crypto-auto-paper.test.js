@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {AUTO_SYMBOLS,createAutoPaperAccount,evaluateAutoSignal,processAutoPaperSignals,markAutoPaperAccount} from "../crypto-auto-paper.js";
+import {AUTO_SYMBOLS,createAutoPaperAccount,evaluateAutoSignal,processAutoPaperSignals,markAutoPaperAccount,normalizeAutoPaperAccount,validateAutoPaperAccount} from "../crypto-auto-paper.js";
 const bars=Array.from({length:300},(_,i)=>{const close=100+i*.25+Math.sin(i/7)*.2;return {timestamp:new Date(Date.UTC(2026,0,1,i)).toISOString(),open:close-.1,high:close+.4,low:close-.4,close,volume:1000};});
 test("automated universe is diversified and paper-only",()=>{assert.ok(AUTO_SYMBOLS.length>=10);assert.equal(createAutoPaperAccount().liveTradingEnabled,false);});
 test("signal engine requires warmup and validates trend filters",()=>{assert.equal(evaluateAutoSignal(bars.slice(0,100)).reason,"WARMUP_REQUIRED");const s=evaluateAutoSignal(bars);assert.equal(typeof s.signal,"boolean");assert.ok(s.atr>0);});
@@ -21,4 +21,12 @@ test("reports every failed entry gate with observed values and requirements",()=
 test("warmup diagnostic explains the missing candle count",()=>{
  const s=evaluateAutoSignal(bars.slice(0,100));
  assert.equal(s.checks.warmup.passed,false);assert.equal(s.checks.warmup.value,100);assert.equal(s.checks.warmup.required,220);
+});
+
+test("stored paper ledger validation rejects corrupt state instead of resetting capital or history",()=>{
+ const valid=createAutoPaperAccount("2026-11-25T00:00:00.000Z");
+ assert.equal(validateAutoPaperAccount(valid),true);
+ assert.throws(()=>normalizeAutoPaperAccount({...valid,cash:-1},"2026-11-25T01:00:00.000Z"),/failed validation/);
+ assert.throws(()=>normalizeAutoPaperAccount({...valid,closedTrades:[{closedAt:"invalid",pnl:-4}]},"2026-11-25T01:00:00.000Z"),/failed validation/);
+ assert.throws(()=>normalizeAutoPaperAccount({...valid,liveTradingEnabled:true},"2026-11-25T01:00:00.000Z"),/failed validation/);
 });

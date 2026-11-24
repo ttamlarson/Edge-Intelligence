@@ -4,7 +4,7 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
-import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
@@ -394,9 +394,17 @@ async function marketSearch(request, env) {
 async function runAutomatedCryptoPaper(env) {
   if (!env.EDGE_KV) return { status: "storage_unavailable" };
   const key = "crypto-auto-paper-global-v1", now = isoNow();
+  const stored = await env.EDGE_KV.get(key);
   let account;
-  try { account = normalizeAutoPaperAccount(JSON.parse(await env.EDGE_KV.get(key) || "null") || createAutoPaperAccount(now), now); }
-  catch { account = createAutoPaperAccount(now); }
+  if (stored === null || stored === undefined || stored === "") {
+    account = createAutoPaperAccount(now);
+  } else {
+    let parsed;
+    try { parsed = JSON.parse(stored); }
+    catch { return { status: "LEDGER_INVALID_JSON", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger is invalid JSON; no existing data was overwritten." }; }
+    try { account = normalizeAutoPaperAccount(parsed, now); }
+    catch { return { status: "LEDGER_VALIDATION_FAILED", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger failed validation; no existing data was overwritten." }; }
+  }
   // Binance documents data-api.binance.vision for unauthenticated public market data.
   // Use one klines request per host: the last closed candle supplies both the
   // indicator inputs and current mark, avoiding a second endpoint that could
@@ -501,8 +509,9 @@ async function handle(request, env, ctx) {
     if (request.method === "POST") return reply(await runAutomatedCryptoPaper(env));
     const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
     if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
-    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid."); }
-    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(502, "Automated paper ledger failed its safety validation.");
+    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid JSON; stored data was preserved."); }
+    try { validateAutoPaperAccount(snapshot); } catch { throw new HttpError(409, "Automated paper ledger failed validation; stored data was preserved."); }
+    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(409, "Automated paper ledger failed its safety validation; stored data was preserved.");
     return reply(snapshot);
   }
 
@@ -704,5 +713,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
