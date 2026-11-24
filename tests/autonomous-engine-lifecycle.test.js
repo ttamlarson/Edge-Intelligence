@@ -473,11 +473,11 @@ test("CSV parser rejects rows with missing or unlabelled extra columns", () => {
 
 
 test("CSV parser rejects multiple aliases for the same required field", () => {
-  const symbolAliases = parseCsv("Symbol,Ticker,Date,Open,High,Low,Close\\nBHP,CSL,2026-11-12,40,41,39,40");
+  const symbolAliases = parseCsv("Symbol,Ticker,Date,Open,High,Low,Close\nBHP,CSL,2026-11-12,40,41,39,40");
   assert.equal(symbolAliases.valid, false);
   assert.match(symbolAliases.reason, /duplicate or ambiguous required columns/);
 
-  const dateAliases = parseCsv("Symbol,Date,Timestamp,Open,High,Low,Close\\nBHP,2026-11-12,2026-11-12,40,41,39,40");
+  const dateAliases = parseCsv("Symbol,Date,Timestamp,Open,High,Low,Close\nBHP,2026-11-12,2026-11-12,40,41,39,40");
   assert.equal(dateAliases.valid, false);
   assert.match(dateAliases.reason, /duplicate or ambiguous required columns/);
 });
@@ -487,7 +487,7 @@ test("CSV parser rejects one trading session represented by different timezone e
     "Symbol,Date,Open,High,Low,Close",
     "BHP,2026-11-12,40,41,39,40",
     "BHP,2026-11-12T00:00:00+08:00,40,41,39,40"
-  ].join("\\n");
+  ].join("\n");
   const result = parseCsv(csv);
   assert.equal(result.valid, false);
   assert.match(result.reason, /Duplicate daily bar/);
