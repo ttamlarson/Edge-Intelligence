@@ -40,19 +40,14 @@ export function validateAutoPaperAccount(value) {
   Number(p.targetPrice) > Number(p.entryPrice) && validNumber(p.atr, 0.00000001) &&
   validNumber(p.highestPrice, 0.00000001)
  );
- if (!value || value.mode !== "AUTOMATED_PAPER_ONLY" || value.quoteCurrency !== "USDT" ||
-     value.startingCapital !== 100 || value.liveTradingEnabled !== false ||
-     !Array.isArray(value.closedTrades) || value.closedTrades.length > 200 ||
-     !value.closedTrades.every(validTrade) || !value.lastProcessed ||
-     typeof value.lastProcessed !== "object" || Array.isArray(value.lastProcessed) ||
-     !Object.values(value.lastProcessed).every(validDate) ||
-     !validNumber(value.cash, 0) || !validNumber(value.realizedPnl) ||
-     !validNumber(value.equity, 0) || !validNumber(value.peakEquity, 0.00000001) ||
-     !validNumber(value.maxDrawdownPct, 0) || !validNumber(value.dailyLoss, 0) ||
-     !validDate(value.updatedAt) || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value.day || "") ||
-     !Number.isFinite(Date.parse(value.day + "T00:00:00.000Z")) || !validPosition) {
-  throw new Error("Automated crypto paper ledger failed validation; existing data must be preserved.");
- }
+ const invalid = [];
+ if (!value || value.mode !== "AUTOMATED_PAPER_ONLY" || value.quoteCurrency !== "USDT" || value.startingCapital !== 100 || value.liveTradingEnabled !== false) invalid.push("account identity or live-trading flag");
+ if (!Array.isArray(value?.closedTrades) || value.closedTrades.length > 200 || !value.closedTrades.every(validTrade)) invalid.push("closed-trade history");
+ if (!value?.lastProcessed || typeof value.lastProcessed !== "object" || Array.isArray(value.lastProcessed) || !Object.values(value.lastProcessed).every(validDate)) invalid.push("processed-signal cursor");
+ if (!validNumber(value?.cash, 0) || !validNumber(value?.realizedPnl) || !validNumber(value?.equity, 0) || !validNumber(value?.peakEquity, 0.00000001) || !validNumber(value?.maxDrawdownPct, 0) || !validNumber(value?.dailyLoss, 0)) invalid.push("account balances or risk metrics");
+ if (!validDate(value?.updatedAt) || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value?.day || "") || !Number.isFinite(Date.parse((value?.day || "") + "T00:00:00.000Z"))) invalid.push("account timestamps");
+ if (!validPosition) invalid.push("open position");
+ if (invalid.length) throw new Error("Automated crypto paper ledger failed validation (" + invalid.join(", ") + "); existing data must be preserved.");
  return true;
 }
 export function normalizeAutoPaperAccount(value,now=new Date().toISOString()){
