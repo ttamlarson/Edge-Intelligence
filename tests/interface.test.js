@@ -29,3 +29,16 @@ test("service-worker update prompt waits for acknowledgement and offers retry on
   assert.match(app, /Restarting EDGE/);
   assert.match(app, /worker\.state==="installed"&&reg\.active/);
 });
+
+test("a failed ASX CSV replacement cannot leave previous candidates actionable", async () => {
+  const app = await readFile(resolve(root, "app.js"), "utf8");
+  const start = app.indexOf('$("asxImportBtn")?.addEventListener("click",()=>{');
+  const end = app.indexOf('$("asxDataCedarBtn")?.addEventListener("click",async()=>{', start);
+  assert.ok(start >= 0 && end > start, "ASX CSV import handler must exist");
+  const handler = app.slice(start, end);
+  const clear = handler.indexOf("asxUniverse={};");
+  const parse = handler.indexOf("parseAsxDailyCsv");
+  assert.ok(clear >= 0 && parse > clear, "previous imported candidates must be cleared before parsing a replacement file");
+  assert.match(handler, /if\(!parsed\.valid\)\{[\s\S]*?renderAsxDesk\(\);return\}/);
+  assert.match(handler, /reader\.onerror=\(\)=>\{[\s\S]*?asxCandidates=\[\];[\s\S]*?renderAsxDesk\(\);/);
+});
