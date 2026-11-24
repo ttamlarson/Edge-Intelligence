@@ -339,16 +339,27 @@ function renderAsxDesk(){
 $("asxImportBtn")?.addEventListener("click",()=>{
  const file=$("asxCsvFile").files[0],source=$("asxSource").value.trim();
  if(!file||!source||$("asxConfirmData")?.checked!==true){toast("Choose a CSV, name its source, and confirm AUD denomination and data-use rights.");return}
- if(file.size>5*1024*1024){toast("CSV must be smaller than 5 MB.");return}
- const reader=new FileReader();reader.onload=()=>{
+ asxUniverse={};
+ asxCandidates=[];
+ renderAsxDesk();
+ if(file.size>5*1024*1024){$("asxImportStatus").textContent="CSV must be smaller than 5 MB.";return}
+ $("asxImportStatus").textContent="Reading CSV. Previous import candidates have been cleared.";
+ const reader=new FileReader();
+ reader.onload=()=>{
   const parsed=parseAsxDailyCsv(String(reader.result||""),{currency:"AUD"});
-  if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;return}
+  if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;renderAsxDesk();return}
   asxUniverse=parsed.barsBySymbol;
-  const observedAt=parsed.latestBar;
   asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:calculatePaperPortfolioEquity(asxPortfolio)??0,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
   $("asxImportStatus").textContent=`Imported ${parsed.rows} daily bars for ${parsed.symbols.length} ASX tickers. Latest bar: ${formatDateTime(parsed.latestBar,"Australia/Perth")}. Source label is user-declared and has not been independently verified.`;
   renderAsxDesk();
- };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
+ };
+ reader.onerror=()=>{
+  asxUniverse={};
+  asxCandidates=[];
+  $("asxImportStatus").textContent="Could not read CSV file.";
+  renderAsxDesk();
+ };
+ reader.readAsText(file);
 });
 $("asxDataCedarBtn")?.addEventListener("click",async()=>{
  const button=$("asxDataCedarBtn"),symbols=$("asxDataCedarSymbols").value.trim();

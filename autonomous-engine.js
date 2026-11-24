@@ -49,13 +49,26 @@ function parseAsxCsvDate(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function asxCsvSessionDate(value) {
+  const raw = String(value ?? "").trim();
+  let match = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:$|T)/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  match = raw.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);
+  if (match) return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+  return null;
+}
+
 export function estimateAsxSideCost(tradeValueAud, { commissionRate = DEFAULT_ASX_COMMISSION_RATE, minimumCommissionAud = EDGE_COMMISSION_MIN_AUD, gstRate = EDGE_GST_RATE, slippageBps = EDGE_DEFAULT_SLIPPAGE_BPS } = {}) {
   const value = num(tradeValueAud);
   if (value === null || value <= 0 || ![commissionRate, minimumCommissionAud, gstRate, slippageBps].every(v => Number.isFinite(v) && v >= 0)) return null;
   const commission = Math.max(minimumCommissionAud, value * commissionRate);
   const gst = commission * gstRate;
   const slippage = value * slippageBps / 10000;
-  return { commissionAud: round2(commission), gstAud: round2(gst), slippageAud: round2(slippage), totalAud: round2(commission + gst + slippage) };
+  const commissionAud = round2(commission);
+  const gstAud = round2(gst);
+  const slippageAud = round2(slippage);
+  const totalAud = round2(commissionAud + gstAud + slippageAud);
+  return { commissionAud, gstAud, slippageAud, totalAud };
 }
 
 export function validateDailyBars(bars, { source, currency, observedAt, now = Date.now(), maxAgeMs = EDGE_MAX_DAILY_BAR_AGE_MS } = {}) {
@@ -298,20 +311,29 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   if (rows.length < 2) return { valid: false, reason: "CSV needs a header and at least one data row." };
   const headers = rows.shift().map(x => x.replace(/^\uFEFF/, "").toLowerCase().replace(/[ _-]/g, ""));
   if (headers.some(header => !header) || new Set(headers).size !== headers.length) return { valid: false, reason: "CSV contains an empty or duplicate header column." };
-  const index = (...names) => headers.findIndex(h => names.includes(h));
-  const cols = { symbol: index("symbol","ticker","code"), date: index("date","timestamp","tradingdate"), open: index("open"), high: index("high"), low: index("low"), close: index("close") };
+  const resolveColumn = (...names) => {
+    const matches = headers.flatMap((header, column) => names.includes(header) ? [column] : []);
+    return matches.length === 1 ? matches[0] : matches.length === 0 ? -1 : -2;
+  };
+  const cols = { symbol: resolveColumn("symbol","ticker","code"), date: resolveColumn("date","timestamp","tradingdate"), open: resolveColumn("open"), high: resolveColumn("high"), low: resolveColumn("low"), close: resolveColumn("close") };
   const requiredColumns = Object.values(cols);
-  if (requiredColumns.some(v => v < 0)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
+  if (requiredColumns.some(v => v === -2)) return { valid: false, reason: "CSV contains duplicate or ambiguous required columns." };
+  if (requiredColumns.some(v => v === -1)) return { valid: false, reason: "Required columns: Symbol, Date, Open, High, Low, Close." };
   if (new Set(requiredColumns).size !== requiredColumns.length) return { valid: false, reason: "CSV contains duplicate or ambiguous required columns." };
   const grouped = {};
+  const sessionDates = {};
   for (const cells of rows) {
     if (cells.length !== headers.length) return { valid: false, reason: "CSV row has an inconsistent column count." };
     const symbol = String(cells[cols.symbol] || "").trim().toUpperCase();
     const dateRaw = String(cells[cols.date] || "").trim();
     const date = parseAsxCsvDate(dateRaw);
+    const sessionDate = asxCsvSessionDate(dateRaw);
     const validDate = Number.isFinite(date);
     const bar = { timestamp: validDate ? new Date(date).toISOString() : null, open: num(cells[cols.open]), high: num(cells[cols.high]), low: num(cells[cols.low]), close: num(cells[cols.close]) };
-    if (!/^[A-Z0-9.]{2,12}$/.test(symbol) || !bar.timestamp || [bar.open,bar.high,bar.low,bar.close].some(v => v === null || v <= 0) || bar.high < Math.max(bar.open,bar.close) || bar.low > Math.min(bar.open,bar.close) || bar.low > bar.high) return { valid: false, reason: "A row has an invalid ticker, date or OHLC value." };
+    if (!/^[A-Z0-9.]{2,12}$/.test(symbol) || !bar.timestamp || !sessionDate || [bar.open,bar.high,bar.low,bar.close].some(v => v === null || v <= 0) || bar.high < Math.max(bar.open,bar.close) || bar.low > Math.min(bar.open,bar.close) || bar.low > bar.high) return { valid: false, reason: "A row has an invalid ticker, date or OHLC value." };
+    const sessions = sessionDates[symbol] ||= new Set();
+    if (sessions.has(sessionDate)) return { valid: false, reason: "Duplicate daily bar detected." };
+    sessions.add(sessionDate);
     (grouped[symbol] ||= []).push(bar);
   }
   const symbols = Object.keys(grouped);
@@ -340,7 +362,7 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   }
   if (price === null || price <= 0) return { accepted: false, reason: "Exit price must be positive." };
   const normalizedPrice = roundPrice(price);
-  const exitCostAssumptions = resolveAsxCostAssumptions(costs ?? position.costAssumptions ?? {});
+  const exitCostAssumptions = resolveAsxCostAssumptions(costs ?? position.lastMarkCostAssumptions ?? position.costAssumptions ?? {});
   const exitValue = position.shares * normalizedPrice, exitCost = estimateAsxSideCost(exitValue, exitCostAssumptions);
   if (!Number.isFinite(exitValue) || !exitCost) return { accepted: false, reason: "Exit costs could not be calculated." };
   const proceeds = round2(exitValue - exitCost.totalAud);

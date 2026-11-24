@@ -470,3 +470,84 @@ test("CSV parser rejects rows with missing or unlabelled extra columns", () => {
   assert.match(parseCsv("Symbol,Date,Open,High,Low,Close,\nBHP,2026-11-12,40,41,39,40.5,").reason, /empty or duplicate header/);
   assert.equal(parseCsv("Symbol,Date,Open,High,Low,Close,Close\nBHP,2026-11-12,40,41,39,40.5,40.5").valid, false);
 });
+
+
+test("CSV parser rejects multiple aliases for the same required field", () => {
+  const symbolAliases = parseCsv("Symbol,Ticker,Date,Open,High,Low,Close\\nBHP,CSL,2026-11-12,40,41,39,40");
+  assert.equal(symbolAliases.valid, false);
+  assert.match(symbolAliases.reason, /duplicate or ambiguous required columns/);
+
+  const dateAliases = parseCsv("Symbol,Date,Timestamp,Open,High,Low,Close\\nBHP,2026-11-12,2026-11-12,40,41,39,40");
+  assert.equal(dateAliases.valid, false);
+  assert.match(dateAliases.reason, /duplicate or ambiguous required columns/);
+});
+
+test("CSV parser rejects one trading session represented by different timezone encodings", () => {
+  const csv = [
+    "Symbol,Date,Open,High,Low,Close",
+    "BHP,2026-11-12,40,41,39,40",
+    "BHP,2026-11-12T00:00:00+08:00,40,41,39,40"
+  ].join("\\n");
+  const result = parseCsv(csv);
+  assert.equal(result.valid, false);
+  assert.match(result.reason, /Duplicate daily bar/);
+});
+
+test("signal screening rejects a breakout when the 20-day average is below the 50-day average", () => {
+  const imported = parseCsv(makeCsv("BHP"));
+  const bars = imported.barsBySymbol.BHP.map((bar, index) => {
+    const close = index < 35 ? 20 : 10;
+    return { ...bar, open: close, high: close + 0.2, low: close - 0.2, close };
+  });
+  Object.assign(bars.at(-1), { open: 24.5, high: 25.2, low: 24.4, close: 25 });
+  const result = evaluateAsxSwingSetup({
+    symbol: "BHP", bars, source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: bars.at(-1).timestamp, equityAud: 500, cashAud: 500, now, costs: zeroCostSchedule
+  });
+  assert.equal(result.status, "NO_SIGNAL");
+  assert.match(result.reason, /trend and 20-session breakout/);
+});
+
+test("paper opening rejects a duplicate open symbol without changing cash or history", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "duplicate-symbol-1", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  const duplicate = openPaperPosition(opened.portfolio, candidate, {
+    id: "duplicate-symbol-2", openedAt: new Date(now + 60_000).toISOString(), now: now + 60_000
+  });
+  assert.equal(duplicate.accepted, false);
+  assert.match(duplicate.reason, /duplicate open symbol/);
+  assert.equal(opened.portfolio.cashAud, 500 - opened.position.debitAud);
+  assert.equal(opened.portfolio.positions.length, 1);
+  assert.equal(opened.portfolio.closedTrades.length, 0);
+});
+
+test("rounded fee components reconcile exactly to the recorded total", () => {
+  const costs = { commissionRate: 0.0008, minimumCommissionAud: 0, gstRate: 0.1, slippageBps: 10 };
+  const fee = estimateAsxSideCost(6.25, costs);
+  assert.deepEqual(fee, { commissionAud: 0.01, gstAud: 0, slippageAud: 0.01, totalAud: 0.02 });
+  assert.equal(fee.totalAud, fee.commissionAud + fee.gstAud + fee.slippageAud);
+});
+
+test("closing defaults to the latest mark fee assumptions unless explicitly overridden", () => {
+  const candidate = candidateFromCsv(makeCsv("BHP"), "BHP");
+  const opened = openPaperPosition(createPaperPortfolio(), candidate, {
+    id: "latest-mark-fees-1", openedAt: new Date(now).toISOString(), now
+  });
+  assert.equal(opened.accepted, true, opened.reason);
+  const markCosts = { commissionRate: 0, minimumCommissionAud: 1, gstRate: 0, slippageBps: 0 };
+  const marked = recordPaperMark(opened.portfolio, "latest-mark-fees-1", 15, {
+    markedAt: new Date(now + 60_000).toISOString(), costs: markCosts, now: now + 60_000
+  });
+  assert.equal(marked.accepted, true, marked.reason);
+  const closed = closePaperPosition(marked.portfolio, "latest-mark-fees-1", 15, {
+    closedAt: new Date(now + 120_000).toISOString(), now: now + 120_000
+  });
+  assert.equal(closed.accepted, true, closed.reason);
+  assert.deepEqual(closed.trade.exitCostAssumptions, markCosts);
+  assert.equal(closed.trade.exitCostsAud, 1);
+  assert.equal(closed.trade.proceedsAud, Math.round((opened.position.shares * 15 - 1) * 100) / 100);
+  assert.equal(closed.portfolio.cashAud, Math.round((500 + closed.trade.profitLossAud) * 100) / 100);
+});
