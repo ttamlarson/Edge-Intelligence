@@ -3,6 +3,7 @@ import {
   evaluateAsxSwingSetup, openPaperPosition, recordPaperMark
 } from "./autonomous-engine.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
+import { evaluateAsxAiDecision } from "./asx-ai-advisor.js";
 
 const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
@@ -216,14 +217,35 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
         now: nowMs
       });
       if (candidate.status === "PAPER_CANDIDATE") {
-        const opened = openPaperPosition(portfolio, candidate, {
-          id: `asx-auto-${symbol}-${latest.timestamp.slice(0, 10)}`,
-          openedAt: scannedAt, now: nowMs
+        const ai = await evaluateAsxAiDecision({
+          candidate, bars: completedBars, apiKey: env.OPENAI_API_KEY,
+          model: env.OPENAI_MODEL || "gpt-6-astra", fetchImpl
         });
-        if (opened.accepted) {
-          portfolio = opened.portfolio;
-          signals.push({ symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt, reason: candidate.reason, entryReference: candidate.entryReference, shares: candidate.shares, openedAt: scannedAt });
-        } else signals.push({ symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt, reason: opened.reason });
+        const aiSummary = {
+          status: ai.status, decision: ai.decision || null, confidence: ai.confidence ?? null,
+          thesis: ai.thesis || null, counterThesis: ai.counterThesis || null,
+          riskFlags: ai.riskFlags || [], reason: ai.reason
+        };
+        if (!ai.approved) {
+          signals.push({
+            symbol, status: ai.status, observedAt: candidate.observedAt,
+            deterministicStatus: candidate.status, ai: aiSummary,
+            reason: ai.reason
+          });
+        } else {
+          const opened = openPaperPosition(portfolio, candidate, {
+            id: `asx-auto-${symbol}-${latest.timestamp.slice(0, 10)}`,
+            openedAt: scannedAt, now: nowMs
+          });
+          if (opened.accepted) {
+            portfolio = opened.portfolio;
+            signals.push({
+              symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt,
+              reason: candidate.reason, entryReference: candidate.entryReference,
+              shares: candidate.shares, openedAt: scannedAt, ai: aiSummary
+            });
+          } else signals.push({ symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt, reason: opened.reason, ai: aiSummary });
+        }
       } else {
         signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
       }
