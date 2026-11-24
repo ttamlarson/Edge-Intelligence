@@ -237,3 +237,45 @@ test("ASX autopilot ignores the current unfinished daily candle and processes th
   const decision = result.signals.find(signal => signal.observedAt);
   assert.equal(decision.observedAt, completed);
 });
+
+
+test("ASX autopilot fails closed when deterministic candidates have no configured AI reviewer", async () => {
+  const now = Date.parse("2026-11-23T07:00:00Z");
+  const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
+  const store = kv(JSON.stringify(seeded));
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
+  }, { now: new Date(now), fetchImpl: provider(now, []) });
+  assert.equal(result.liveTradingEnabled, false);
+  assert.equal(result.portfolio.positions.length, 0);
+  assert.ok(result.signals.some(signal => signal.status === "AI_BLOCKED_NOT_CONFIGURED"));
+});
+
+test("ASX autopilot opens only after deterministic screening and a valid AI approval", async () => {
+  const now = Date.parse("2026-11-23T07:00:00Z");
+  const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
+  const store = kv(JSON.stringify(seeded));
+  const decision = {
+    decision: "APPROVE", confidence: 82,
+    thesis: "The supplied trend and breakout context are internally consistent.",
+    counter_thesis: "A breakout can fail after the observation date.",
+    risk_flags: []
+  };
+  const fetchImpl = async (url, options) => {
+    if (new URL(url).hostname === "api.datacedar.com") return provider(now, [])(url, options);
+    if (new URL(url).hostname === "api.openai.com") return new Response(JSON.stringify({
+      output_text: JSON.stringify(decision)
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    throw new Error("Unexpected provider host.");
+  };
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", OPENAI_API_KEY: "test-only", EDGE_KV: store.binding
+  }, { now: new Date(now), fetchImpl });
+  assert.equal(result.liveTradingEnabled, false);
+  assert.equal(result.portfolio.positions.filter(position => position.status === "OPEN_PAPER").length, 1);
+  const opened = result.signals.find(signal => signal.status === "OPENED_PAPER");
+  assert.equal(opened.ai.status, "AI_APPROVED_PAPER_CANDIDATE");
+  assert.equal(opened.ai.confidence, 82);
+});
