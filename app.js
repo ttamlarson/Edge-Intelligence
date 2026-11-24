@@ -38,7 +38,7 @@ function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{toas
 function money(n,currency=null){return formatMoney(n,currency)}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}}
+function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.page)));
 document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.goto)));
 $("dismissNotice").onclick=()=>{$("dismissNotice").closest(".notice").remove()};
@@ -383,4 +383,27 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
  finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
 });
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
+async function loadAsxAutopilotStatus(){
+ const status=$("asxAutoStatus");if(!status)return;
+ try{
+  const a=await api("/api/asx/autopilot");
+  const configured=a.configured===true&&Array.isArray(a.symbols)&&a.symbols.length>0;
+  status.textContent=configured
+   ? "AUTOMATED PAPER SCANNER "+(a.status||"CONFIGURED")+" · "+a.symbols.join(", ")+" · scans "+(a.scanCount||0)+" · last scan "+(a.lastScanAt?formatDateTime(a.lastScanAt,"Australia/Perth"):"not yet run")+" · open positions "+(a.portfolio?.positions||[]).filter(p=>p.status==="OPEN_PAPER").length+" · AI reviewer "+(a.aiReviewConfigured?"READY":"BLOCKED · OPENAI_API_KEY missing")
+   : "AUTOMATION NOT ENABLED · Configure ASX_AUTOPILOT_ENABLED, ASX_AUTOPILOT_SYMBOLS, DataCedar key and Worker KV before running.";
+  if(a.lastError)status.textContent+=" · Last provider error: "+a.lastError;
+  const p=a.performance||{};
+  const metric=(label,value,detail)=>'<article class="metric-card"><span>'+label+'</span><strong>'+value+'</strong><small>'+detail+'</small></article>';
+  $("asxAutoPerformance").innerHTML=metric("CLOSED TRADES",String(p.tradeCount??0),"Realized sample only")+metric("WIN RATE",p.winRatePct==null?"—":p.winRatePct.toFixed(1)+"%","Wins / all closed trades")+metric("PROFIT FACTOR",p.profitFactor==null?"—":p.profitFactor.toFixed(2),"Gross profit / gross loss")+metric("NET REALIZED P&amp;L",p.totalRealizedProfitLossAud==null?"—":aud(p.totalRealizedProfitLossAud),"After simulated fees")+metric("MAX DRAWDOWN",p.maxRealizedDrawdownAud==null?"—":aud(p.maxRealizedDrawdownAud)+" · "+(p.maxRealizedDrawdownPct??0).toFixed(2)+"%","Realized equity curve only");
+  $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
+  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% confidence)':'')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+ }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
+}
+$("asxAutoScanBtn")?.addEventListener("click",async()=>{
+ const button=$("asxAutoScanBtn"),status=$("asxAutoStatus");button.disabled=true;button.textContent="Running paper scan…";
+ try{const result=await api("/api/asx/autopilot/scan",{method:"POST",body:JSON.stringify({})});status.textContent=result.message||("Automated paper scan "+(result.status||"completed")+" · "+(result.symbols||[]).join(", "));await loadAsxAutopilotStatus();}
+ catch(error){status.textContent="Automated paper scan failed: "+error.message}
+ finally{button.disabled=false;button.textContent="Run automated paper scan now"}
+});
 renderAsxDesk();
+loadAsxAutopilotStatus();

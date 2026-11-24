@@ -99,7 +99,7 @@ export function validateDailyBars(bars, { source, currency, observedAt, now = Da
 }
 
 export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observedAt, equityAud = EDGE_STARTING_CAPITAL_AUD, cashAud = equityAud, openPositions = 0, now = Date.now(), costs = {} } = {}) {
-  const reject = reason => ({ status: "REJECTED", executable: false, simulatedOnly: true, symbol: String(symbol || "").toUpperCase(), reason });
+  const reject = reason => ({ status: "REJECTED", executable: false, simulatedOnly: true, symbol: String(symbol || "").toUpperCase(), observedAt: typeof observedAt === "string" ? observedAt : null, reason });
   if (!/^[A-Z0-9.]{2,12}$/.test(String(symbol || "").toUpperCase())) return reject("A valid ASX ticker is required.");
   const validated = validateDailyBars(bars, { source, currency, observedAt, now });
   if (!validated.valid) return reject(validated.reason);
@@ -115,11 +115,10 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
     return Math.max(bar.high - bar.low, Math.abs(bar.high - previousClose), Math.abs(bar.low - previousClose));
   });
   const atr14 = ranges.slice(-14).reduce((a, b) => a + b, 0) / 14;
-  if (!(last > sma20 && sma20 > sma50 && last > priorHigh20)) return { status: "NO_SIGNAL", executable: false, simulatedOnly: true, symbol: String(symbol).toUpperCase(), reason: "Daily trend and 20-session breakout conditions are not all satisfied." };
+  if (!(last > sma20 && sma20 > sma50 && last > priorHigh20)) return { status: "NO_SIGNAL", executable: false, simulatedOnly: true, symbol: String(symbol).toUpperCase(), observedAt: validated.observedAt, reason: "Daily trend and 20-session breakout conditions are not all satisfied." };
   const entryPrice = roundPrice(last);
   const stopPrice = roundPrice(entryPrice - 2 * atr14);
-  const targetPrice = roundPrice(entryPrice + 2 * (entryPrice - stopPrice));
-  if (stopPrice <= 0 || stopPrice >= entryPrice || targetPrice <= entryPrice) return reject("Volatility-based stop or target is invalid.");
+  if (stopPrice <= 0 || stopPrice >= entryPrice) return reject("Volatility-based stop is invalid.");
   const riskBudget = equity * EDGE_RISK_PER_TRADE_PCT;
   const maxSpend = Math.min(EDGE_MAX_POSITION_AUD, Math.max(0, cash - EDGE_MIN_CASH_RESERVE_AUD));
   const perShareRisk = entryPrice - stopPrice;
@@ -129,19 +128,49 @@ export function evaluateAsxSwingSetup({ symbol, bars, source, currency, observed
     notional = shares * entryPrice;
     buyCost = estimateAsxSideCost(notional, costs);
     sellCost = estimateAsxSideCost(shares * stopPrice, costs);
-    targetSellCost = estimateAsxSideCost(shares * targetPrice, costs);
-    if (!buyCost || !sellCost || !targetSellCost) return reject("Estimated transaction costs are invalid.");
+    if (!buyCost || !sellCost) return reject("Estimated transaction costs are invalid.");
     rawNetStopLoss = notional - shares * stopPrice + buyCost.totalAud + sellCost.totalAud;
     netStopLoss = round2(rawNetStopLoss);
     if (notional + buyCost.totalAud <= maxSpend + 0.01 && rawNetStopLoss <= riskBudget + 0.01) break;
     shares--;
   }
   if (shares < 1) return reject("No whole-share position fits the 1% net-equity risk budget and AUD 200 allocation cap after estimated fees.");
+
+  // A fixed 2R gross target cannot meet a 2:1 NET reward/risk gate after
+  // round-trip fees. Solve for the lowest four-decimal target that clears
+  // 2:1 using the same commission, GST and slippage assumptions as the ledger.
+  const requiredNetProfit = 2 * rawNetStopLoss;
+  const netTargetAt = price => {
+    const exitCost = estimateAsxSideCost(shares * price, costs);
+    return exitCost ? shares * price - notional - buyCost.totalAud - exitCost.totalAud : Number.NEGATIVE_INFINITY;
+  };
+  let lower = entryPrice;
+  let upper = entryPrice + 2 * perShareRisk;
+  let expansions = 0;
+  while (netTargetAt(upper) + 1e-9 < requiredNetProfit && expansions < 32) {
+    upper = entryPrice + (upper - entryPrice) * 2;
+    expansions++;
+  }
+  if (!Number.isFinite(upper) || netTargetAt(upper) + 1e-9 < requiredNetProfit) {
+    return reject("A finite target meeting the 2:1 net reward/risk requirement cannot be found after estimated fees.");
+  }
+  for (let i = 0; i < 64; i++) {
+    const middle = (lower + upper) / 2;
+    if (netTargetAt(middle) >= requiredNetProfit) upper = middle;
+    else lower = middle;
+  }
+  let targetPrice = Math.ceil((upper - 1e-10) * 10000) / 10000;
+  targetSellCost = estimateAsxSideCost(shares * targetPrice, costs);
+  let rawNetTargetProfit = targetSellCost ? shares * targetPrice - notional - buyCost.totalAud - targetSellCost.totalAud : Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < 3 && rawNetTargetProfit + 1e-9 < requiredNetProfit; i++) {
+    targetPrice = roundPrice(targetPrice + 0.0001);
+    targetSellCost = estimateAsxSideCost(shares * targetPrice, costs);
+    rawNetTargetProfit = targetSellCost ? shares * targetPrice - notional - buyCost.totalAud - targetSellCost.totalAud : Number.NEGATIVE_INFINITY;
+  }
   const targetValue = shares * targetPrice;
-  const rawNetTargetProfit = targetValue - notional - buyCost.totalAud - targetSellCost.totalAud;
   const netTargetProfit = round2(rawNetTargetProfit);
-  if (rawNetStopLoss <= 0 || rawNetTargetProfit <= 0 || rawNetTargetProfit + 1e-9 < 2 * rawNetStopLoss) return reject("Expected net reward after estimated costs is below the 2:1 minimum.");
-  return { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, strategy: "ASX_DAILY_TREND_BREAKOUT_V1", symbol: String(symbol).toUpperCase(), source: validated.source, currency: "AUD", observedAt: validated.observedAt, entryReference: entryPrice, stopPrice, targetPrice, shares, notionalAud: round2(notional), riskBudgetAud: round2(riskBudget), estimatedEntryCostsAud: buyCost.totalAud, estimatedNetTargetProfitAud: round2(netTargetProfit), estimatedNetStopLossAud: round2(netStopLoss), rewardRiskAfterCosts: round2(netTargetProfit / netStopLoss), assumptions: { commissionRate: costs.commissionRate ?? 0.0008, commissionMinimumAud: costs.minimumCommissionAud ?? EDGE_COMMISSION_MIN_AUD, gstRate: costs.gstRate ?? EDGE_GST_RATE, slippageBps: costs.slippageBps ?? EDGE_DEFAULT_SLIPPAGE_BPS, exitAtStopOrTarget: true }, reason: "Candidate passed deterministic screening; it is not an order or a prediction of profit." };
+  if (targetPrice <= entryPrice || rawNetStopLoss <= 0 || rawNetTargetProfit <= 0 || rawNetTargetProfit + 1e-9 < requiredNetProfit) return reject("Expected net reward after estimated costs is below the 2:1 minimum.");
+  return { status: "PAPER_CANDIDATE", executable: false, simulatedOnly: true, strategy: "ASX_DAILY_TREND_BREAKOUT_NET_RR_V2", symbol: String(symbol).toUpperCase(), source: validated.source, currency: "AUD", observedAt: validated.observedAt, entryReference: entryPrice, stopPrice, targetPrice, shares, notionalAud: round2(notional), riskBudgetAud: round2(riskBudget), estimatedEntryCostsAud: buyCost.totalAud, estimatedNetTargetProfitAud: round2(netTargetProfit), estimatedNetStopLossAud: round2(netStopLoss), rewardRiskAfterCosts: round2(netTargetProfit / netStopLoss), assumptions: { commissionRate: costs.commissionRate ?? 0.0008, commissionMinimumAud: costs.minimumCommissionAud ?? EDGE_COMMISSION_MIN_AUD, gstRate: costs.gstRate ?? EDGE_GST_RATE, slippageBps: costs.slippageBps ?? EDGE_DEFAULT_SLIPPAGE_BPS, exitAtStopOrTarget: true }, reason: "Candidate passed deterministic screening; it is not an order or a prediction of profit." };
 }
 
 export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } = {}) {

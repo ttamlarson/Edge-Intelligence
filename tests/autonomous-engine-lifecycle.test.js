@@ -99,15 +99,15 @@ test("signal screening rejects a ticker that does not close above the prior 20-s
   assert.equal(result.simulatedOnly, true);
 });
 
-test("default cost assumptions reject this synthetic setup at the after-cost 2:1 gate", () => {
+test("default cost assumptions calculate a target that clears the after-cost 2:1 gate", () => {
   const imported = parseCsv(makeCsv("BHP"));
   const bars = imported.barsBySymbol.BHP;
   const result = evaluateAsxSwingSetup({
     symbol: "BHP", bars, source: "Synthetic test fixture only", currency: "AUD",
     observedAt: bars.at(-1).timestamp, equityAud: 5000, cashAud: 500, now
   });
-  assert.equal(result.status, "REJECTED");
-  assert.match(result.reason, /2:1 minimum/);
+  assert.equal(result.status, "PAPER_CANDIDATE", result.reason);
+  assert.ok(result.rewardRiskAfterCosts >= 2);
 });
 
 test("paper lifecycle imports, screens, opens, marks, closes with stored cost assumptions and permits re-entry", () => {

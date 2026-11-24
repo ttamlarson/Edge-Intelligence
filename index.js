@@ -1,6 +1,7 @@
 import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } from "./domain.js";
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
+import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
@@ -490,6 +491,14 @@ async function handle(request, env, ctx) {
     }
     return reply(data);
   }
+  if (requestUrl.pathname === "/api/asx/autopilot" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "asx-autopilot-status");
+    return reply(await readAsxAutopilot(env));
+  }
+  if (requestUrl.pathname === "/api/asx/autopilot/scan" && request.method === "POST") {
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "asx-autopilot-scan");
+    return reply(await runAsxAutopilot(env));
+  }
   if (requestUrl.pathname === "/api/crypto/auto-paper/account" && (request.method === "GET" || request.method === "POST")) {
     await routeLimit(request.method === "POST" ? env.WRITE_LIMITER : env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
@@ -691,6 +700,7 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (env.EDGE_KV) ctx.waitUntil(runAutomatedCryptoPaper(env).catch(() => null));
+    if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
       const result = await scan(env, rules); await alertNew(env, result);

@@ -70,3 +70,20 @@
 - [ ] Run chronological out-of-sample validation and independently review costs, drawdown and trade count.
 - [ ] Complete at least 60 days of forward paper trading with immutable server-side trade/equity records.
 - [ ] Require explicit operator activation after all release gates; live order submission stays disabled until then.
+
+
+## Automated ASX paper autopilot (feature branch)
+
+- [ ] Confirm data-use rights and that the DataCedar plan covers the chosen ASX symbols.
+- [ ] Configure `ASX_AUTOPILOT_ENABLED=true`, `ASX_AUTOPILOT_SYMBOLS` (1–3 tickers), `DATACEDAR_API_KEY` as a Worker secret, and the existing `EDGE_KV` binding.
+- [ ] Call authenticated `GET /api/asx/autopilot`; confirm configuration is reported separately from verified retrieval.
+- [ ] Call authenticated `POST /api/asx/autopilot/scan`; verify actual DataCedar source, AUD denomination, daily timeframe, timestamps and returned symbol coverage.
+- [ ] Confirm repeated cron invocations within six hours are throttled and do not reprocess a daily candle.
+- [ ] Confirm open paper positions are marked only from newer daily bars and same-candle stop/target hits resolve stop-first.
+- [ ] Confirm the automated KV ledger is separate from the device-local `edge-asx-paper-v1` account and that both remain paper-only.
+- [ ] Confirm default fees/risk gates are not bypassed when candidates are rejected; no forced entries or real-money order routes exist.
+- [ ] Verify Worker scheduled logs and the deployed UI only after approved merge/deployment.
+
+- [ ] Simulate a DataCedar timeout, 401 or 429; confirm `DATA_PROVIDER_ERROR`, bounded error text and incremented failure count are persisted without advancing the successful scan cursor.
+
+- [ ] During ASX trading hours, confirm the current Sydney-date daily bar is excluded until 17:00 Sydney time (including daylight-saving changes); verify the scanner uses only the latest completed bar.
