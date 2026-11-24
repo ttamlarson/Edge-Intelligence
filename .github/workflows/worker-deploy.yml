@@ -10,6 +10,8 @@ on:
       - "au-sources.js"
       - "datacedar.js"
       - "asx-autopilot.js"
+      - "asx-ai-advisor.js"
+      - "binance-market-data.js"
       - "autonomous-engine.js"
       - "crypto-engine.js"
       - "coinspot.js"

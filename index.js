@@ -5,6 +5,7 @@ import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -413,14 +414,9 @@ async function runAutomatedCryptoPaper(env) {
         let raw;
         try { raw = JSON.parse(body); }
         catch { lastError = "INVALID_JSON_RESPONSE"; continue; }
-        if (!Array.isArray(raw) || raw.length < 220) { lastError = "INVALID_OR_INCOMPLETE_RESPONSE"; continue; }
-        const bars = raw.filter(row => Array.isArray(row) && Number(row[6]) < Date.now()).map(row => ({
-          timestamp: new Date(Number(row[0])).toISOString(), open: Number(row[1]),
-          high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5])
-        }));
-        if (bars.length < 220 || bars.some(b => ![b.open,b.high,b.low,b.close,b.volume].every(Number.isFinite) || Math.min(b.open,b.high,b.low,b.close) <= 0 || b.high < Math.max(b.open,b.close) || b.low > Math.min(b.open,b.close))) {
-          lastError = "INVALID_HOURLY_CANDLES"; continue;
-        }
+        const normalized = normalizeBinanceHourlyKlines(raw, { now: Date.now() });
+        if (!normalized.valid) { lastError = normalized.reason; continue; }
+        const bars = normalized.bars;
         const latest = bars.at(-1);
         return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {

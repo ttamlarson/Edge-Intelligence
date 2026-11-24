@@ -10,6 +10,8 @@ test("Worker deploy workflow watches every directly imported runtime module", as
     "au-sources.js",
     "datacedar.js",
     "asx-autopilot.js",
+    "asx-ai-advisor.js",
+    "binance-market-data.js",
     "autonomous-engine.js",
     "coinspot.js",
     "coinspot-paper.js",
