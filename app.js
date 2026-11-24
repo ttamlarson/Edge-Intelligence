@@ -389,7 +389,7 @@ async function loadAsxAutopilotStatus(){
   const a=await api("/api/asx/autopilot");
   const configured=a.configured===true&&Array.isArray(a.symbols)&&a.symbols.length>0;
   status.textContent=configured
-   ? "AUTOMATED PAPER SCANNER "+(a.status||"CONFIGURED")+" · "+a.symbols.join(", ")+" · scans "+(a.scanCount||0)+" · last scan "+(a.lastScanAt?formatDateTime(a.lastScanAt,"Australia/Perth"):"not yet run")+" · open positions "+(a.portfolio?.positions||[]).filter(p=>p.status==="OPEN_PAPER").length+" · AI reviewer "+(a.aiReviewConfigured?"READY":"BLOCKED · OPENAI_API_KEY missing")
+   ? "AUTOMATED PAPER SCANNER "+(a.status||"CONFIGURED")+" · "+a.symbols.join(", ")+" · scans "+(a.scanCount||0)+" · last scan "+(a.lastScanAt?formatDateTime(a.lastScanAt,"Australia/Perth"):"not yet run")+" · open positions "+(a.portfolio?.positions||[]).filter(p=>p.status==="OPEN_PAPER").length+" · AI reviewer "+(a.aiReviewConfigured?"KEY CONFIGURED · NOT VERIFIED":"BLOCKED · OPENAI_API_KEY missing")
    : "AUTOMATION NOT ENABLED · Configure ASX_AUTOPILOT_ENABLED, ASX_AUTOPILOT_SYMBOLS, DataCedar key and Worker KV before running.";
   if(a.lastError)status.textContent+=" · Last provider error: "+a.lastError;
   const p=a.performance||{};
