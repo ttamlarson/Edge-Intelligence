@@ -106,11 +106,11 @@ function validateSnapshot(value) {
 export async function readAsxAutopilot(env) {
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", configured: false, liveTradingEnabled: false };
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
-  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
+  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
   const snapshot = validateSnapshot(parsed);
-  return { ...snapshot, configured: isAutopilotConfigured(env), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
 }
 
 function isAutopilotConfigured(env) {
@@ -262,7 +262,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
     scanCount: snapshot.scanCount + 1,
     source: data.source, dataClass: data.dataClass, latestBar: data.latestBar,
-    symbols, rowsBySymbol: data.rowsBySymbol
+    symbols, rowsBySymbol: data.rowsBySymbol, aiReviewConfigured: Boolean(env.OPENAI_API_KEY)
   };
   await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(next));
   return { ...next, performance: calculateAsxPaperPerformance(portfolio) };
