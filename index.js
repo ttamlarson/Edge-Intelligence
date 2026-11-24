@@ -325,7 +325,7 @@ async function research(env, input) {
   }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST", headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
+    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6.2-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
   });
   if (response.url && new URL(response.url).hostname !== "api.openai.com") throw new HttpError(502, "AI provider redirected to an unexpected host.");
   const text = await readLimitedText(response, 1_000_000, () => new HttpError(502, "OpenAI response exceeded the size limit.")); let data;
@@ -341,7 +341,7 @@ async function research(env, input) {
   if (report.probability != null && (report.probability < 0 || report.probability > 100) || report.market_price != null && (report.market_price < 0 || report.market_price > 100)) throw new HttpError(502, "Research response probability was outside the 0–100 range.");
   report.market_price = validated.marketPrice;
   report.edge_points = validated.marketPrice === null || report.probability === null || report.probability === undefined ? null : report.probability - validated.marketPrice;
-  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6-astra", classification: "model_generated_research_probability" };
+  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6.2-astra", classification: "model_generated_research_probability" };
 }
 
 async function backtest(env, input) {
