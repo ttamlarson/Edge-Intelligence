@@ -281,11 +281,11 @@ async function loadCoinSpotMtfStrategy(syncNow=false){
  try{
   if(syncNow){
    const batch=await api("/api/crypto/coinspot/strategy/sync",{method:"POST",body:JSON.stringify({})});
-   progress.textContent="Processed "+batch.processedDate+" · next date "+batch.nextDate+" · "+(batch.markets||[]).map(x=>x.coin+": "+x.tradeCount+" trades / "+x.apiCalls+" API calls").join(" · ");
+   progress.textContent="Processed "+batch.processedDate+" · next date "+batch.nextDate+" · "+(batch.markets||[]).map(x=>x.coin+": raw "+(Number(x.rawBuyOrders||0)+Number(x.rawSellOrders||0))+" / accepted "+x.tradeCount+" trades / "+x.apiCalls+" API calls").join(" · ");
   }
   const data=await api("/api/crypto/coinspot/strategy");
   status.textContent=String(data.status||"UNKNOWN").replaceAll("_"," ");
-  if(!syncNow)progress.textContent=data.lastSyncAt?"Last history sync "+formatDateTime(data.lastSyncAt,$("auTimezone")?.value||"Australia/Perth")+" · next date "+(data.nextDate||"—"):"History backfill has not started. The Worker begins automatically when CoinSpot read-only credentials are configured.";
+  if(!syncNow)progress.textContent=data.lastSyncAt?"Last history sync "+formatDateTime(data.lastSyncAt,$("auTimezone")?.value||"Australia/Perth")+" · next date "+(data.nextDate||"—")+" · "+(data.lastBatch||[]).map(x=>x.coin+": raw "+(Number(x.rawBuyOrders||0)+Number(x.rawSellOrders||0))+" / accepted "+Number(x.tradeCount||0)+" · markets "+(x.marketsSeen||[]).join(",")).join(" · "):"History backfill has not started. The Worker begins automatically when CoinSpot read-only credentials are configured.";
   const rows=Array.isArray(data.markets)?data.markets:[];
   container.innerHTML=rows.map(m=>{
    const h=m.history||{},s=m.signal;
