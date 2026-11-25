@@ -242,3 +242,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Backfill now retries empty numeric-epoch partitions with stringified epoch seconds and millisecond epoch values, accepting only non-empty responses whose normalized trades all fall inside the exact requested UTC interval.
 
 - Production probe confirmed millisecond epoch windows return in-range trades for BTC/AUD and ETH/AUD; numeric and string seconds returned empty. Sub-day backfill now uses milliseconds first, with seconds-based fallbacks retained only for empty responses.
+
+
+## 2026-11-25 — Full-window history integrity rebuild
+
+- The 10:30 UTC production scan proved millisecond epoch partitions work: BTC/AUD recovered 1,642 valid trades and created one daily plus six four-hour candles; ETH/AUD recovered 602 trades and created one daily plus six four-hour candles. The cursor advanced to 2026-08-20 with no sync error.
+- Earlier four-day legacy batches had run under the defective parent-partition logic, so reprocessing only 2026-08-19 and 2026-08-20 could leave older gaps. Added a one-time full rebuild from the original `today - 120` start date (2026-07-28 for this run).
+- The migration clears only derived BTC/ETH candles and history trade counters, preserves the paper ledger and all safety controls, persists its marker before network requests, and replays from the start date. Expected maximum cadence: ~40 hours for the 121 inclusive dates at three CoinSpot slots/hour.
+- Regression test verifies the full rebuild starts at 2026-07-28, clears stale derived history, and leaves `liveTradingEnabled=false`.

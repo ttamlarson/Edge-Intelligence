@@ -271,12 +271,14 @@ test("CoinSpot sync rewinds legacy dates whose prior batches had raw rows but ze
  };
  try{
   const result=await __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T12:00:00.000Z");
-  assert.equal(result.processedDate,"2026-08-19");
+  assert.equal(result.processedDate,"2026-07-28");
   const saved=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(saved.historyIntegrityRewindFrom,"2026-08-20");
-  assert.equal(saved.lastProcessedDate,"2026-08-19");
-  assert.equal(saved.lastBatchDate,"2026-08-19");
-  assert.equal(saved.nextDate,"2026-08-20");
+  assert.equal(saved.historyIntegrityFullRewindFrom,"2026-07-28");
+  assert.ok(saved.historyIntegrityFullRewindAt);
+  assert.equal(saved.lastProcessedDate,"2026-07-28");
+  assert.equal(saved.lastBatchDate,"2026-07-28");
+  assert.equal(saved.nextDate,"2026-07-29");
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
@@ -336,6 +338,50 @@ test("CoinSpot backfill uses validated millisecond-epoch partitions when seconds
   assert.equal(saved.markets.ETH.fourHourCandles.length,2);
   assert.equal(saved.lastProcessedDate,"2026-08-19");
   assert.equal(saved.nextDate,"2026-08-20");
+  assert.equal(saved.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("CoinSpot legacy integrity marker rebuilds the entire original 120-day window once",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const variants=[{format:"epoch"},{format:"epoch-string"},{format:"epoch-ms"}];
+ const probeMarket=coin=>({coin,pair:coin+"/AUD",readOnlyHistory:{partitionHistory:[
+  {startAt:"2026-11-25T00:00:00.000Z",endAt:"2026-11-25T12:00:00.000Z",variants},
+  {startAt:"2026-11-25T12:00:00.000Z",endAt:"2026-11-26T00:00:00.000Z",variants}
+ ]}});
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
+  nextDate:"2026-08-20",lastProcessedDate:"2026-08-19",lastBatchDate:"2026-08-19",
+  historyIntegrityRewindFrom:"2026-08-20",historyIntegrityRewindAt:"2026-11-25T10:00:00.000Z",
+  lastProviderProbeAt:"2026-11-25T10:15:00.000Z",
+  providerProbe:{markets:[probeMarket("BTC"),probeMarket("ETH")]},
+  markets:{
+   BTC:{dailyCandles:[{timestamp:1}],fourHourCandles:[{timestamp:1}],tradesFetched:1642,lastHistoryDate:"2026-08-19"},
+   ETH:{dailyCandles:[{timestamp:1},{timestamp:2},{timestamp:3}],fourHourCandles:Array.from({length:18},(_,i)=>({timestamp:i})),tradesFetched:898,lastHistoryDate:"2026-08-19"}
+  },
+  lastBatch:[{coin:"BTC",tradeCount:1642,rawBuyOrders:2769,rawSellOrders:2769},{coin:"ETH",tradeCount:602,rawBuyOrders:844,rawSellOrders:844}],
+  liveTradingEnabled:false
+ }));
+ globalThis.fetch=async(url)=>{
+  const target=String(url);
+  if(target.endsWith("/orders/market/completed")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
+  throw new Error("Unexpected CoinSpot URL: "+target);
+ };
+ try{
+  const result=await __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T10:45:00.000Z");
+  assert.equal(result.processedDate,"2026-07-28");
+  const saved=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  assert.equal(saved.historyIntegrityFullRewindFrom,"2026-07-28");
+  assert.ok(saved.historyIntegrityFullRewindAt);
+  assert.equal(saved.lastProcessedDate,"2026-07-28");
+  assert.equal(saved.nextDate,"2026-07-29");
+  assert.equal(saved.markets.BTC.dailyCandles.length,0);
+  assert.equal(saved.markets.BTC.fourHourCandles.length,0);
+  assert.equal(saved.markets.BTC.tradesFetched,0);
+  assert.equal(saved.markets.ETH.dailyCandles.length,0);
+  assert.equal(saved.markets.ETH.fourHourCandles.length,0);
+  assert.equal(saved.markets.ETH.tradesFetched,0);
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });

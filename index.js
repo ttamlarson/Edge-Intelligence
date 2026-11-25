@@ -749,8 +749,28 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     state.lastProcessedDate = shiftUtcDate(previousProcessedDate, -2);
     state.nextDate = shiftUtcDate(previousProcessedDate, -1);
     state.status = "BACKFILLING";
-    // Persist the one-time rewind before any upstream call so a retry after a
-    // provider failure cannot repeatedly move the cursor further backwards.
+    await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+  }
+  if (state.historyIntegrityRewindFrom && !state.historyIntegrityFullRewindAt) {
+    const fullStartDate = shiftUtcDate(today, -120);
+    state.historyIntegrityFullRewindFrom = fullStartDate;
+    state.historyIntegrityFullRewindAt = new Date(clock).toISOString();
+    state.lastProcessedDate = shiftUtcDate(fullStartDate, -1);
+    state.nextDate = fullStartDate;
+    state.lastBatchDate = state.historyIntegrityRewindFrom;
+    state.lastBatch = [];
+    state.lastSyncAt = null;
+    state.status = "BACKFILLING";
+    state.markets = Object.fromEntries(COINSPOT_MTF_COINS.map(coin => [coin, {
+      ...(state.markets[coin] || {}),
+      dailyCandles: [],
+      fourHourCandles: [],
+      tradesFetched: 0,
+      lastHistoryDate: null,
+      lastSyncAt: null
+    }]));
+    // Rebuild the full original window: earlier legacy batches may also have
+    // advanced despite incomplete capped responses. Persist before any fetch.
     await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
