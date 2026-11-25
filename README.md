@@ -206,3 +206,6 @@ When a numeric epoch partition is empty, the backfill now tries stringified epoc
 
 
 Production validation on 2026-11-25 confirmed Unix milliseconds return correctly time-bounded sub-day CoinSpot records, while seconds-based formats returned empty arrays. Sub-day history now uses milliseconds first, retaining seconds-based fallbacks only when the millisecond response is empty.
+
+
+Because early legacy batches may have advanced with incomplete history, the first integrity migration performs a one-time rebuild of the original 120-day window from `today - 120`. It clears only the derived CoinSpot candle cache and trade counters—not the paper account or risk settings—then replays each date using validated millisecond partitions. The migration marker is persisted before upstream calls and cannot repeat.
