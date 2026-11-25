@@ -20,7 +20,10 @@ export function coinSpotHistoryRangeParams(startMs, endMs, format = "date") {
       enddate: Math.floor((endMs - 1) / 1000)
     };
   }
-  throw new Error("CoinSpot history date format must be date or epoch.");
+  if (format === "epoch-ms") {
+    return { startdate: startMs, enddate: endMs - 1 };
+  }
+  throw new Error("CoinSpot history date format must be date, epoch or epoch-ms.");
 }
 
 
