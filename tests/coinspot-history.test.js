@@ -57,6 +57,9 @@ test("builds documented UTC-date and exact Unix-epoch CoinSpot history ranges", 
  assert.deepEqual(coinSpotHistoryRangeParams(start, halfDayEnd, "epoch"), {
   startdate: Math.floor(start / 1000), enddate: Math.floor((halfDayEnd - 1) / 1000)
  });
+ assert.deepEqual(coinSpotHistoryRangeParams(start, halfDayEnd, "epoch-ms"), {
+  startdate: start, enddate: halfDayEnd - 1
+ });
  assert.throws(() => coinSpotHistoryRangeParams(end, start, "date"), /Invalid CoinSpot history date range/);
- assert.throws(() => coinSpotHistoryRangeParams(start, end, "milliseconds"), /format must be date or epoch/);
+ assert.throws(() => coinSpotHistoryRangeParams(start, end, "milliseconds"), /format must be date, epoch or epoch-ms/);
 });
