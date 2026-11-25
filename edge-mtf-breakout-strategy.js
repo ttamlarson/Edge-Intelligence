@@ -22,7 +22,7 @@ function validateCandles(candles, interval, label, minimum) {
     const timestamp = Date.parse(candle.timestamp);
     const open = finite(candle.open), high = finite(candle.high), low = finite(candle.low);
     const close = finite(candle.close), volume = finite(candle.volume);
-    if (!Number.isFinite(timestamp) || timestamp - previous !== interval ||
+    if (!Number.isFinite(timestamp) || (previous !== -Infinity && timestamp - previous !== interval) ||
         ![open, high, low, close, volume].every(Number.isFinite) ||
         Math.min(open, high, low, close) <= 0 || high < Math.max(open, close) ||
         low > Math.min(open, close) || high < low || volume < 0) {
