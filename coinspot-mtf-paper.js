@@ -37,7 +37,7 @@ function closePosition(a, bid, now, reason) {
     signalAt:p.signalAt,entryPrice:p.entryPrice,exitPrice:exit,quantity:p.quantity,
     entryFeeAud:p.entryFeeAud,exitFeeAud:round(exitFee),pnlAud:round(pnl),reason,
     strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
-  a.closedTrades=a.closedTrades.slice(-200); a.openPosition=null;
+  a.closedTrades=a.closedTrades.slice(-200); a.openPosition=null; a.unrealizedPnlAud=0;
   a.dailyLossAud=round(a.closedTrades.filter(t=>t.closedAt.slice(0,10)===now.slice(0,10))
     .reduce((sum,t)=>sum+Math.max(0,-t.pnlAud),0));
 }
