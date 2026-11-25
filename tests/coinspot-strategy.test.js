@@ -32,7 +32,8 @@ test("crypto walk-forward rejects future, incomplete and discontinuous hourly da
  assert.throws(()=>walkForwardCoinSpotTrend({
   candles:shifted,market:"BTCUSDT",source:"fixture",now:Date.parse("2026-11-25T07:30:00.000Z")
  }),/incomplete/i);
- const gap=shifted.map(x=>({...x}));gap[100].timestamp=new Date(Date.parse(gap[100].timestamp)+3600000).toISOString();
+ const gap=shifted.map(x=>({...x}));
+ for(let i=100;i<gap.length;i++)gap[i].timestamp=new Date(Date.parse(gap[i].timestamp)+3600000).toISOString();
  assert.throws(()=>walkForwardCoinSpotTrend({
   candles:gap,market:"BTCUSDT",source:"fixture",now:Date.parse("2026-11-25T08:05:00.000Z")
  }),/contiguous hourly/i);
