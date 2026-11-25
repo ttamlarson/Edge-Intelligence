@@ -228,3 +228,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Added a one-time legacy-state migration: when an old batch has raw rows but zero accepted trades and no `lastBatchDate` marker, rewind the cursor to the day before the last processed date. This replays the suspect date and the previously skipped final date in order.
 - Persist a rewind marker before any provider request so a timeout cannot repeatedly move the cursor backwards. Every successful sync now records `lastBatchDate`.
 - Added regression coverage for the exact production-shaped legacy state and verified the cursor replays 2026-08-19 first without enabling live trading.
+
+
+## 2026-11-25 — Isolate CoinSpot scheduled workload
+
+- The 10:00 UTC production scan confirmed the daily partition probe plus Binance's ten-symbol scan could still exceed the Worker invocation's 50-subrequest ceiling. The probe recorded BTC/AUD's full-day history as valid but both 12-hour epoch windows as empty; ETH/AUD diagnostics were interrupted by the same subrequest limit.
+- Isolated scheduled workloads: UTC :00 runs Binance/ASX/prediction scans; UTC :15, :30 and :45 run CoinSpot MTF alone. This preserves the other research engines while giving CoinSpot three daily-backfill slots per hour (one UTC day per 20-minute average slot; ~40 hours for 120 days, ~32.3 hours for the current 97-day backlog).
+- Added deterministic dispatch tests for all quarter-hour slots and missing CoinSpot credentials.
+- Remaining data blocker: numeric epoch sub-day filters returned zero rows despite valid full-day BTC/AUD history. Next diagnostic pass must test string-epoch and millisecond-epoch representations before accepting any historical candles.
