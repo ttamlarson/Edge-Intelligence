@@ -440,13 +440,3 @@ $("asxAutoScanBtn")?.addEventListener("click",async()=>{
 });
 renderAsxDesk();
 loadAsxAutopilotStatus();
- }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
-}
-$("asxAutoScanBtn")?.addEventListener("click",async()=>{
- const button=$("asxAutoScanBtn"),status=$("asxAutoStatus");button.disabled=true;button.textContent="Running paper scan…";
- try{const result=await api("/api/asx/autopilot/scan",{method:"POST",body:JSON.stringify({})});status.textContent=result.message||("Automated paper scan "+(result.status||"completed")+" · "+(result.symbols||[]).join(", "));await loadAsxAutopilotStatus();}
- catch(error){status.textContent="Automated paper scan failed: "+error.message}
- finally{button.disabled=false;button.textContent="Run automated paper scan now"}
-});
-renderAsxDesk();
-loadAsxAutopilotStatus();
