@@ -598,7 +598,9 @@ async function probeCoinSpotHistory(env, coin, clock) {
     usedFormat = format;
     if (candidate.buyorders.length + candidate.sellorders.length > 0) break;
   }
-  const trades = normalizeCoinSpotCompletedOrders({ coin, payload });
+  const normalizedTrades = normalizeCoinSpotCompletedOrders({ coin, payload });
+  const trades = normalizedTrades.filter(trade => trade.timestamp >= startMs && trade.timestamp < endMs);
+  const outOfRangeTrades = normalizedTrades.length - trades.length;
   const marketsSeen = [...new Set([...payload.buyorders, ...payload.sellorders]
     .map(row => String(row?.market || "")).filter(Boolean))].slice(0, 6);
   const midpoint = startMs + 12 * 60 * 60 * 1000;
@@ -629,6 +631,7 @@ async function probeCoinSpotHistory(env, coin, clock) {
     rawBuyOrders: payload.buyorders.length,
     rawSellOrders: payload.sellorders.length,
     validAudTrades: trades.length,
+    outOfRangeTrades,
     sampleOrderAt: trades.length ? new Date(trades.at(-1).timestamp).toISOString() : null,
     marketsSeen, partitionHistory
   };
