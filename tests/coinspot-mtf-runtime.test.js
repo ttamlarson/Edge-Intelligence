@@ -313,3 +313,14 @@ test("CoinSpot sync rewinds legacy dates whose prior batches had raw rows but ze
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
+
+
+test("CoinSpot MTF cron slots are isolated from other scheduled provider workloads",()=>{
+ const env={EDGE_KV:{},COINSPOT_READONLY_KEY:"read-only",COINSPOT_READONLY_SECRET:"read-only-secret"};
+ const at=minute=>({scheduledTime:Date.parse("2026-11-25T09:"+String(minute).padStart(2,"0")+":00.000Z")});
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(0),env),false);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(15),env),true);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(30),env),true);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(45),env),true);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(15),{EDGE_KV:{},COINSPOT_READONLY_KEY:"",COINSPOT_READONLY_SECRET:""}),false);
+});
