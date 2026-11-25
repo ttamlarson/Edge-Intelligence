@@ -82,3 +82,21 @@ test("AI holdout baseline is estimated only from earlier reference outcomes", ()
   assert.equal(result.outOfSample.brierScore, 0.36);
   assert.equal(result.outOfSample.brierSkillScore, 0.64);
 });
+
+
+test("AI calibration never pools outcomes across different model versions", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => {
+    const row = trade(i, 0.6, i % 2 === 0);
+    row.aiReview.model = i < 20 ? "model-a" : "model-b";
+    return row;
+  });
+  const result = calculateAsxAiCalibration(rows, {
+    holdoutFraction: 0.25, minimumReferenceSamples: 10, minimumOutOfSampleSamples: 5
+  });
+  assert.equal(result.status, "MIXED_MODEL_VERSIONS_SEPARATE_DIAGNOSTICS");
+  assert.equal(result.outOfSample, null);
+  assert.equal(result.outOfSampleSampleCount, 0);
+  assert.equal(result.modelDiagnostics.length, 2);
+  assert.deepEqual(result.modelDiagnostics.map(item => item.model), ["model-a", "model-b"]);
+  assert.ok(result.modelDiagnostics.every(item => item.outOfSampleSampleCount === 5));
+});
