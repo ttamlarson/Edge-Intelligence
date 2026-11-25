@@ -163,3 +163,9 @@
 - [ ] Confirm sub-day millisecond epoch queries return valid in-range trades before any seconds-based fallback is attempted.
 
 - [ ] Verify the one-time full-history migration resets only derived BTC/ETH candle caches and trade counters, preserves the paper ledger, and begins at `today - 120` exactly once.
+
+
+## CoinSpot MTF ledger paper-only marker
+- [ ] Confirm persisted MTF account reports `paperOnly: true` and `liveTradingEnabled: false`.
+- [ ] Confirm a legacy account with no `paperOnly` marker is upgraded on its next scan.
+- [ ] Confirm an explicit `paperOnly: false` ledger is rejected without resetting cash, positions or trade history.
