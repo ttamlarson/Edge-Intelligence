@@ -45,7 +45,7 @@ test("AI calibration excludes manual exits, invalid provenance and duplicate rev
   const duplicate = trade(3, 0.7, true);
   duplicate.aiReview.reviewId = valid.aiReview.reviewId;
   const result = calculateAsxAiCalibration([valid, manual, invalid, duplicate], {
-    holdoutFraction: 0.25, minimumOutOfSampleSamples: 1
+    holdoutFraction: 0.25, minimumOutOfSampleSamples: 2
   });
   assert.equal(result.totalEligibleTrades, 1);
   assert.equal(result.manualExitExcludedCount, 1);
