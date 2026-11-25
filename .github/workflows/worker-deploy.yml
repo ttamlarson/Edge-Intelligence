@@ -18,6 +18,8 @@ on:
       - "autonomous-engine.js"
       - "crypto-engine.js"
       - "coinspot.js"
+      - "coinspot-history.js"
+      - "edge-mtf-breakout-strategy.js"
       - "coinspot-paper.js"
       - "crypto-auto-paper.js"
       - "coinspot-strategy.js"
