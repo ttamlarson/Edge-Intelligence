@@ -437,7 +437,7 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
         return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {
         lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";
-        lastErrorDetail = String(error?.message || error?.name || "Provider request failed").replace(/[\\r\\n\\t]+/g, " ").replace(/Bearer\\s+\\S+/gi, "Bearer [redacted]").replace(/(api[_-]?key|secret|token)\\s*[:=]\\s*\\S+/gi, "$1=[redacted]").slice(0, 160);
+        lastErrorDetail = String(error?.message || error?.name || "Provider request failed").replace(/[\r\n\t]+/g, " ").replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/(api[_-]?key|secret|token)\s*[:=]\s*\S+/gi, "$1=[redacted]").slice(0, 160);
       }
     }
     return { symbol, status: "UNAVAILABLE", errorCode: lastError, errorDetail: lastErrorDetail, message: "All configured public market-data endpoints failed." };
