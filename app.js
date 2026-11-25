@@ -40,7 +40,7 @@ function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{toas
 function money(n,currency=null){return formatMoney(n,currency)}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
+function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount();loadCoinSpotMtfStrategy()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.page)));
 document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.goto)));
 $("dismissNotice").onclick=()=>{$("dismissNotice").closest(".notice").remove()};
@@ -257,6 +257,36 @@ async function loadCoinSpotMarkets(){
   status.textContent="Market data unavailable";
  }finally{if(button){button.disabled=false;button.textContent="Refresh market data"}}
 }
+async function loadCoinSpotMtfStrategy(syncNow=false){
+ const panel=$("coinSpotMtfPanel"),button=$("coinSpotMtfSyncBtn"),status=$("coinSpotMtfStatus"),progress=$("coinSpotMtfProgress"),container=$("coinSpotMtfMarkets");
+ if(!panel||!status||!container)return;
+ if(button){button.disabled=true;button.textContent=syncNow?"Syncing CoinSpot…":"Sync next history day"}
+ try{
+  if(syncNow){
+   const batch=await api("/api/crypto/coinspot/strategy/sync",{method:"POST",body:JSON.stringify({})});
+   progress.textContent="Processed "+batch.processedDate+" · next date "+batch.nextDate+" · "+(batch.markets||[]).map(x=>x.coin+": "+x.tradeCount+" trades / "+x.apiCalls+" API calls").join(" · ");
+  }
+  const data=await api("/api/crypto/coinspot/strategy");
+  status.textContent=String(data.status||"UNKNOWN").replaceAll("_"," ");
+  if(!syncNow)progress.textContent=data.lastSyncAt?"Last history sync "+formatDateTime(data.lastSyncAt,$("auTimezone")?.value||"Australia/Perth")+" · next date "+(data.nextDate||"—"):"History backfill has not started. The Worker begins automatically when CoinSpot read-only credentials are configured.";
+  const rows=Array.isArray(data.markets)?data.markets:[];
+  container.innerHTML=rows.map(m=>{
+   const h=m.history||{},s=m.signal;
+   const ready=Number(h.dailyCandles)>=110&&Number(h.fourHourCandles)>=210;
+   const quote=m.quote;
+   const signalLabel=s?.status==="BUY_CANDIDATE_PAPER_ONLY"?"PAPER ENTRY CANDIDATE":String(m.signalStatus||"WAITING").replaceAll("_"," ");
+   const details=quote?"Bid "+money(quote.bid,"AUD")+" · Ask "+money(quote.ask,"AUD")+" · Spread "+Number(quote.spreadBps||0).toFixed(1)+" bps":"Live quote withheld until validated history is warm";
+   const checks=s?Object.entries(s.checks||{}).map(([k,v])=>k+": "+(v?"PASS":"FAIL")).join(" · "):m.signalError||"Awaiting validated candles";
+   return '<article class="integration"><b>'+esc(m.pair)+'</b><small>'+esc(details)+'</small><small>Daily candles '+Number(h.dailyCandles||0)+'/110 · 4h candles '+Number(h.fourHourCandles||0)+'/210</small><small>Trades collected '+Number(h.tradesFetched||0)+' · last history day '+esc(h.lastHistoryDate||"—")+'</small><em>'+esc(signalLabel)+'</em><small>'+esc(checks)+'</small><small>Execution: no orders · live trading disabled</small></article>';
+  }).join("")||'<div class="empty">CoinSpot history is not available yet.</div>';
+  if(data.status==="BACKFILLING")status.textContent="BACKFILLING · HISTORICAL DATA";
+  else if(data.status==="COLLECTING_LIVE_DAY")status.textContent="COLLECTING CURRENT DAY · CHECKING SIGNAL READINESS";
+ }catch(error){
+  status.textContent="COINSPOT STRATEGY DATA UNAVAILABLE";
+  progress.textContent=error.message;
+  container.innerHTML='<div class="empty">'+esc(error.message)+' Check the CoinSpot Read Only key and Worker deployment.</div>';
+ }finally{if(button){button.disabled=false;button.textContent="Sync next history day"}}
+}
 async function loadAutomatedCryptoPaper(runNow=false){
  const panel=$("cryptoAutoPaperPanel");if(!panel)return;
  const button=$("cryptoAutoPaperRefresh");if(button){button.disabled=true;button.textContent=runNow?"Scanning markets…":"Loading…"}
@@ -286,6 +316,7 @@ async function openCoinSpotPaper(coin){const buttons=[...document.querySelectorA
 async function closeCoinSpotPaper(){const b=$("cryptoPaperCloseBtn");b.disabled=true;try{await api("/api/crypto/coinspot/paper/close",{method:"POST",body:JSON.stringify({})});toast("Paper position closed at current CoinSpot bid.");await loadCoinSpotPaper();}catch(e){toast("Paper close failed: "+e.message);b.disabled=false;}}
 async function searchMarkets(cursor=null){const q=$("marketSearch").value.trim(),platform=$("venueFilter").value;const body={q,platform:platform==="all"?undefined:platform,limit:40,...(cursor?{cursor}:{})};$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">Loading market data...</td></tr>`;try{const data=await api("/api/markets?"+new URLSearchParams(Object.entries(body).filter(([,v])=>v!==undefined)));const rows=(data.markets||[]).map(normalize);markets=rows;nextMarketCursor=data.next_cursor||null;$("marketRows").innerHTML=rows.length?rows.map(m=>`<tr><td><div class="table-market">${esc(m.title)}</div><div class="table-sub">${esc(m.id)} | ${esc(m.quoteType||"quote type unverified")} | ${m.observedAt?esc(formatDateTime(m.observedAt,$("auTimezone")?.value)):"time unknown"} | ${esc(m.freshness||"freshness unknown")}</div></td><td>${esc(venueLabel(m.platform))}<div class="table-sub">jurisdiction: ${esc(m.raw?.jurisdiction||"unverified")}</div></td><td>${m.yes==null?"unavailable":m.yes.toFixed(1)+"%"}</td><td>${m.volume?.amount!=null?esc(money(m.volume.amount,m.volume.currency)):"Currency unavailable"}</td><td><button class="small-btn" data-watch="${esc(m.id)}">Save</button></td></tr>`).join(""):`<tr><td colspan="5" class="empty">No markets returned for these filters.</td></tr>`;const next=$("marketNext");if(next){next.hidden=!nextMarketCursor;next.disabled=false}bindWatch();$("connectionText").textContent="Provider response received"}catch(e){nextMarketCursor=null;$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">${esc(e.message)} Configure the backend and confirm credentials and venue access.</td></tr>`;if($("marketNext"))$("marketNext").hidden=true}}
 if($("cryptoRefreshBtn"))$("cryptoRefreshBtn").onclick=loadCoinSpotMarkets;
+$("coinSpotMtfSyncBtn")?.addEventListener("click",()=>loadCoinSpotMtfStrategy(true));
 $("cryptoAutoPaperRefresh")?.addEventListener("click",()=>loadAutomatedCryptoPaper(true));
 loadAutomatedCryptoPaper();
 $("coinSpotAccountRefresh")?.addEventListener("click",loadCoinSpotAccount);
