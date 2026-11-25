@@ -414,7 +414,8 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
   // fail independently and incorrectly mark an otherwise healthy market offline.
   const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/", "https://api4.binance.com/api/v3/"];
   const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
-    let lastError = "NO_PROVIDER_RESPONSE";\n    let lastErrorDetail = null;
+    let lastError = "NO_PROVIDER_RESPONSE";
+    let lastErrorDetail = null;
     for (const base of hosts) {
       try {
         const options = { headers: { Accept: "application/json" } };
@@ -435,7 +436,8 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
         const latest = bars.at(-1);
         return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {
-        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";\n        lastErrorDetail = String(error?.message || error?.name || "Provider request failed").replace(/[\\r\\n\\t]+/g, " ").replace(/Bearer\\s+\\S+/gi, "Bearer [redacted]").replace(/(api[_-]?key|secret|token)\\s*[:=]\\s*\\S+/gi, "$1=[redacted]").slice(0, 160);
+        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";
+        lastErrorDetail = String(error?.message || error?.name || "Provider request failed").replace(/[\\r\\n\\t]+/g, " ").replace(/Bearer\\s+\\S+/gi, "Bearer [redacted]").replace(/(api[_-]?key|secret|token)\\s*[:=]\\s*\\S+/gi, "$1=[redacted]").slice(0, 160);
       }
     }
     return { symbol, status: "UNAVAILABLE", errorCode: lastError, errorDetail: lastErrorDetail, message: "All configured public market-data endpoints failed." };
