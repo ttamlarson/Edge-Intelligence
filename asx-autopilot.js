@@ -159,7 +159,7 @@ export function rankAsxCandidates(items) {
   });
 }
 
-export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch } = {}) {
+export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
   const scannedAt = iso(now);
   const nowMs = Date.parse(scannedAt);
   if (env?.ASX_AUTOPILOT_ENABLED !== "true") return { status: "DISABLED", scannedAt, liveTradingEnabled: false, message: "Set ASX_AUTOPILOT_ENABLED=true only after confirming DataCedar access and data-use rights." };
@@ -179,7 +179,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   }
   let data;
   try {
-    data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
+    data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt), timeoutMs });
   } catch (error) {
     const lastError = String(error?.message || "DataCedar request failed.").slice(0, 240);
     const failed = {
