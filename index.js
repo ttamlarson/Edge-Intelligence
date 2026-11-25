@@ -526,18 +526,21 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
     let quote=null,signal=null,signalError=null;
+    const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
+    const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
+    if(daily.length<110||fourHour.length<210){
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError:null,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
     try {
       const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
       const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
       if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
       quote={pair:coin+"/AUD",bid,ask,last,spreadBps:Number(((ask-bid)/ask*10000).toFixed(2)),retrievedAt:new Date(clock).toISOString()};
-      const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
-      const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
       const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
       const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
-      if(daily.length<110||fourHour.length<210) signalError="WARMUP_REQUIRED";
-      else if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
+      if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
       else {
         try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
         catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
