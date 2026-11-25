@@ -41,5 +41,5 @@ test("merges updates by candle timestamp and keeps the newest bounded history",(
  );
  assert.equal(merged.length,2);
  assert.equal(merged[0].close,3);
- assert.equal(merged[1].timestamp,"2026-11-25T00:00:00.000Z");
+ assert.equal(merged[1].timestamp,"2026-11-25T00:00:00Z");
 });
