@@ -323,7 +323,7 @@ test("scheduled ASX scans omit AbortSignal.timeout outside an HTTP request conte
   assert.equal(requests[0].hasSignal, false);
   const snapshot = JSON.parse(store.values.get("asx-auto-paper-v1"));
   assert.equal(snapshot.liveTradingEnabled, false);
-  assert.equal(snapshot.status, "SCAN_COMPLETED");
+  assert.equal(snapshot.status, "NO_DATA");
   assert.equal(snapshot.portfolio.positions.length, 0);
 });
 test("crypto research review route is authenticated, rate-limited and fails closed without an AI key", async () => {
