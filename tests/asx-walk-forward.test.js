@@ -129,3 +129,40 @@ test("ASX walk-forward does not let future bars change an earlier fold result", 
   });
   assert.deepEqual(second.folds[0], first.folds[0]);
 });
+
+
+test("ASX walk-forward rejects future and unfinished current-session daily bars", () => {
+  const bars = makeBars();
+  bars[bars.length - 1] = {
+    ...bars.at(-1), timestamp: "2026-11-25T00:00:00.000Z"
+  };
+  assert.throws(() => walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    now: Date.parse("2026-11-24T23:00:00.000Z")
+  }), /future-dated/i);
+  assert.throws(() => walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    now: Date.parse("2026-11-25T02:00:00.000Z")
+  }), /incomplete/i);
+  const completed = walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    now: Date.parse("2026-11-25T06:30:00.000Z"),
+    startingCapitalAud: 5000, costs: {
+      commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0
+    }
+  });
+  assert.equal(completed.data.lastBarAt, "2026-11-25T00:00:00.000Z");
+  assert.equal(completed.asOf, "2026-11-25T06:30:00.000Z");
+});
+
+test("ASX walk-forward excludes an unavailable buy-and-hold benchmark when no whole share fits", () => {
+  const result = walkForwardAsxStrategy({
+    symbol: "BHP", bars: makeBars(), source: "Synthetic test fixture only",
+    startingCapitalAud: 100, costs: {
+      commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0
+    }
+  });
+  assert.ok(result.folds.every(fold => fold.benchmark.status === "NO_BENCHMARK_POSITION"));
+  assert.ok(result.folds.every(fold => fold.benchmark.returnPct === null));
+  assert.equal(result.summary.meanBenchmarkReturnPct, null);
+});
