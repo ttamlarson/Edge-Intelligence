@@ -203,3 +203,6 @@ The daily diagnostic probe compares three sub-day timestamp representations—nu
 
 
 When a numeric epoch partition is empty, the backfill now tries stringified epoch seconds and millisecond epoch values in sequence. It adopts the first non-empty representation only when every normalized trade falls inside the requested UTC window; errors or out-of-range data fail closed.
+
+
+Production validation on 2026-11-25 confirmed Unix milliseconds return correctly time-bounded sub-day CoinSpot records, while seconds-based formats returned empty arrays. Sub-day history now uses milliseconds first, retaining seconds-based fallbacks only when the millisecond response is empty.

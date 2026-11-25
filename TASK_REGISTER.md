@@ -240,3 +240,5 @@ Updated after local implementation and automated verification on `edge-productio
 - Added diagnostic comparisons for numeric epoch seconds, stringified epoch seconds and epoch milliseconds across both 12-hour windows. These alternate representations are not used for candle generation until a probe confirms in-range trades.
 
 - Backfill now retries empty numeric-epoch partitions with stringified epoch seconds and millisecond epoch values, accepting only non-empty responses whose normalized trades all fall inside the exact requested UTC interval.
+
+- Production probe confirmed millisecond epoch windows return in-range trades for BTC/AUD and ETH/AUD; numeric and string seconds returned empty. Sub-day backfill now uses milliseconds first, with seconds-based fallbacks retained only for empty responses.
