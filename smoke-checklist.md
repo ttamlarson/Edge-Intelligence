@@ -99,3 +99,26 @@
 - Close an AI-reviewed position through the automated daily-bar stop/target path and confirm the review metadata survives in trade history. Confirm manual closes are excluded from AI calibration diagnostics.
 - Confirm the AI calibration report uses the latest chronological holdout, reports Brier/reliability diagnostics, and remains explicitly uncalibrated / not model-trained.
 - Confirm all paper controls remain authoritative: 1% risk budget, AUD 200 position cap, AUD 100 cash reserve, fees and no live order route.
+
+
+## EDGE MTF Donchian breakout candidate
+
+- [ ] Verify the multi-timeframe engine rejects incomplete, non-contiguous and invalid daily/four-hour OHLCV series.
+- [ ] Confirm daily EMA100, four-hour EMA50/EMA200 and positive EMA200 slope use only completed candles.
+- [ ] Confirm Donchian 20/55/100 highs exclude the signal candle and at least two breakout votes are required.
+- [ ] Confirm spread above 50 bps, insufficient volume and out-of-range ATR/price all produce NO_TRADE.
+- [ ] Verify sizing respects 0.5% risk and 25% allocation ceilings after fees and venue minimums.
+- [ ] Confirm stop/trailing/time exits use conservative stop-first and gap handling in the eventual backtester.
+- [ ] Confirm the module never submits orders and liveTradingEnabled remains false.
+- [ ] Do not promote to paper execution until verified CoinSpot AUD daily/four-hour data, venue costs, next-quote fills, chronological out-of-sample tests and forward paper evidence are available.
+
+
+## CoinSpot-native MTF strategy integration
+
+- [ ] Verify Read Only API key can access `/orders/market/completed` for BTC/AUD and ETH/AUD.
+- [ ] Verify HMAC signature and nonce ordering on repeated historical requests.
+- [ ] Verify historical fetch splits saturated windows and never saves truncated results.
+- [ ] Confirm candles are derived only from actual CoinSpot AUD completed orders; missing 4h/daily intervals are not filled.
+- [ ] Confirm 110 completed daily and 210 completed 4h candles plus freshness and spread checks are required before any candidate signal.
+- [ ] Confirm strategy status is authenticated, rate-limited, and never places an exchange order.
+- [ ] Confirm scheduled backfill advances one UTC day per 15-minute cron and preserves history on errors.

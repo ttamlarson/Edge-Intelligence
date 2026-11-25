@@ -161,3 +161,13 @@ No market data is generated or substituted. The walk-forward panel uses only the
 
 
 ASX autopilot candidate selection is now risk-aware and deterministic across the configured ticker set. AI-approved candidates are ranked lexicographically by higher fee-adjusted net reward/risk, higher estimated net target profit, then lower consumption of the fixed risk budget; ticker is the final tie-breaker. The uncalibrated AI win-probability estimate is deliberately excluded from ranking until a sufficiently large chronological outcome sample exists. Portfolio controls still decide whether any ranked candidate can actually open.
+
+
+## Multi-timeframe crypto breakout research candidate
+
+`edge-mtf-breakout-strategy.js` implements a deterministic, long-only signal and risk-sizing engine for the separately documented EDGE MTF Donchian Ensemble V1. It requires verified, contiguous completed daily and four-hour OHLCV series; checks the daily EMA100 regime, four-hour EMA50/EMA200 trend and slope, two-of-three prior Donchian breakouts, spread, volume and volatility; and exposes risk sizing and exit calculations. The module is deliberately isolated from exchange execution: it creates no orders, is not wired to live trading, and returns paper-only candidate signals. Tests use synthetic fixtures solely to exercise code paths, not to claim strategy performance. Production use still requires a real multi-timeframe data adapter, fee/slippage-aware chronological backtester, CoinSpot quote/fill reconciliation and forward paper validation.
+
+
+## CoinSpot-native MTF breakout data connection
+
+The MTF Donchian research route uses CoinSpot Read Only V2 `/orders/market/completed` history for BTC/AUD and ETH/AUD, with the existing authenticated HMAC-SHA512 request path and strictly increasing nonce queue. Actual completed market orders are aggregated into UTC 4-hour and daily OHLCV bars; no empty candles are fabricated. A bounded recursive time-window fetch splits potentially truncated responses, and the scheduled Worker advances a one-day historical backfill per 15-minute run. The authenticated status route is `GET /api/crypto/coinspot/strategy`; an authenticated manual one-day sync is `POST /api/crypto/coinspot/strategy/sync`. Signals remain withheld until sufficient fresh contiguous CoinSpot history and current public bid/ask quotes exist. This integration is research/paper-candidate only and cannot place exchange orders.
