@@ -48,6 +48,7 @@ test("AI calibration excludes manual exits, invalid provenance and duplicate rev
   invalid.aiReview.inputProvenance.fingerprint = "not-a-hash";
   const duplicate = trade(3, 0.7, true);
   duplicate.aiReview.reviewId = valid.aiReview.reviewId;
+  duplicate.aiReview.inputProvenance.fingerprint = valid.aiReview.inputProvenance.fingerprint;
   const result = calculateAsxAiCalibration([valid, manual, invalid, duplicate], {
     holdoutFraction: 0.25, minimumOutOfSampleSamples: 2
   });
