@@ -429,7 +429,18 @@ async function loadAsxAutopilotStatus(){
   $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
   const calibration=a.aiCalibration||{};const oos=calibration.outOfSample||{};const sample=calibration.outOfSampleSampleCount??0;const minimum=calibration.minimumOutOfSampleSamples??30;
   $("asxAutoCalibration").textContent="AI win-probability audit: "+(calibration.status||"UNKNOWN")+" · chronological holdout "+sample+"/"+minimum+" trades"+(oos.brierScore==null?"":" · Brier "+Number(oos.brierScore).toFixed(4))+(oos.expectedCalibrationError==null?"":" · calibration error "+Number(oos.expectedCalibrationError).toFixed(4))+" · diagnostic only; no model training or calibration claim.";
-  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% subjective confidence)':'')+(s.ai?.predictedWinProbability==null?'':' · uncalibrated win estimate '+(Number(s.ai.predictedWinProbability)*100).toFixed(0)+'%')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% subjective confidence)':'')+(s.ai?.predictedWinProbability==null?'':' · uncalibrated win estimate '+(Number(s.ai.predictedWinProbability)*100).toFixed(0)+'%')+(s.candidateRank==null?'':' · risk rank #'+esc(s.candidateRank)+' · net R/R '+esc(s.ranking?.rewardRiskAfterCosts)+' · net target +(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+ }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
+}
+$("asxAutoScanBtn")?.addEventListener("click",async()=>{
+ const button=$("asxAutoScanBtn"),status=$("asxAutoStatus");button.disabled=true;button.textContent="Running paper scan…";
+ try{const result=await api("/api/asx/autopilot/scan",{method:"POST",body:JSON.stringify({})});status.textContent=result.message||("Automated paper scan "+(result.status||"completed")+" · "+(result.symbols||[]).join(", "));await loadAsxAutopilotStatus();}
+ catch(error){status.textContent="Automated paper scan failed: "+error.message}
+ finally{button.disabled=false;button.textContent="Run automated paper scan now"}
+});
+renderAsxDesk();
+loadAsxAutopilotStatus();
++esc(s.ranking?.expectedNetTargetProfitAud)+' · risk budget use '+esc(s.ranking?.riskBudgetUtilizationPct)+'%')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
  }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
 }
 $("asxAutoScanBtn")?.addEventListener("click",async()=>{
