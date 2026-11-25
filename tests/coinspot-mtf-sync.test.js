@@ -82,7 +82,14 @@ test("CoinSpot sync retries empty full-day history with epoch seconds and record
 
 
 test("CoinSpot live-day refresh replaces per-date trade counts instead of inflating history totals", async () => {
-  const kv = kvStore();
+  const store = new Map();
+  const kv = {
+    values: store,
+    binding: {
+      get: async key => store.get(key) ?? null,
+      put: async (key, value) => { store.set(key, value); }
+    }
+  };
   const now = "2026-11-25T16:00:00.000Z";
   const variants = [{ format: "epoch" }, { format: "epoch-string" }, { format: "epoch-ms" }];
   const probeMarket = coin => ({ coin, readOnlyHistory: { partitionHistory: [{ variants }, { variants }] } });
