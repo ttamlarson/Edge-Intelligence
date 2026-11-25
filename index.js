@@ -392,18 +392,20 @@ async function marketSearch(request, env) {
   return { markets: data.markets.map(market => normalizePredictionMarket(market, data.as_of, retrievedAt)), next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : null, total_count: finiteNumber(data.total_count), as_of: typeof data.as_of === "string" ? data.as_of : null, retrieved_at: retrievedAt, source: "Prediction.com API", jurisdiction: "unverified" };
 }
 
-async function runAutomatedCryptoPaper(env) {
+async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 7000, now = Date.now() } = {}) {
   if (!env.EDGE_KV) return { status: "storage_unavailable" };
-  const key = "crypto-auto-paper-global-v1", now = isoNow();
+  const nowMs = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
+  if (!Number.isFinite(nowMs)) return { status: "INVALID_SCAN_CLOCK", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false };
+  const key = "crypto-auto-paper-global-v1", nowIso = new Date(nowMs).toISOString();
   const stored = await env.EDGE_KV.get(key);
   let account;
   if (stored === null || stored === undefined || stored === "") {
-    account = createAutoPaperAccount(now);
+    account = createAutoPaperAccount(nowIso);
   } else {
     let parsed;
     try { parsed = JSON.parse(stored); }
     catch { return { status: "LEDGER_INVALID_JSON", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger is invalid JSON; no existing data was overwritten." }; }
-    try { account = normalizeAutoPaperAccount(parsed, now); }
+    try { account = normalizeAutoPaperAccount(parsed, nowIso); }
     catch { return { status: "LEDGER_VALIDATION_FAILED", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger failed validation; no existing data was overwritten." }; }
   }
   // Binance documents data-api.binance.vision for unauthenticated public market data.
@@ -412,35 +414,44 @@ async function runAutomatedCryptoPaper(env) {
   // fail independently and incorrectly mark an otherwise healthy market offline.
   const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/", "https://api4.binance.com/api/v3/"];
   const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
-    let lastError = "NO_PROVIDER_RESPONSE";
+    let lastError = "NO_PROVIDER_RESPONSE";\n    let lastErrorDetail = null;
     for (const base of hosts) {
       try {
-        const response = await fetch(base + "klines?symbol=" + symbol + "&interval=1h&limit=260", {
-          headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000)
-        });
+        const options = { headers: { Accept: "application/json" } };
+        // Cron scheduled() invocations do not have an HTTP Request Context. In
+        // that context AbortSignal.timeout() can throw before fetch is attempted.
+        // Keep the bounded timeout for HTTP-triggered manual scans, but omit it
+        // for Cron and rely on the platform's outbound request lifecycle.
+        if (Number.isFinite(timeoutMs) && timeoutMs > 0) options.signal = AbortSignal.timeout(timeoutMs);
+        const response = await fetchImpl(base + "klines?symbol=" + symbol + "&interval=1h&limit=260", options);
         if (!response.ok) { lastError = "HTTP_" + response.status; continue; }
         const body = await response.text();
         let raw;
         try { raw = JSON.parse(body); }
         catch { lastError = "INVALID_JSON_RESPONSE"; continue; }
-        const normalized = normalizeBinanceHourlyKlines(raw, { now: Date.now() });
+        const normalized = normalizeBinanceHourlyKlines(raw, { now: nowMs });
         if (!normalized.valid) { lastError = normalized.reason; continue; }
         const bars = normalized.bars;
         const latest = bars.at(-1);
         return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
       } catch (error) {
-        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";
+        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";\n        lastErrorDetail = String(error?.message || error?.name || "Provider request failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 160);
       }
     }
-    return { symbol, status: "UNAVAILABLE", errorCode: lastError, message: "All configured public market-data endpoints failed." };
+    return { symbol, status: "UNAVAILABLE", errorCode: lastError, errorDetail: lastErrorDetail, message: "All configured public market-data endpoints failed." };
   }));
   const prices = Object.fromEntries(results.filter(x => x.price > 0).map(x => [x.symbol,x.price]));
   const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
-  account = processAutoPaperSignals(account, { signals, prices, now });
+  account = processAutoPaperSignals(account, { signals, prices, now: nowIso });
   const liveMarkets = results.filter(x => x.status === "LIVE_PUBLIC_DATA").length;
-  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,errorDetail:x.errorDetail||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:nowIso, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
   await env.EDGE_KV.put(key, JSON.stringify(snapshot));
   return snapshot;
+}
+
+async function runScheduledCryptoPaper(env, options = {}) {
+  // ScheduledEvent has no HTTP Request Context; do not use AbortSignal.timeout().
+  return runAutomatedCryptoPaper(env, { ...options, timeoutMs: null });
 }
 
 async function handle(request, env, ctx) {
@@ -718,7 +729,7 @@ export default {
     }
   },
   async scheduled(_event, env, ctx) {
-    if (env.EDGE_KV) ctx.waitUntil(runAutomatedCryptoPaper(env).catch(() => null));
+    if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
     if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
@@ -727,5 +738,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
