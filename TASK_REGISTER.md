@@ -179,3 +179,12 @@ Updated after local implementation and automated verification on `edge-productio
 - Added synthetic-fixture unit tests for signal eligibility, incomplete/gapped data rejection, liquidity/spread fail-closed behaviour, sizing caps and exit rules. Synthetic tests validate implementation only; they are not market performance evidence.
 - Added syntax check and README documentation. Engine is not connected to exchange execution, does not generate orders, and remains live-disabled.
 - Outstanding before operational paper promotion: verified CoinSpot AUD multi-timeframe data adapter, fee/spread/slippage-aware chronological backtester, execution/fill reconciliation, and forward paper validation.
+
+
+## 2026-11-25 — CoinSpot-native MTF data connection
+
+- Added CoinSpot Read Only V2 completed market-order history adapter for BTC/AUD and ETH/AUD, using HMAC-SHA512 authenticated requests and the existing serialized nonce queue.
+- Aggregates actual CoinSpot completed orders into UTC daily and 4-hour OHLCV bars. Missing intervals remain missing and the strategy rejects non-contiguous history.
+- Adds bounded recursive splitting for potentially truncated history windows, per-run request budget, KV persistence, one-day scheduled backfill progression, and authenticated strategy status/manual sync endpoints.
+- Strategy status uses current CoinSpot public bid/ask quotes to calculate spread and evaluates only closed, fresh bars. No order is placed; live execution remains disabled.
+- Outstanding: run deployed Worker against the actual Read Only key; verify CoinSpot endpoint permissions, historical coverage and rate/volume; complete warm-up; integrate strategy candidates into an isolated paper ledger and validate fee/slippage/fill handling.
