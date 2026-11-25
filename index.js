@@ -558,7 +558,12 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
     }
     return partitioned;
   }
-  const trades = normalizeCoinSpotCompletedOrders({ coin, payload });
+  const normalizedTrades = normalizeCoinSpotCompletedOrders({ coin, payload });
+  const outOfRangeTrades = normalizedTrades.filter(trade => trade.timestamp < startMs || trade.timestamp >= endMs);
+  if (outOfRangeTrades.length > 0) {
+    throw new HttpError(502, "COINSPOT_HISTORY_RANGE_MISMATCH: " + coin + "/AUD returned trades outside the requested UTC window.");
+  }
+  const trades = normalizedTrades;
   const rawRows = [...payload.buyorders, ...payload.sellorders];
   if (rawRows.length > 0 && trades.length === 0) {
     const sample = rawRows.find(row => row && typeof row === "object") || {};
@@ -606,13 +611,16 @@ async function probeCoinSpotHistory(env, coin, clock) {
     if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
       throw new Error("CoinSpot sub-day history probe returned a malformed response.");
     }
-    const partTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
+    const normalizedPartTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
+    const partTrades = normalizedPartTrades.filter(trade => trade.timestamp >= windowStart && trade.timestamp < windowEnd);
+    const outOfRangeTrades = normalizedPartTrades.length - partTrades.length;
     partitionHistory.push({
       startAt: new Date(windowStart).toISOString(),
       endAt: new Date(windowEnd).toISOString(),
       rawBuyOrders: part.buyorders.length,
       rawSellOrders: part.sellorders.length,
       validAudTrades: partTrades.length,
+      outOfRangeTrades,
       sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
     });
   }
