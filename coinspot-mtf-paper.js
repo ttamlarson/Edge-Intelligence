@@ -8,13 +8,14 @@ const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
 export function createMtfPaperAccount(now = new Date().toISOString()) {
-  return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", currency:"AUD", startingCapitalAud:100,
+  return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", paperOnly:true, currency:"AUD", startingCapitalAud:100,
     cashAud:100, realizedPnlAud:0, unrealizedPnlAud:0, equityAud:100, dailyLossAud:0,
     day:now.slice(0,10), openPosition:null, closedTrades:[], lastProcessed:{},
     liveTradingEnabled:false, updatedAt:now };
 }
 export function validateMtfPaperAccount(a) {
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
+      (a.paperOnly !== undefined && a.paperOnly !== true) ||
       a.startingCapitalAud!==100 || a.liveTradingEnabled!==false ||
       !Number.isFinite(a.cashAud) || a.cashAud<0 || !Number.isFinite(a.realizedPnlAud) ||
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
@@ -153,6 +154,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
 
   a.equityAud = round(a.cashAud + (a.openPosition ? a.openPosition.entryCost : 0) + a.unrealizedPnlAud);
   a.updatedAt = now;
+  a.paperOnly = true;
   a.liveTradingEnabled = false;
   return a;
 }

@@ -250,3 +250,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Earlier four-day legacy batches had run under the defective parent-partition logic, so reprocessing only 2026-08-19 and 2026-08-20 could leave older gaps. Added a one-time full rebuild from the original `today - 120` start date (2026-07-28 for this run).
 - The migration clears only derived BTC/ETH candles and history trade counters, preserves the paper ledger and all safety controls, persists its marker before network requests, and replays from the start date. Expected maximum cadence: ~40 hours for the 121 inclusive dates at three CoinSpot slots/hour.
 - Regression test verifies the full rebuild starts at 2026-07-28, clears stale derived history, and leaves `liveTradingEnabled=false`.
+
+
+## 2026-11-26 — Explicit paper-only marker for the automated CoinSpot MTF ledger
+
+- Added a persisted `paperOnly: true` marker to new and updated AUD MTF paper accounts.
+- Legacy accounts with no marker remain readable and are upgraded on the next scan; an explicit false marker is rejected without resetting the ledger.
+- The existing `liveTradingEnabled: false` requirement is unchanged. No CoinSpot order, withdrawal or transfer route, credential or safety flag was added or enabled.
+- Regression coverage verifies account creation, legacy migration and rejection of a false paper-only marker.

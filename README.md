@@ -30,6 +30,8 @@ CSV source labels are user-declared, not independently authenticated. Only impor
 
 The **CoinSpot Crypto · Paper** workspace supports public BTC/AUD and ETH/AUD quotes, a persistent per-Cloudflare-Access-user AUD 100 paper ledger, and a separate CoinSpot read-only account adapter.
 
+- Automated MTF ledger safety: the persisted AUD paper account carries `paperOnly: true` and `liveTradingEnabled: false`. Legacy accounts without the marker are upgraded on the next scan; an explicit `paperOnly: false` value is rejected without resetting stored data.
+
 - Public market data: CoinSpot V2 latest bid/ask/last and up to 100 recent completed trades. The public API data is not an OHLC candle history.
 - Paper account: AUD 100 starting capital, AUD 50 maximum position spend, one open position, AUD 3 daily realised-loss pause, 0.1% fee each side, and modelled spread/slippage. Entries use the public ask; exits use the public bid. Stops and targets are simulation-only and are evaluated when the authenticated paper-account endpoint is refreshed.
 - Strategy research: `coinspot-strategy.js` is a hypothesis-only 1-hour EMA20/EMA50 trend-continuation screen with RSI and ATR filters, next-bar-open entries, conservative same-candle stop-first resolution, fee/spread/slippage costs and a chronological in-sample/out-of-sample split. It requires at least 300 validated hourly candles uploaded as CSV. The CSV source is user-supplied and not independently verified.
