@@ -732,7 +732,7 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
-    if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
+    if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env, { timeoutMs: 0 }).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
       const result = await scan(env, rules); await alertNew(env, result);
