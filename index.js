@@ -612,19 +612,19 @@ async function probeCoinSpotProviders(env, clock) {
     probe.readOnlyStatus = status?.status === "ok" ? "AUTHENTICATED" : "INVALID_RESPONSE";
   } catch (error) {
     probe.readOnlyStatus = "FAILED";
-    probe.readOnlyStatusError = String(error?.message || "CoinSpot read-only status probe failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 180);
+    probe.readOnlyStatusError = String(error?.message || "CoinSpot read-only status probe failed").replace(/\s+/g, " ").slice(0, 180);
   }
   for (const coin of COINSPOT_MTF_COINS) {
     const market = { coin, pair: coin + "/AUD" };
     try {
       market.readOnlyHistory = await probeCoinSpotHistory(env, coin, clock);
     } catch (error) {
-      market.readOnlyHistory = { status: "ERROR", message: String(error?.message || "Read-only history probe failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 180) };
+      market.readOnlyHistory = { status: "ERROR", message: String(error?.message || "Read-only history probe failed").replace(/\s+/g, " ").slice(0, 180) };
     }
     try {
       market.publicHistory = await probeCoinSpotPublicHistory(coin);
     } catch (error) {
-      market.publicHistory = { status: "ERROR", message: String(error?.message || "Public history probe failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 180) };
+      market.publicHistory = { status: "ERROR", message: String(error?.message || "Public history probe failed").replace(/\s+/g, " ").slice(0, 180) };
     }
     probe.markets.push(market);
   }
@@ -741,7 +741,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
         if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) break;
         if (historySync.status === "COLLECTING_LIVE_DAY") break;
       } catch (error) {
-        syncError = String(error?.message || "CoinSpot history sync failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 220);
+        syncError = String(error?.message || "CoinSpot history sync failed").replace(/\s+/g, " ").slice(0, 220);
         break;
       }
     }
