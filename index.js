@@ -532,6 +532,32 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
     }
   }
 
+  if (count === 0 && !wholeUtcDay) {
+    let sawOutOfRangeCandidate = false;
+    for (const format of ["epoch-string", "epoch-ms"]) {
+      const candidate = await request(format);
+      budget.queryFormatsAttempted.push(format);
+      const candidateCount = candidate.buyorders.length + candidate.sellorders.length;
+      if (candidateCount === 0) continue;
+      const normalizedCandidate = normalizeCoinSpotCompletedOrders({ coin, payload: candidate });
+      if (normalizedCandidate.length === 0) {
+        throw new HttpError(502, "COINSPOT_HISTORY_SCHEMA_MISMATCH: non-empty " + format + " history contained no accepted " + coin + "/AUD trades.");
+      }
+      const outOfRangeCandidate = normalizedCandidate.some(trade => trade.timestamp < startMs || trade.timestamp >= endMs);
+      if (outOfRangeCandidate) {
+        sawOutOfRangeCandidate = true;
+        continue;
+      }
+      payload = candidate;
+      selectedFormat = format;
+      count = candidateCount;
+      break;
+    }
+    if (count === 0 && sawOutOfRangeCandidate) {
+      throw new HttpError(502, "COINSPOT_HISTORY_RANGE_MISMATCH: alternate CoinSpot epoch formats returned trades outside the requested UTC window.");
+    }
+  }
+
   budget.queryDateFormat = selectedFormat;
   budget.rawBuyOrders = (budget.rawBuyOrders || 0) + payload.buyorders.length;
   budget.rawSellOrders = (budget.rawSellOrders || 0) + payload.sellorders.length;
