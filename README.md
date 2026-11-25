@@ -197,3 +197,6 @@ The provider health probe checks two epoch-second 12-hour windows for each marke
 
 
 On first run after this integrity migration, legacy history state whose last batch contains raw completed orders but zero accepted trades is rewound one additional UTC day. The last-batch date is recorded as a one-time marker so provider failures cannot repeatedly move the cursor backwards. The previously skipped date and the last processed date are then replayed under the new partition and timestamp checks.
+
+
+The daily diagnostic probe compares three sub-day timestamp representations—numeric Unix seconds, stringified Unix seconds and Unix milliseconds—for both 12-hour windows. These are diagnostics only: a format is not adopted for backfill until it returns valid trades inside the exact requested UTC window. The backfill remains paper-only and fails closed on empty or out-of-range partitions.
