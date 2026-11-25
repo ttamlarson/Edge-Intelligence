@@ -159,3 +159,5 @@
 - [ ] Verify the current 97-day backfill remains within the 24–48-hour target at three days per hour.
 
 - [ ] Compare numeric seconds, string seconds and millisecond timestamps for each 12-hour history window; adopt only a representation with validated in-range BTC/AUD or ETH/AUD trades.
+
+- [ ] Confirm sub-day millisecond epoch queries return valid in-range trades before any seconds-based fallback is attempted.
