@@ -184,7 +184,7 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
       endMs = Number(body.enddate) + 1;
     }
     const duration = endMs - startMs;
-    allCalls.push({ coin, duration, startMs });
+    allCalls.push({ coin, duration, startMs, startdate: body.startdate, enddate: body.enddate });
     if (duration > 60 * 60 * 1000) {
       const makeRows = side => Array.from({ length: 500 }, (_, i) => ({
         market: coin + "/AUD",
@@ -232,7 +232,8 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
     for (const coin of ["BTC", "ETH"]) {
       const marketCalls = allCalls.filter(call => call.coin === coin);
       const ranges = marketCalls.map(call => call.startMs + ":" + call.duration);
-      assert.equal(new Set(ranges).size, ranges.length, coin + " history windows must not be fetched twice");
+      const duplicateRanges = [...new Set(ranges.filter((range, index) => ranges.indexOf(range) !== index))];
+      assert.deepEqual(duplicateRanges, [], coin + " duplicate history windows: " + JSON.stringify(marketCalls.filter(call => duplicateRanges.includes(call.startMs + ":" + call.duration))));
       assert.ok(marketCalls.length > 15, coin + " dense date should require more than one bounded sync chunk");
     }
     const history = JSON.parse(store.get("coinspot-mtf-history-global-v1"));
