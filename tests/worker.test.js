@@ -313,3 +313,31 @@ test("crypto research review route is authenticated, rate-limited and fails clos
   const limited = await worker.fetch(request(), baseEnv({ AI_LIMITER: limiter(false) }), access("user-1"));
   assert.equal(limited.status, 429);
 });
+
+test("CoinSpot read-only status route verifies credentials without exposing them", async t => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl, requestedBody;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    requestedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const env = baseEnv({ COINSPOT_READONLY_KEY: "read-only-key", COINSPOT_READONLY_SECRET: "read-only-secret" });
+  const response = await worker.fetch(new Request("https://api.example.au/api/crypto/coinspot/readonly/status"), env, access("user-1"));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.provider, "CoinSpot");
+  assert.equal(body.access, "READ_ONLY");
+  assert.equal(body.status, "AUTHENTICATED");
+  assert.equal(body.liveTradingEnabled, false);
+  assert.equal(requestedUrl, "https://www.coinspot.com.au/api/v2/ro/status");
+  assert.ok(Number.isSafeInteger(requestedBody.nonce));
+  assert.doesNotMatch(JSON.stringify(body), /read-only-key|read-only-secret/);
+});
+
+test("CoinSpot read-only status route fails closed when credentials are missing", async () => {
+  const response = await worker.fetch(new Request("https://api.example.au/api/crypto/coinspot/readonly/status"), baseEnv(), access("user-1"));
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /read-only API credentials/);
+});
