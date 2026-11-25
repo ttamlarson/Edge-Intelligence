@@ -899,7 +899,12 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
       spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
-      fourHourCandles: m.history?.fourHourCandles || 0, tradesFetched: m.history?.tradesFetched || 0,
+      fourHourCandles: m.history?.fourHourCandles || 0,
+      storedDailyCandles: m.history?.storedDailyCandles ?? m.history?.dailyCandles ?? 0,
+      storedFourHourCandles: m.history?.storedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
+      lastCompletedFourHourAt: m.history?.lastCompletedFourHourAt || null,
+      tradesFetched: m.history?.tradesFetched || 0,
       checks: m.signal?.checks || null, signalError: m.signalError || null,
       aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
     })),
@@ -936,8 +941,20 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
     let quote=null,signal=null,signalError=null;
-    const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
-    const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
+    const storedDaily=Array.isArray(history.dailyCandles)?history.dailyCandles:[];
+    const storedFourHour=Array.isArray(history.fourHourCandles)?history.fourHourCandles:[];
+    const daily=storedDaily.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
+    const fourHour=storedFourHour.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
+    const historySummary={
+      dailyCandles:daily.length,
+      fourHourCandles:fourHour.length,
+      storedDailyCandles:storedDaily.length,
+      storedFourHourCandles:storedFourHour.length,
+      lastCompletedDailyAt:daily.at(-1)?.timestamp||null,
+      lastCompletedFourHourAt:fourHour.at(-1)?.timestamp||null,
+      tradesFetched:history.tradesFetched||0,
+      lastHistoryDate:history.lastHistoryDate||null
+    };
 
     // Always retrieve the current AUD quote, even during history warm-up. An
     // existing paper position must continue to be marked and stop-managed when
@@ -953,11 +970,11 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     }
 
     if(daily.length<110||fourHour.length<210){
-      markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,signalStatus:"WARMUP_REQUIRED",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     if(!quote){
-      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:historySummary,signal:null,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
@@ -967,7 +984,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
       catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
     }
-    markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
 }
@@ -1288,10 +1305,45 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (isCoinSpotMtfScheduleSlot(_event, env)) {
-      ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => {
-        console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220));
+      const scan = runCoinSpotMtfPaper(env).then(snapshot => {
+        console.log(JSON.stringify({
+          event: "COINSPOT_MTF_SCAN",
+          scannedAt: snapshot.lastScanAt,
+          status: snapshot.status,
+          strategyStatus: snapshot.strategyStatus,
+          backfill: {
+            requested: snapshot.backfillDaysRequested,
+            processed: snapshot.backfillDaysProcessed,
+            processedDate: snapshot.historySync?.processedDate || null,
+            nextDate: snapshot.historySync?.nextDate || null
+          },
+          markets: (snapshot.markets || []).map(market => ({
+            pair: market.pair,
+            signalStatus: market.signalStatus,
+            completedDailyCandles: market.dailyCandles,
+            completedFourHourCandles: market.fourHourCandles,
+            storedDailyCandles: market.storedDailyCandles,
+            storedFourHourCandles: market.storedFourHourCandles,
+            lastCompletedDailyAt: market.lastCompletedDailyAt,
+            lastCompletedFourHourAt: market.lastCompletedFourHourAt,
+            spreadBps: market.spreadBps,
+            aiReviewStatus: market.aiReview?.status || "NOT_RUN"
+          })),
+          ledger: {
+            equityAud: snapshot.equityAud,
+            cashAud: snapshot.cashAud,
+            openPosition: snapshot.openPosition?.coin || null,
+            closedTradeCount: Array.isArray(snapshot.closedTrades) ? snapshot.closedTrades.length : 0
+          },
+          paperOnly: snapshot.paperOnly === true,
+          liveTradingEnabled: false
+        }));
+        return snapshot;
+      }).catch(error => {
+        console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).replace(/\\s+/g, " ").slice(0, 220));
         throw error;
-      }));
+      });
+      ctx.waitUntil(scan);
       return;
     }
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
