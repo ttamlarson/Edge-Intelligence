@@ -298,6 +298,34 @@ test("ASX autopilot API reports missing KV or DataCedar configuration without up
 });
 
 
+test("scheduled ASX scans omit AbortSignal.timeout outside an HTTP request context", async t => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const target = new URL(url);
+    if (target.hostname === "api.datacedar.com") {
+      requests.push({ host: target.hostname, hasSignal: Object.hasOwn(options, "signal") });
+      return new Response(JSON.stringify({ data: { "asx:BHP": [] } }), { headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("unavailable", { status: 503 });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const store = kv();
+  const pending = [];
+  await worker.scheduled({}, baseEnv({
+    EDGE_KV: store.binding,
+    ASX_AUTOPILOT_ENABLED: "true",
+    ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-only-test-secret"
+  }), { waitUntil: promise => pending.push(promise) });
+  await Promise.all(pending);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].hasSignal, false);
+  const snapshot = JSON.parse(store.values.get("asx-auto-paper-v1"));
+  assert.equal(snapshot.liveTradingEnabled, false);
+  assert.equal(snapshot.status, "SCAN_COMPLETED");
+  assert.equal(snapshot.portfolio.positions.length, 0);
+});
 test("crypto research review route is authenticated, rate-limited and fails closed without an AI key", async () => {
   const request = () => new Request("https://api.example.au/api/crypto/research/review", {
     method: "POST",
