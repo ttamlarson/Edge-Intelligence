@@ -2,6 +2,13 @@ name = "edge-intelligence-api"
 main = "index.js"
 compatibility_date = "2026-11-01"
 
+[observability]
+enabled = true
+
+[observability.logs]
+invocation_logs = true
+head_sampling_rate = 1.0
+
 [vars]
 OPENAI_MODEL = "gpt-6.2-astra"
 FRONTEND_ORIGINS = "https://REPLACE_WITH_YOUR_PAGES_DOMAIN"
