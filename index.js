@@ -494,7 +494,7 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
   const wholeUtcDay = duration === 86400000 && startMs % 86400000 === 0;
   const primaryFormat = wholeUtcDay ? "date" : "epoch";
   const request = async format => {
-    if (budget.calls >= 48) throw new HttpError(503, "CoinSpot history batch reached its safe request budget; retrying this date on the next sync.");
+    if (budget.calls >= 16) throw new HttpError(503, "CoinSpot history batch reached its 16-request per-market safety budget; retrying this date on the next sync.");
     budget.calls++;
     const range = coinSpotHistoryRangeParams(startMs, endMs, format);
     const payload = await coinSpotReadOnly(env, "/orders/market/completed", {
@@ -554,7 +554,20 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
     const right = await fetchCoinSpotHistoryWindow(env, coin, midpoint, endMs, budget);
     return [...left, ...right];
   }
-  return normalizeCoinSpotCompletedOrders({ coin, payload });
+  const trades = normalizeCoinSpotCompletedOrders({ coin, payload });
+  const rawRows = [...payload.buyorders, ...payload.sellorders];
+  if (rawRows.length > 0 && trades.length === 0) {
+    const sample = rawRows.find(row => row && typeof row === "object") || {};
+    const diagnostic = {
+      marketMatch: sample.market === coin + "/AUD",
+      timestampValid: Number.isFinite(Date.parse(sample.solddate)),
+      pricePositive: Number.isFinite(Number(sample.rate)) && Number(sample.rate) > 0,
+      amountPositive: Number.isFinite(Number(sample.amount)) && Number(sample.amount) > 0,
+      totalPositive: Number.isFinite(Number(sample.total)) && Number(sample.total) > 0
+    };
+    throw new HttpError(502, "COINSPOT_HISTORY_SCHEMA_MISMATCH: non-empty history contained no accepted trades; sample validation=" + JSON.stringify(diagnostic));
+  }
+  return trades;
 }
 
 async function probeCoinSpotHistory(env, coin, clock) {
@@ -645,7 +658,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     return { status: "HISTORY_CACHE_VALIDATION_FAILED", liveTradingEnabled: false };
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
-  if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 14 * 60 * 1000) {
+  if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
     // Persist provider diagnostics before backfill work so a later history
@@ -719,7 +732,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
   } finally { clearTimeout(timeout); }
 }
 
-async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
+async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 1) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
   if (!Number.isFinite(clock)) throw new HttpError(400, "Invalid paper scan clock.");

@@ -134,3 +134,12 @@
 - [ ] Confirm the paper ledger remains AUD 100, live trading disabled, no more than one open position, 0.5% round-trip-cost-aware risk, 25% allocation and AUD 3 daily-loss cap including unrealized losses.
 - [ ] Confirm current quotes are still fetched during history warm-up so existing positions remain marked and stop-managed, and new positions immediately reflect bid-side fees/slippage in equity and daily loss.
 - [ ] Do not call the engine operational until at least 110 completed daily and 210 completed four-hour candles per market are fresh, contiguous and validated; then complete forward paper validation before any separate live-trading decision.
+
+
+### CoinSpot runtime subrequest and history-integrity checks
+
+- [ ] Verify scheduled runner processes exactly one historical UTC day per 15-minute invocation and stays below Cloudflare's subrequest limit.
+- [ ] Verify provider diagnostics are sampled no more than once per 24 hours.
+- [ ] Verify recursive completed-order history requests stop at the 16-request per-market/day safety budget and do not advance incomplete dates.
+- [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
+- [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.

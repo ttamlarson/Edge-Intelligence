@@ -66,7 +66,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z");
   assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
-  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,8);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/latest/")).length,2);
   assert.equal(result.mode,"COINSPOT_MTF_AUTOMATED_PAPER");
@@ -76,7 +76,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   assert.equal(result.markets.length,2);
   assert.equal(result.markets[0].signalStatus,"WARMUP_REQUIRED");
   const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
-  assert.equal(history.lastProcessedDate,"2026-07-31");
+  assert.equal(history.lastProcessedDate,"2026-07-28");
   const account=JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));
   assert.equal(account.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
@@ -161,5 +161,32 @@ test("existing paper positions remain stop-managed while historical candles are 
   assert.ok(btc.bid<stop);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.paperOnly,true);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("CoinSpot refuses to advance a historical date when non-empty rows fail trade validation",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
+  if(target.endsWith("/orders/market/completed")){
+   const body=JSON.parse(options.body||"{}");
+   const coin=body.cointype;
+   const invalid={market:coin+"/AUD",solddate:"2026-07-28T10:00:00.000Z",rate:"not-a-price",amount:1,total:100};
+   return new Response(JSON.stringify({status:"ok",buyorders:[invalid],sellorders:[]}),{status:200});
+  }
+  if(target.includes("/pubapi/v2/orders/completed/")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
+  throw new Error("Unexpected CoinSpot URL: "+target);
+ };
+ try{
+  await assert.rejects(
+   ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T06:00:00.000Z"),
+   /COINSPOT_HISTORY_SCHEMA_MISMATCH/
+  );
+  const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  assert.equal(history.nextDate,"2026-07-28");
+  assert.equal(history.lastProcessedDate,undefined);
+  assert.equal(history.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });

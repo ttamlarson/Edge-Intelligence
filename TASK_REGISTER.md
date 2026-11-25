@@ -202,3 +202,12 @@ Updated after local implementation and automated verification on `edge-productio
 | Warm-up position management | Implemented on feature branch | Current BTC/AUD and ETH/AUD quotes are fetched even before candle warm-up completes, so existing paper positions can still be marked and stopped; regression tests cover this path. |
 | Live trading safety | Preserved | No order, cancel, withdrawal or transfer route is added. No live-trading safety flag or secret is changed. |
 | Runtime promotion | Pending branch CI and deployment verification | Do not claim CoinSpot retrieval is operational until the read-only status check succeeds and KV contains validated, non-empty BTC/AUD and ETH/AUD history. |
+
+
+## 2026-11-25 — CoinSpot MTF subrequest and history-integrity remediation
+
+- Production KV confirms the CoinSpot Read Only `/status` probe authenticates and recent live BTC/AUD and ETH/AUD order history is available. The scheduled paper runner was exceeding Cloudflare's per-invocation subrequest ceiling while attempting four UTC backfill days per scan.
+- Reduced scheduled work to one UTC backfill day per 15-minute invocation (approximately 30 hours for a 120-day warm-up before retries), capped recursive history requests at 16 per market/day, and reduced redundant provider probes to once per 24 hours.
+- Added a fail-closed schema diagnostic: a non-empty provider response that yields zero valid normalized trades now blocks the sync instead of silently advancing the history cursor. Diagnostics expose only field-validity booleans.
+- Regression coverage verifies one-day progression, bounded call counts, non-advancement on invalid non-empty rows, and paper-only safety.
+- Remaining blocker: production history still contains sparse candles and historical responses require fresh runtime verification after this branch is tested and deployed. No strategy signal or paper entry is permitted until each market has the required fresh, contiguous history.
