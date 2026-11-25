@@ -138,8 +138,10 @@
 
 ### CoinSpot runtime subrequest and history-integrity checks
 
-- [ ] Verify scheduled runner processes exactly one historical UTC day per 15-minute invocation and stays below Cloudflare's subrequest limit.
+- [ ] Verify CoinSpot runs on the staggered 7/22/37/52-minute cron, separately from the Binance 0/15/30/45-minute scanner.
+- [ ] Verify the CoinSpot runner processes one historical UTC day per 15-minute invocation and stays below Cloudflare's subrequest limit.
 - [ ] Verify provider diagnostics are sampled no more than once per 24 hours.
-- [ ] Verify recursive completed-order history requests stop at the 16-request per-market/day safety budget and do not advance incomplete dates.
+- [ ] Verify recursive completed-order history requests stop at the eight-request per-market/day safety budget and checkpoint BTC/ETH independently.
+- [ ] Verify empty epoch-second sub-day partitions retry with millisecond epochs; if both formats remain empty after a capped day, confirm `COINSPOT_HISTORY_PARTITION_EMPTY` and no cursor advancement.
 - [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
 - [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.
