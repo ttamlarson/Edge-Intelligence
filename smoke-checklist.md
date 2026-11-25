@@ -132,4 +132,5 @@
 - [ ] Confirm a transient transport failure retries once with a higher nonce and records `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` rather than silently advancing the history cursor.
 - [ ] Confirm each persisted candle is derived from validated CoinSpot BTC/AUD or ETH/AUD completed orders, with no fabricated missing buckets.
 - [ ] Confirm the paper ledger remains AUD 100, live trading disabled, no more than one open position, 0.5% round-trip-cost-aware risk, 25% allocation and AUD 3 daily-loss cap including unrealized losses.
+- [ ] Confirm current quotes are still fetched during history warm-up so existing positions remain marked and stop-managed, and new positions immediately reflect bid-side fees/slippage in equity and daily loss.
 - [ ] Do not call the engine operational until at least 110 completed daily and 210 completed four-hour candles per market are fresh, contiguous and validated; then complete forward paper validation before any separate live-trading decision.

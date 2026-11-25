@@ -81,7 +81,8 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   if (!a.openPosition && a.dailyLossAud < MTF_PAPER_CONFIG.maxDailyLossAud) {
     const candidates = markets.filter(m => validCoin(m.coin) &&
       m.signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
-      m.quote && Number.isFinite(m.quote.ask) && m.quote.ask > 0 &&
+      m.quote && Number.isFinite(m.quote.bid) && m.quote.bid > 0 &&
+      Number.isFinite(m.quote.ask) && m.quote.ask > 0 &&
       m.signal?.risk && Number.isFinite(m.signal.risk.initialStopDistance) &&
       m.signal.risk.initialStopDistance > 0)
       .sort((x, y) => Number(y.signal.indicators?.breakoutVotes || 0) - Number(x.signal.indicators?.breakoutVotes || 0));
@@ -117,8 +118,15 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         entryFeeAud:round(fee), entryCost:round(entryCost),
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
         highestPrice:entry, status:"OPEN_PAPER_ONLY" };
-      a.unrealizedPnlAud = 0;
-      a.equityAud = round(a.cashAud + entryCost);
+      // Mark the new position to the executable bid immediately. This includes
+      // the modeled round-trip costs in equity and the daily-loss circuit from
+      // the first scan rather than temporarily reporting par after entry.
+      const mark = quoteCost(m.quote.bid);
+      const markGross = quantity * mark;
+      const markFee = markGross * MTF_PAPER_CONFIG.feeRate;
+      a.unrealizedPnlAud = round(markGross - markFee - entryCost);
+      a.dailyLossAud = round(realizedDailyLoss(a, now) + Math.max(0, -a.unrealizedPnlAud));
+      a.equityAud = round(a.cashAud + markGross - markFee);
       break;
     }
   }

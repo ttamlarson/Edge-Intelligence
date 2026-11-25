@@ -668,31 +668,42 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   let state;
   try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
   catch { throw new HttpError(502,"CoinSpot strategy history cache is invalid JSON."); }
-  if(!state) return {provider:"CoinSpot",status:"HISTORY_SYNC_NOT_STARTED",historyDaysRequired:110,liveTradingEnabled:false};
+  if(!state) state={mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"HISTORY_SYNC_NOT_STARTED",markets:{},liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
     let quote=null,signal=null,signalError=null;
     const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
     const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
-    if(daily.length<110||fourHour.length<210){
-      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError:null,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
-      continue;
-    }
+
+    // Always retrieve the current AUD quote, even during history warm-up. An
+    // existing paper position must continue to be marked and stop-managed when
+    // historical candles are incomplete or temporarily unavailable.
     try {
       const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
       const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
       if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
       quote={pair:coin+"/AUD",bid,ask,last,spreadBps:Number(((ask-bid)/ask*10000).toFixed(2)),retrievedAt:new Date(clock).toISOString()};
-      const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
-      const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
-      if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
-      else {
-        try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
-        catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
-      }
-    } catch(error) { signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180); }
+    } catch(error) {
+      signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
+    }
+
+    if(daily.length<110||fourHour.length<210){
+      markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
+    if(!quote){
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
+    const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
+    const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
+    if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
+    else {
+      try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
+      catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
+    }
     markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
