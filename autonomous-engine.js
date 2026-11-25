@@ -207,7 +207,7 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
       provenance?.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" &&
       Number.isInteger(provenance?.barsProvided) && provenance.barsProvided >= 51 &&
       provenance?.barsReviewed === 30 && provenance?.fingerprintAlgorithm === "SHA-256" &&
-      /^[a-f0-9]{64}$/i.test(provenance?.fingerprint || "") &&
+      typeof provenance?.fingerprint === "string" && /^[a-f0-9]{64}$/i.test(provenance.fingerprint) &&
       aiReview.reviewId.endsWith(provenance.fingerprint.slice(0, 16));
     if (!validAiReview) return { accepted: false, reason: "AI review provenance or approval metadata is invalid." };
   }

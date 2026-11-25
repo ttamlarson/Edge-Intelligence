@@ -129,7 +129,8 @@ test("AI advisor preserves missing provider volume as missing rather than invent
   assert.equal(result.approved, true);
   assert.equal(result.inputProvenance.volumeBarsAvailable, 0);
   assert.equal(result.inputProvenance.volumeBarsMissing, 30);
-  const packet = JSON.parse(requestBody.input[1].content.split("\\n\\n").at(-1));
+  const userContent = requestBody.input[1].content;
+  const packet = JSON.parse(userContent.slice(userContent.lastIndexOf("\n\n") + 2));
   assert.equal(packet.recentDailyBars.at(-1).volume, null);
 });
 
