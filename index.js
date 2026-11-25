@@ -692,6 +692,24 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       typeof state.nextDate !== "string" || !state.markets || typeof state.markets !== "object") {
     return { status: "HISTORY_CACHE_VALIDATION_FAILED", liveTradingEnabled: false };
   }
+  const legacyBatchHasUnacceptedRows = Array.isArray(state.lastBatch) && state.lastBatch.some(batch =>
+    Number(batch?.tradeCount || 0) === 0 &&
+    Number(batch?.rawBuyOrders || 0) + Number(batch?.rawSellOrders || 0) > 0
+  );
+  if (state.lastBatchDate === undefined && legacyBatchHasUnacceptedRows &&
+      typeof state.lastProcessedDate === "string" &&
+      state.nextDate === shiftUtcDate(state.lastProcessedDate, 1)) {
+    const previousProcessedDate = state.lastProcessedDate;
+    state.historyIntegrityRewindFrom = previousProcessedDate;
+    state.historyIntegrityRewindAt = new Date(clock).toISOString();
+    state.lastBatchDate = previousProcessedDate;
+    state.lastProcessedDate = shiftUtcDate(previousProcessedDate, -2);
+    state.nextDate = shiftUtcDate(previousProcessedDate, -1);
+    state.status = "BACKFILLING";
+    // Persist the one-time rewind before any upstream call so a retry after a
+    // provider failure cannot repeatedly move the cursor further backwards.
+    await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+  }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
   const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
     state.providerProbe.markets.some(market => !Array.isArray(market.readOnlyHistory?.partitionHistory) || market.readOnlyHistory.partitionHistory.length !== 2);
@@ -721,7 +739,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     };
     outcomes.push({coin,tradeCount:trades.length,dailyBarsAdded:daily.length,fourHourBarsAdded:fourHour.length,apiCalls:budget.calls,rawBuyOrders:budget.rawBuyOrders,rawSellOrders:budget.rawSellOrders,marketsSeen:budget.marketsSeen,sampleOrderAt:budget.sampleOrderAt,emptyPrimaryResponses:budget.emptyPrimaryResponses,emptyHistoryWindows:budget.emptyHistoryWindows,dateFormatFallbackHits:budget.dateFormatFallbackHits,queryFormatsAttempted:budget.queryFormatsAttempted});
   }
-  state={...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),lastProcessedDate:targetDate,
+  state={...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),lastProcessedDate:targetDate,lastBatchDate:targetDate,
     nextDate:targetDate<today?shiftUtcDate(targetDate,1):today,
     status:targetDate<today?"BACKFILLING":"COLLECTING_LIVE_DAY",liveTradingEnabled:false,lastBatch:outcomes};
   await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));

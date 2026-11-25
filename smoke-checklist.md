@@ -148,3 +148,5 @@
 - [ ] Confirm a saturated full-day response with empty child partitions fails as `COINSPOT_HISTORY_PARTITION_EMPTY` and preserves the date cursor.
 
 - [ ] Verify full-day and 12-hour probes count only trades within their requested UTC range; any out-of-range record must be diagnosed and rejected by the backfill.
+
+- [ ] Seed legacy state with a non-empty raw batch and zero accepted trades; verify the cursor rewinds exactly one prior UTC day once, persists the marker, and does not rewind repeatedly after a failed request.

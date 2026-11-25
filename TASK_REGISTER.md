@@ -220,3 +220,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Added fail-closed checks for saturated daily windows whose child partitions produce no accepted trades (`COINSPOT_HISTORY_PARTITION_EMPTY`) and for responses containing trades outside the requested UTC window (`COINSPOT_HISTORY_RANGE_MISMATCH`). The date cursor cannot advance in either case.
 - Reduced the per-market/day recursive request ceiling to 15 to reserve subrequest headroom for the once-daily partition probe and existing scheduled services.
 - Remaining blocker: the next production scan must show non-empty, correctly time-bounded epoch partitions before any historical candles can be considered complete. Strategy signals and paper entries remain blocked until the full 110 daily / 210 four-hour candle requirements are met.
+
+
+## 2026-11-25 — Recovery of legacy skipped history dates
+
+- Production state showed the 2026-08-19 and 2026-08-20 batches had non-empty raw CoinSpot order arrays but zero accepted trades. The first remediation had already advanced the cursor through those dates, so simply fixing future partitions would leave a historical gap.
+- Added a one-time legacy-state migration: when an old batch has raw rows but zero accepted trades and no `lastBatchDate` marker, rewind the cursor to the day before the last processed date. This replays the suspect date and the previously skipped final date in order.
+- Persist a rewind marker before any provider request so a timeout cannot repeatedly move the cursor backwards. Every successful sync now records `lastBatchDate`.
+- Added regression coverage for the exact production-shaped legacy state and verified the cursor replays 2026-08-19 first without enabling live trading.
