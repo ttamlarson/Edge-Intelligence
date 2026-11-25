@@ -467,6 +467,12 @@ async function fetchCoinSpotHistoryWindow(env,coin,startMs,endMs,budget) {
     enddate:Math.floor((endMs-1)/1000),limit:500
   });
   if(!Array.isArray(payload.buyorders)||!Array.isArray(payload.sellorders)) throw new HttpError(502,"CoinSpot historical order response was malformed.");
+  budget.rawBuyOrders=(budget.rawBuyOrders||0)+payload.buyorders.length;
+  budget.rawSellOrders=(budget.rawSellOrders||0)+payload.sellorders.length;
+  for(const row of [...payload.buyorders,...payload.sellorders].slice(0,6)){
+    if(row?.market&&budget.marketsSeen?.length<6&&!budget.marketsSeen.includes(String(row.market)))budget.marketsSeen.push(String(row.market));
+    if(!budget.sampleOrderAt&&row?.solddate)budget.sampleOrderAt=String(row.solddate);
+  }
   const count=payload.buyorders.length+payload.sellorders.length;
   if(count>=450){
     const duration=endMs-startMs;
@@ -496,7 +502,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   const updatedMarkets={...state.markets};
   const outcomes=[];
   for(const coin of COINSPOT_MTF_COINS){
-    const budget={calls:0};
+    const budget={calls:0,rawBuyOrders:0,rawSellOrders:0,marketsSeen:[],sampleOrderAt:null};
     const trades=await fetchCoinSpotHistoryWindow(env,coin,startMs,endMs,budget);
     const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
     const fourHour=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.fourHour);
@@ -508,7 +514,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       lastHistoryDate:targetDate,
       lastSyncAt:new Date(clock).toISOString()
     };
-    outcomes.push({coin,tradeCount:trades.length,dailyBarsAdded:daily.length,fourHourBarsAdded:fourHour.length,apiCalls:budget.calls});
+    outcomes.push({coin,tradeCount:trades.length,dailyBarsAdded:daily.length,fourHourBarsAdded:fourHour.length,apiCalls:budget.calls,rawBuyOrders:budget.rawBuyOrders,rawSellOrders:budget.rawSellOrders,marketsSeen:budget.marketsSeen,sampleOrderAt:budget.sampleOrderAt});
   }
   state={...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),lastProcessedDate:targetDate,
     nextDate:targetDate<today?shiftUtcDate(targetDate,1):today,
@@ -659,7 +665,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     } catch(error) { signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180); }
     markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
-  return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
+  return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
 }
 
 async function runScheduledCryptoPaper(env, options = {}) {
