@@ -293,7 +293,7 @@ test("CoinSpot MTF cron slots are isolated from other scheduled provider workloa
 });
 
 
-test("CoinSpot backfill uses a validated string-epoch partition when numeric epoch returns empty",async()=>{
+test("CoinSpot backfill uses validated millisecond-epoch partitions when seconds return empty",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch;
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
@@ -314,8 +314,8 @@ test("CoinSpot backfill uses a validated string-epoch partition when numeric epo
     const make=offset=>Array.from({length:500},(_,i)=>makeRow(Date.parse("2026-08-19T00:00:00Z")+(offset+i)*1000));
     return new Response(JSON.stringify({status:"ok",buyorders:make(0),sellorders:make(500)}),{status:200});
    }
-   if(typeof body.startdate==="string" && /^\d+$/.test(body.startdate)){
-    const start=Number(body.startdate)*1000;
+   if(typeof body.startdate==="number" && body.startdate > 1e12){
+    const start=Number(body.startdate);
     return new Response(JSON.stringify({status:"ok",buyorders:[makeRow(start+5*60*1000)],sellorders:[]}),{status:200});
    }
    return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
@@ -327,6 +327,7 @@ test("CoinSpot backfill uses a validated string-epoch partition when numeric epo
   const result=await __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T12:00:00.000Z");
   assert.equal(result.processedDate,"2026-08-19");
   assert.equal(result.markets[0].tradeCount,2);
+  assert.ok(result.markets[0].queryFormatsAttempted.includes("epoch-ms"));
   assert.equal(result.markets[1].tradeCount,2);
   const saved=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(saved.markets.BTC.dailyCandles.length,1);
