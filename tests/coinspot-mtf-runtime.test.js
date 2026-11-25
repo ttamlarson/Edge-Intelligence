@@ -199,7 +199,7 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
   if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
   if(target.endsWith("/orders/market/completed")){
    const body=JSON.parse(options.body||"{}"),coin=body.cointype;
-   if(typeof body.startdate==="string"){
+   if(typeof body.startdate==="string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(body.startdate)){
     const make=offset=>Array.from({length:500},(_,i)=>({
      market:coin+"/AUD",
      solddate:new Date(Date.parse("2026-07-28T00:00:00.000Z")+(offset+i)*1000).toISOString(),
@@ -228,41 +228,6 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
  }finally{globalThis.fetch=originalFetch;}
 });
 
-
-test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions return no history",async()=>{
- const kv=kvStore(),originalFetch=globalThis.fetch;
- globalThis.fetch=async(url,options={})=>{
-  const target=String(url);
-  if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
-  if(target.endsWith("/orders/market/completed")){
-   const body=JSON.parse(options.body||"{}"),coin=body.cointype;
-   if(typeof body.startdate==="string"){
-    const make=offset=>Array.from({length:500},(_,i)=>({
-     market:coin+"/AUD",
-     solddate:new Date(Date.parse("2026-07-28T00:00:00.000Z")+(offset+i)*1000).toISOString(),
-     rate:coin==="BTC"?90000:2500,amount:0.01,total:coin==="BTC"?900:25
-    }));
-    return new Response(JSON.stringify({status:"ok",buyorders:make(0),sellorders:make(500)}),{status:200});
-   }
-   return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
-  }
-  if(target.includes("/pubapi/v2/orders/completed/")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
-  throw new Error("Unexpected CoinSpot URL: "+target);
- };
- try{
-  await assert.rejects(
-   ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T06:00:00.000Z"),
-   /COINSPOT_HISTORY_PARTITION_EMPTY/
-  );
-  const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
-  assert.equal(history.nextDate,"2026-07-28");
-  assert.equal(history.lastProcessedDate,undefined);
-  assert.equal(history.liveTradingEnabled,false);
-  assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory.length,2);
-  assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades,0);
-  assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].validAudTrades,0);
- }finally{globalThis.fetch=originalFetch;}
-});
 
 test("CoinSpot sub-day probe detects a provider that returns out-of-window trades",async()=>{
  const originalFetch=globalThis.fetch;
