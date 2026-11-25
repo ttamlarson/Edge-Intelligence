@@ -64,7 +64,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  try{
-  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z");
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z", 1);
   assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
   assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
