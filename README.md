@@ -176,3 +176,13 @@ The MTF Donchian research route uses CoinSpot Read Only V2 `/orders/market/compl
 ## CoinSpot multi-timeframe automated paper trading
 
 The CoinSpot AUD MTF breakout candidate is now connected to a separate automated paper ledger in `coinspot-mtf-paper.js`. It uses BTC/AUD and ETH/AUD CoinSpot read-only completed-order history, the daily/4-hour breakout strategy, and live public bid/ask quotes for simulated fills. The 15-minute Worker schedule advances up to four historical UTC days per run, evaluates the fixed strategy, updates a virtual AUD 100 account, and records simulated trades. The paper ledger uses a 0.5% equity risk budget, 25% maximum allocation, one position, 0.1% fees, 15 bps slippage, an ATR stop/trailing stop, and an AUD 3 daily loss pause. OpenAI provides advisory risk commentary on qualifying candidates; AI cannot alter strategy parameters, sizing, or risk controls. The new endpoint is `GET/POST /api/crypto/coinspot/mtf-paper`. This is simulation only: it does not submit CoinSpot orders, and it does not prove profitability. The history backfill and first successful authenticated CoinSpot response must be verified in production before treating the engine as operational.
+
+
+## CoinSpot MTF paper runtime hardening
+
+- The authenticated CoinSpot adapter now has an explicit read-only endpoint allowlist: status, balances, open market orders and completed market-order history only. Order placement, cancellation, withdrawals and transfers are rejected before any upstream request.
+- `GET /api/crypto/coinspot/readonly/status` verifies the configured Read Only key against CoinSpot's documented `/status` endpoint without returning credentials.
+- Transient CoinSpot transport failures are retried once with a fresh monotonic nonce and matching HMAC-SHA512 signature. Requests have a bounded 15-second timeout and persist explicit `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` diagnostics.
+- Paper position sizing now includes both entry and stop-exit fees and modeled slippage in its risk budget. The daily-loss circuit includes open mark-to-market losses as well as realized losses and closes an open paper position when the limit is reached.
+- Current BTC/AUD and ETH/AUD quotes are fetched even while historical candles are warming, so existing paper positions remain marked and stop-managed. New positions are marked to the current bid after modeled slippage and fees immediately on entry.
+- The engine remains restricted to BTC/AUD and ETH/AUD, AUD 100 simulated capital, one open position, 0.5% risk per trade, 25% allocation and AUD 3 daily loss. It never submits CoinSpot orders; `liveTradingEnabled` remains false.

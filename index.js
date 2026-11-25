@@ -25,6 +25,9 @@ let accessKeysCache = null;
 let accessKeysCacheAt = 0;
 let accessKeysPending = null;
 let lastCoinSpotNonce = 0;
+const COINSPOT_READONLY_PATHS = new Set(["/status", "/orders/market/completed", "/my/balances", "/my/orders/market/open"]);
+const COINSPOT_READONLY_TIMEOUT_MS = 15_000;
+const COINSPOT_READONLY_MAX_ATTEMPTS = 2;
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -184,29 +187,56 @@ function coinSpotReadOnly(env, path, extra = {}) {
 }
 
 async function coinSpotReadOnlyNow(env, path, extra = {}) {
-  const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
-  if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
-  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
-  // Add a random sub-millisecond component to reduce nonce collisions across isolates.
-  const random = new Uint32Array(1); crypto.getRandomValues(random);
-  const nonce=Math.max(Date.now()*1000+(random[0]%1000),lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
-  const body=JSON.stringify({...extra,nonce});
-  const cryptoKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-512"},false,["sign"]);
-  const signature=await crypto.subtle.sign("HMAC",cryptoKey,new TextEncoder().encode(body));
-  const sign=[...new Uint8Array(signature)].map(b=>b.toString(16).padStart(2,"0")).join("");
-  let response;
-  try {
-    response=await fetch("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body,signal:AbortSignal.timeout(10_000)});
-  } catch {
-    throw new HttpError(502,"Could not reach CoinSpot. Retry the read-only account request.");
+  const key = String(env.COINSPOT_READONLY_KEY || "").trim();
+  const secret = String(env.COINSPOT_READONLY_SECRET || "").trim();
+  if (!key || !secret) throw new HttpError(503, "CoinSpot read-only API credentials are not configured.");
+  if (!COINSPOT_READONLY_PATHS.has(path)) throw new HttpError(403, "CoinSpot adapter only permits read-only status, balance, open-order and completed-market-history endpoints.");
+
+  let response = null;
+  let transportError = null;
+  for (let attempt = 0; attempt < COINSPOT_READONLY_MAX_ATTEMPTS; attempt++) {
+    // A timed-out request may have reached CoinSpot. Every retry therefore
+    // receives a fresh, strictly increasing nonce and matching HMAC signature.
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const nonce = Math.max(Date.now() * 1000 + (random[0] % 1000), lastCoinSpotNonce + 1);
+    lastCoinSpotNonce = nonce;
+    const body = JSON.stringify({ ...extra, nonce });
+    const cryptoKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(body));
+    const sign = [...new Uint8Array(signature)].map(b => b.toString(16).padStart(2, "0")).join("");
+
+    try {
+      response = await fetch("https://www.coinspot.com.au/api/v2/ro" + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", key, sign, Accept: "application/json" },
+        body,
+        signal: AbortSignal.timeout(COINSPOT_READONLY_TIMEOUT_MS)
+      });
+      transportError = null;
+      break;
+    } catch (error) {
+      transportError = error;
+      if (attempt + 1 < COINSPOT_READONLY_MAX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+      }
+    }
   }
-  if(response.url && new URL(response.url).hostname!=="www.coinspot.com.au") throw new HttpError(502,"CoinSpot redirected to an unexpected host.");
-  const length=Number(response.headers.get("Content-Length"));
-  if(Number.isFinite(length)&&length>512*1024) throw new HttpError(502,"CoinSpot response exceeded the size limit.");
-  const raw=await readLimitedText(response,512*1024,()=>new HttpError(502,"CoinSpot response exceeded the size limit."));
+
+  if (!response) {
+    const errorName = String(transportError?.name || "");
+    if (errorName === "TimeoutError" || errorName === "AbortError") {
+      throw new HttpError(504, `COINSPOT_TIMEOUT: CoinSpot read-only request timed out after ${COINSPOT_READONLY_MAX_ATTEMPTS} attempts.`);
+    }
+    throw new HttpError(502, `COINSPOT_NETWORK_ERROR: CoinSpot read-only endpoint could not be reached after ${COINSPOT_READONLY_MAX_ATTEMPTS} attempts.`);
+  }
+  if (response.url && new URL(response.url).hostname !== "www.coinspot.com.au") throw new HttpError(502, "CoinSpot redirected to an unexpected host.");
+  const length = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(length) && length > 512 * 1024) throw new HttpError(502, "CoinSpot response exceeded the size limit.");
+  const raw = await readLimitedText(response, 512 * 1024, () => new HttpError(502, "CoinSpot response exceeded the size limit."));
   let payload;
-  try { payload=JSON.parse(raw); } catch { throw new HttpError(502,"CoinSpot returned an invalid response."); }
-  if(!response.ok || payload?.status!=="ok") throw new HttpError(502,coinSpotDiagnostic(response.status,payload?.message));
+  try { payload = JSON.parse(raw); } catch { throw new HttpError(502, "CoinSpot returned an invalid response."); }
+  if (!response.ok || payload?.status !== "ok") throw new HttpError(502, coinSpotDiagnostic(response.status, payload?.message));
   return payload;
 }
 
@@ -638,31 +668,42 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   let state;
   try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
   catch { throw new HttpError(502,"CoinSpot strategy history cache is invalid JSON."); }
-  if(!state) return {provider:"CoinSpot",status:"HISTORY_SYNC_NOT_STARTED",historyDaysRequired:110,liveTradingEnabled:false};
+  if(!state) state={mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"HISTORY_SYNC_NOT_STARTED",markets:{},liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
     let quote=null,signal=null,signalError=null;
     const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
     const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
-    if(daily.length<110||fourHour.length<210){
-      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError:null,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
-      continue;
-    }
+
+    // Always retrieve the current AUD quote, even during history warm-up. An
+    // existing paper position must continue to be marked and stop-managed when
+    // historical candles are incomplete or temporarily unavailable.
     try {
       const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
       const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
       if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
       quote={pair:coin+"/AUD",bid,ask,last,spreadBps:Number(((ask-bid)/ask*10000).toFixed(2)),retrievedAt:new Date(clock).toISOString()};
-      const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
-      const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
-      if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
-      else {
-        try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
-        catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
-      }
-    } catch(error) { signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180); }
+    } catch(error) {
+      signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
+    }
+
+    if(daily.length<110||fourHour.length<210){
+      markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:"WARMUP_REQUIRED",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
+    if(!quote){
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal:null,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
+    const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
+    const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
+    if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
+    else {
+      try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
+      catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
+    }
     markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
@@ -849,6 +890,13 @@ async function handle(request, env, ctx) {
     }));
     return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
+  if (requestUrl.pathname === "/api/crypto/coinspot/readonly/status" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "coinspot-readonly-status");
+    if (!env.COINSPOT_READONLY_KEY || !env.COINSPOT_READONLY_SECRET) throw new HttpError(503, "CoinSpot read-only API credentials are not configured.");
+    const status = await coinSpotReadOnly(env, "/status");
+    if (status?.status !== "ok") throw new HttpError(502, "CoinSpot read-only status response was invalid.");
+    return reply({ provider: "CoinSpot", access: "READ_ONLY", status: "AUTHENTICATED", retrievedAt: isoNow(), paperOnly: true, liveTradingEnabled: false });
+  }
   if (requestUrl.pathname === "/api/crypto/coinspot/strategy" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-mtf-strategy");
     return reply(await getCoinSpotMtfStrategy(env));
@@ -975,5 +1023,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

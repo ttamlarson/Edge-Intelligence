@@ -188,3 +188,17 @@ Updated after local implementation and automated verification on `edge-productio
 - Adds bounded recursive splitting for potentially truncated history windows, per-run request budget, KV persistence, one-day scheduled backfill progression, and authenticated strategy status/manual sync endpoints.
 - Strategy status uses current CoinSpot public bid/ask quotes to calculate spread and evaluates only closed, fresh bars. No order is placed; live execution remains disabled.
 - Outstanding: run deployed Worker against the actual Read Only key; verify CoinSpot endpoint permissions, historical coverage and rate/volume; complete warm-up; integrate strategy candidates into an isolated paper ledger and validate fee/slippage/fill handling.
+
+
+## 2026-11-25 — CoinSpot MTF paper runtime remediation
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Production runtime audit | Verified | GitHub CI and Pages production deployment were green on main commit `c031332`; the Worker had the latest backend code from `3cdf9dc` and a 15-minute cron. |
+| CoinSpot historical sync | Blocked by provider transport | Production KV showed the history cursor at 2026-08-07, zero accepted BTC/AUD and ETH/AUD candles, and `DATA_OR_SYNC_WARNING`. The stored transport message was generic, so the actual timeout/network cause was not yet distinguishable. |
+| Read-only credential verification | Implemented on `edge-production-remediation-coinspot-20261125` | Adds an authenticated `/api/crypto/coinspot/readonly/status` check and restricts the internal adapter to read-only endpoints only. |
+| Transport resilience and diagnostics | Implemented on feature branch | One bounded retry uses a fresh nonce/signature; 15-second request timeout and explicit transport error codes. |
+| Paper risk controls | Implemented on feature branch | Round-trip fee/slippage-aware stop-risk sizing, immediate bid-side mark-to-market after entry, and daily-loss accounting that includes open mark-to-market losses. |
+| Warm-up position management | Implemented on feature branch | Current BTC/AUD and ETH/AUD quotes are fetched even before candle warm-up completes, so existing paper positions can still be marked and stopped; regression tests cover this path. |
+| Live trading safety | Preserved | No order, cancel, withdrawal or transfer route is added. No live-trading safety flag or secret is changed. |
+| Runtime promotion | Pending branch CI and deployment verification | Do not claim CoinSpot retrieval is operational until the read-only status check succeeds and KV contains validated, non-empty BTC/AUD and ETH/AUD history. |
