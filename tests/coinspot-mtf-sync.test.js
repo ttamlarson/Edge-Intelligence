@@ -222,9 +222,11 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
       console.log("COINSPOT_RESUME_DIAG", run, JSON.stringify({
         dateComplete: result.dateComplete,
         progress: result.progress,
+        marketOutcomes: result.markets,
         persistedPending: persisted.pendingHistorySync && Object.fromEntries(Object.entries(persisted.pendingHistorySync.coins).map(([coin, value]) => [coin, { complete: value.complete, windows: value.windows.length, calls: value.apiCallsTotal }]))
       }));
       const runCalls = allCalls.slice(before);
+      console.log("COINSPOT_RESUME_CALLS", run, runCalls.length);
       for (const coin of ["BTC", "ETH"]) {
         assert.ok(runCalls.filter(call => call.coin === coin).length <= 15, "per-market request budget must be respected");
       }
