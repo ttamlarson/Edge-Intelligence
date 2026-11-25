@@ -171,3 +171,11 @@ Updated after local implementation and automated verification on `edge-productio
 
 
 - Added deterministic cross-ticker candidate ranking by net reward/risk, net target profit and risk-budget utilisation. Uncalibrated AI win probability is deliberately not used as a ranking signal.
+
+
+## 2026-11-25 — Multi-timeframe crypto breakout engine
+
+- Added isolated `edge-mtf-breakout-strategy.js` with completed-candle daily/four-hour trend filters, three-lookback Donchian breakout voting, spread/volume/volatility gates, risk-based position sizing and deterministic exit calculations.
+- Added synthetic-fixture unit tests for signal eligibility, incomplete/gapped data rejection, liquidity/spread fail-closed behaviour, sizing caps and exit rules. Synthetic tests validate implementation only; they are not market performance evidence.
+- Added syntax check and README documentation. Engine is not connected to exchange execution, does not generate orders, and remains live-disabled.
+- Outstanding before operational paper promotion: verified CoinSpot AUD multi-timeframe data adapter, fee/spread/slippage-aware chronological backtester, execution/fill reconciliation, and forward paper validation.
