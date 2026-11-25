@@ -4,6 +4,25 @@ const ALLOWED = new Set(["BTC","ETH"]);
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const finite = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+export function coinSpotHistoryRangeParams(startMs, endMs, format = "date") {
+  if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) || startMs < 0 || endMs <= startMs) {
+    throw new Error("Invalid CoinSpot history date range.");
+  }
+  if (format === "date") {
+    return {
+      startdate: new Date(startMs).toISOString().slice(0, 10),
+      enddate: new Date(endMs - 1).toISOString().slice(0, 10)
+    };
+  }
+  if (format === "epoch") {
+    return {
+      startdate: Math.floor(startMs / 1000),
+      enddate: Math.floor((endMs - 1) / 1000)
+    };
+  }
+  throw new Error("CoinSpot history date format must be date or epoch.");
+}
+
 
 export function normalizeCoinSpotCompletedOrders({coin,payload}={}) {
   const symbol=String(coin||"").toUpperCase();
