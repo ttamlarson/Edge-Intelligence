@@ -27,6 +27,7 @@ const venues = [
  ["Metaculus","metaculus","No verified integration configured"],
 ];
 let state = loadState();
+const cryptoResearchReports = new Map();
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const initialTimeZone = VALID_TIME_ZONES.includes(state.timeZone) ? state.timeZone : VALID_TIME_ZONES.includes(browserTimeZone) ? browserTimeZone : "Australia/Sydney";
 if ($("auTimezone")) $("auTimezone").value = initialTimeZone;
@@ -121,6 +122,7 @@ async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
 }
 function renderCryptoBacktest(label, imported) {
  const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
+ cryptoResearchReports.set(m.symbol, imported);
  const moneyQ=value=>new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0)+" "+q;
  const cards=[
   ["OUT-OF-SAMPLE NET P&L",moneyQ(r.outOfSample.netPnlQuote),r.outOfSample.trades+" closed trades"],
@@ -152,11 +154,53 @@ function renderCryptoBacktest(label, imported) {
     ["ASSESSMENT",wfSummary.assessment||"UNKNOWN","Research only · no live orders"]
    ].map(c=>'<article class="metric-card"><span>'+esc(c[0])+'</span><strong>'+esc(c[1])+'</strong><small>'+esc(c[2])+'</small></article>').join("")+'</div>'+
    (wf.folds||[]).map(fold=>'<p class="market-meta">Fold '+fold.fold+': '+fold.trades+' trades · return '+wfPct(fold.returnPct)+' · buy/hold '+wfPct(fold.benchmark?.returnPct)+' · drawdown '+wfPct(fold.maxDrawdownPct)+'</p>').join("")+
-   '<p class="muted tiny">Chronological expanding-history validation; fixed parameters, no fitting. Source: '+esc(wf.source||m.source||"User supplied")+' · '+esc(wf.data?.firstBarAt||"")+' → '+esc(wf.data?.lastBarAt||"")+'. Source and data-use rights are not independently verified. Small samples are not evidence of profitability.</p></div>';
+   '<p class="muted tiny">Chronological expanding-history validation; fixed parameters, no fitting. Source: '+esc(wf.source||m.source||"User supplied")+' · '+esc(wf.data?.firstBarAt||"")+' → '+esc(wf.data?.lastBarAt||"")+'. Source and data-use rights are not independently verified. Small samples are not evidence of profitability.</p><button class="secondary-btn" type="button" data-crypto-ai-review="'+esc(m.symbol)+'">Run AI research review</button><div class="market-meta" id="cryptoAiReview-'+esc(m.symbol)+'"></div></div>';
  const skipLabels={positionOpen:"Position already open",dailyLossLimit:"Daily loss limit",trendFilter:"Trend filter",rsiFilter:"RSI filter",volatilityFilter:"ATR / volatility filter",insufficientCapitalOrRisk:"Capital or risk sizing"};
  const skipRows=Object.entries(o.skipped||{}).map(([key,value])=>`<tr><td>${esc(skipLabels[key]||key)}</td><td>${value}</td></tr>`).join("");
  return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><div class="result-section"><h4>ALTERNATIVE · EDGE ACTIVE MOMENTUM v1</h4><p>${esc(active.methodology)}</p><div class="metric-grid">${activeCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${av.trades} closed trades from ${av.evaluatedBars} bars · ${esc(av.dateRange.from||"—")} → ${esc(av.dateRange.to||"—")}. This is a separate research candidate, not a validated replacement.</p></div><div class="result-section"><h4>NEW CANDIDATE · REGIME-ADAPTIVE BREAKOUT v1 · 4H</h4><p>${esc(br.methodology)} Risk ${br.risk.perTradePct}% of equity per trade; maximum allocation ${br.risk.maxAllocationPct}%; initial stop ${br.risk.initialStopAtr} ATR; trailing stop ${br.risk.trailingStopAtr} ATR. Uses complete 4-hour candles aggregated from hourly history; incomplete buckets are discarded.</p><div class="metric-grid">${breakoutCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${bo.trades} closed trades from ${bo.evaluatedBars} bars · ${esc(bo.dateRange.from||"—")} → ${esc(bo.dateRange.to||"—")}; ${bo.eligibleSignals} qualifying entry signals. ${br.sample.fourHourCandles} complete 4h candles; ${br.sample.outOfSampleCandles} OOS candles. Research candidate only; not approved for live trading.</p></div>'+walkForwardHtml+trendFollowingHtml+'<p class="muted tiny">Data provenance: ${esc(m.source||"User-supplied historical CSV")}, ${esc(m.exchange||"Binance")} ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
 }
+
+document.addEventListener("click", async event => {
+ const button=event.target?.closest?.("[data-crypto-ai-review]");
+ if(!button)return;
+ const symbol=button.dataset.cryptoAiReview;
+ const imported=cryptoResearchReports.get(symbol);
+ const target=$("cryptoAiReview-"+symbol);
+ if(!imported||!target)return;
+ const candles=imported.candles||[];
+ if(candles.length>5000){target.textContent="AI review is limited to 5,000 completed hourly candles. The deterministic local backtest remains available.";return;}
+ button.disabled=true;button.textContent="Reviewing research…";
+ target.textContent="Recomputing the fixed-rule walk-forward on the Worker and requesting a structured AI critique. No orders can be placed.";
+ try{
+  const review=await api("/api/crypto/research/review",{
+   method:"POST",
+   body:JSON.stringify({
+    market:symbol,quoteCurrency:imported.metadata.quoteAsset,
+    source:imported.metadata.source||"User-supplied historical OHLCV",candles
+   })
+  });
+  const provenance=review.inputProvenance||{};
+  const lines=[
+   "AI research review: "+(review.status||"UNKNOWN"),
+   "Decision: "+(review.decision||"Not authorised")+" · model suggestion: "+(review.modelDecision||"—"),
+   "Subjective confidence: "+(review.confidence==null?"—":review.confidence+"%")+" · evidence quality: "+(review.evidenceQuality||"—"),
+   "Deterministic gate: "+(review.deterministicGateMet?"met":"not met")+" · advance allowed: "+(review.advanceAllowed?"yes, to extended paper observation only":"no"),
+   "Thesis: "+(review.thesis||"—"),
+   "Counter-thesis: "+(review.counterThesis||"—"),
+   "Risk flags: "+((review.riskFlags||[]).join("; ")||"None declared"),
+   "Limitations: "+((review.limitations||[]).join("; ")||"—"),
+   "Walk-forward assessment: "+(review.research?.summary?.assessment||"Unavailable"),
+   "Provenance: "+(provenance.barsProvided||0)+" bars · SHA-256 "+(provenance.fingerprint||"").slice(0,16)+"… · source not independently verified",
+   review.reason||"",
+   "Model-assisted critique only; not a trained predictor, profitability claim or trade instruction."
+  ].filter(Boolean);
+  target.innerHTML=lines.map(line=>"<div>"+esc(line)+"</div>").join("");
+ }catch(error){
+  target.textContent="AI review unavailable: "+(error?.message||"Request failed")+". No research advancement or trade was authorised.";
+ }finally{
+  button.disabled=false;button.textContent="Run AI research review";
+ }
+});
 $("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults"),button=$("fetchCryptoHistoryBtn");
  let symbols; try { symbols=parseBinanceUsdtSymbols($("cryptoHistorySymbols")?.value||""); } catch(error) { status.textContent=error.message; return; }
