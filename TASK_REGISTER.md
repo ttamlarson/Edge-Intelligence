@@ -211,3 +211,12 @@ Updated after local implementation and automated verification on `edge-productio
 - Added a fail-closed schema diagnostic: a non-empty provider response that yields zero valid normalized trades now blocks the sync instead of silently advancing the history cursor. Diagnostics expose only field-validity booleans.
 - Regression coverage verifies one-day progression, bounded call counts, non-advancement on invalid non-empty rows, and paper-only safety.
 - Remaining blocker: production history still contains sparse candles and historical responses require fresh runtime verification after this branch is tested and deployed. No strategy signal or paper entry is permitted until each market has the required fresh, contiguous history.
+
+
+## 2026-11-25 — CoinSpot partition-window integrity
+
+- The first post-deployment production scan advanced one day without exceeding the Worker subrequest ceiling, but it still accepted zero historical trades for both markets despite raw completed-order responses. The full-day responses were at/near the 500-per-side cap, while recursive epoch sub-day windows yielded no accepted trades.
+- Added a two-window 12-hour epoch probe for each market, including in-range and out-of-range trade counts. The probe is forced once after deployment, then remains on the 24-hour cadence.
+- Added fail-closed checks for saturated daily windows whose child partitions produce no accepted trades (`COINSPOT_HISTORY_PARTITION_EMPTY`) and for responses containing trades outside the requested UTC window (`COINSPOT_HISTORY_RANGE_MISMATCH`). The date cursor cannot advance in either case.
+- Reduced the per-market/day recursive request ceiling to 15 to reserve subrequest headroom for the once-daily partition probe and existing scheduled services.
+- Remaining blocker: the next production scan must show non-empty, correctly time-bounded epoch partitions before any historical candles can be considered complete. Strategy signals and paper entries remain blocked until the full 110 daily / 210 four-hour candle requirements are met.
