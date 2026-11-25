@@ -4,6 +4,8 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, COINSPOT_INTERVALS } from "./coinspot-history.js";
+import { evaluateEdgeBreakoutSignal } from "./edge-mtf-breakout-strategy.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
@@ -451,6 +453,101 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
   return snapshot;
 }
 
+const COINSPOT_MTF_KEY = "coinspot-mtf-history-global-v1";
+const COINSPOT_MTF_COINS = ["BTC","ETH"];
+const utcDate = timestamp => new Date(timestamp).toISOString().slice(0,10);
+const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+days*86400000).toISOString().slice(0,10);
+
+async function fetchCoinSpotHistoryWindow(env,coin,startMs,endMs,budget) {
+  if (budget.calls >= 48) throw new HttpError(503,"CoinSpot history batch reached its safe request budget; retrying this date on the next sync.");
+  budget.calls++;
+  const payload=await coinSpotReadOnly(env,"/orders/market/completed",{
+    cointype:coin,markettype:"AUD",startdate:Math.floor(startMs/1000),
+    enddate:Math.floor((endMs-1)/1000),limit:500
+  });
+  if(!Array.isArray(payload.buyorders)||!Array.isArray(payload.sellorders)) throw new HttpError(502,"CoinSpot historical order response was malformed.");
+  const count=payload.buyorders.length+payload.sellorders.length;
+  if(count>=450){
+    const duration=endMs-startMs;
+    if(duration<=15*60*1000) throw new HttpError(503,"CoinSpot returned a potentially truncated 15-minute history window; no candles were saved.");
+    const midpoint=Math.floor((startMs+endMs)/2/1000)*1000;
+    if(midpoint<=startMs||midpoint>=endMs) throw new HttpError(502,"CoinSpot history window could not be safely partitioned.");
+    const left=await fetchCoinSpotHistoryWindow(env,coin,startMs,midpoint,budget);
+    const right=await fetchCoinSpotHistoryWindow(env,coin,midpoint,endMs,budget);
+    return [...left,...right];
+  }
+  return normalizeCoinSpotCompletedOrders({coin,payload});
+}
+
+async function syncCoinSpotMtfHistory(env,now=new Date()) {
+  if(!env.EDGE_KV) return {status:"STORAGE_UNAVAILABLE",liveTradingEnabled:false};
+  const clock=now instanceof Date?now.getTime():Date.parse(now);
+  if(!Number.isFinite(clock)) return {status:"INVALID_SYNC_CLOCK",liveTradingEnabled:false};
+  const today=utcDate(clock);
+  let state;
+  try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
+  catch { return {status:"HISTORY_CACHE_INVALID_JSON",liveTradingEnabled:false}; }
+  if(!state) state={mode:"COINSPOT_AUD_RESEARCH_ONLY",startedAt:new Date(clock).toISOString(),nextDate:shiftUtcDate(today,-120),markets:{},liveTradingEnabled:false};
+  if(state.mode!=="COINSPOT_AUD_RESEARCH_ONLY"||state.liveTradingEnabled!==false||typeof state.nextDate!=="string"||!state.markets||typeof state.markets!=="object")
+    return {status:"HISTORY_CACHE_VALIDATION_FAILED",liveTradingEnabled:false};
+  const targetDate=state.nextDate<=today?state.nextDate:today;
+  const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;
+  const updatedMarkets={...state.markets};
+  const outcomes=[];
+  for(const coin of COINSPOT_MTF_COINS){
+    const budget={calls:0};
+    const trades=await fetchCoinSpotHistoryWindow(env,coin,startMs,endMs,budget);
+    const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
+    const fourHour=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.fourHour);
+    const previous=updatedMarkets[coin]||{dailyCandles:[],fourHourCandles:[],tradesFetched:0};
+    updatedMarkets[coin]={
+      dailyCandles:mergeCoinSpotCandles(previous.dailyCandles,daily,160),
+      fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,420),
+      tradesFetched:Number(previous.tradesFetched||0)+trades.length,
+      lastHistoryDate:targetDate,
+      lastSyncAt:new Date(clock).toISOString()
+    };
+    outcomes.push({coin,tradeCount:trades.length,dailyBarsAdded:daily.length,fourHourBarsAdded:fourHour.length,apiCalls:budget.calls});
+  }
+  state={...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),lastProcessedDate:targetDate,
+    nextDate:targetDate<today?shiftUtcDate(targetDate,1):today,
+    status:targetDate<today?"BACKFILLING":"COLLECTING_LIVE_DAY",liveTradingEnabled:false,lastBatch:outcomes};
+  await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
+  return {status:state.status,processedDate:targetDate,nextDate:state.nextDate,markets:outcomes,liveTradingEnabled:false};
+}
+
+async function getCoinSpotMtfStrategy(env,now=new Date()) {
+  if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
+  let state;
+  try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
+  catch { throw new HttpError(502,"CoinSpot strategy history cache is invalid JSON."); }
+  if(!state) return {provider:"CoinSpot",status:"HISTORY_SYNC_NOT_STARTED",historyDaysRequired:110,liveTradingEnabled:false};
+  const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
+  for(const coin of COINSPOT_MTF_COINS){
+    const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
+    let quote=null,signal=null,signalError=null;
+    try {
+      const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+      if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
+      const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
+      if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
+      quote={pair:coin+"/AUD",bid,ask,last,spreadBps:Number(((ask-bid)/ask*10000).toFixed(2)),retrievedAt:new Date(clock).toISOString()};
+      const daily=history.dailyCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
+      const fourHour=history.fourHourCandles.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
+      const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
+      const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
+      if(daily.length<110||fourHour.length<210) signalError="WARMUP_REQUIRED";
+      else if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
+      else {
+        try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
+        catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
+      }
+    } catch(error) { signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180); }
+    markets.push({coin,pair:coin+"/AUD",quote,history:{dailyCandles:history.dailyCandles?.length||0,fourHourCandles:history.fourHourCandles?.length||0,tradesFetched:history.tradesFetched||0,lastHistoryDate:history.lastHistoryDate||null},signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+  }
+  return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
+}
+
 async function runScheduledCryptoPaper(env, options = {}) {
   // ScheduledEvent has no HTTP Request Context; do not use AbortSignal.timeout().
   return runAutomatedCryptoPaper(env, { ...options, timeoutMs: null });
@@ -624,6 +721,15 @@ async function handle(request, env, ctx) {
     }));
     return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
+  if (requestUrl.pathname === "/api/crypto/coinspot/strategy" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-mtf-strategy");
+    return reply(await getCoinSpotMtfStrategy(env));
+  }
+  if (requestUrl.pathname === "/api/crypto/coinspot/strategy/sync" && request.method === "POST") {
+    await routeLimit(env.WRITE_LIMITER,principal.sub,"coinspot-mtf-sync");
+    if(!env.COINSPOT_READONLY_KEY||!env.COINSPOT_READONLY_SECRET) throw new HttpError(503,"CoinSpot Read Only API credentials are not configured.");
+    return reply(await syncCoinSpotMtfHistory(env));
+  }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
     return reply(await marketSearch(request, env));
@@ -732,6 +838,7 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
+    if (env.EDGE_KV && env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) ctx.waitUntil(syncCoinSpotMtfHistory(env).catch(() => null));
     if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
@@ -740,5 +847,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
