@@ -440,7 +440,6 @@ $("asxAutoScanBtn")?.addEventListener("click",async()=>{
 });
 renderAsxDesk();
 loadAsxAutopilotStatus();
-+esc(s.ranking?.expectedNetTargetProfitAud)+' · risk budget use '+esc(s.ranking?.riskBudgetUtilizationPct)+'%')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
  }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
 }
 $("asxAutoScanBtn")?.addEventListener("click",async()=>{
