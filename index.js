@@ -1340,7 +1340,7 @@ export default {
         }));
         return snapshot;
       }).catch(error => {
-        console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).replace(/\\s+/g, " ").slice(0, 220));
+        console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).replace(/\s+/g, " ").slice(0, 220));
         throw error;
       });
       ctx.waitUntil(scan);
