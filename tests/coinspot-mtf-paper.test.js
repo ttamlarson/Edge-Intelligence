@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import {MTF_PAPER_CONFIG,createMtfPaperAccount,processMtfPaperAccount,validateMtfPaperAccount} from "../coinspot-mtf-paper.js";
 const now="2026-11-25T08:00:00.000Z";
 function candidate(coin="BTC",signalAt="2026-11-25T04:00:00.000Z",ask=100000){
- return {coin,quote:{bid:ask*.999,ask,last:ask},signal:{status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,
-  indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},checks:{dailyTrend:true,fourHourTrend:true}}};
+ const bid=ask*.999;
+ return {coin,quote:{bid,ask,last:ask,spreadBps:(ask-bid)/ask*10000},signal:{
+  strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,
+  indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},
+  checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,liquidity:true,volatility:true},
+  execution:{orderIntent:"NONE",paperOnly:true,liveTradingEnabled:false}
+ }};
 }
 test("starts with AUD 100 and immutable paper-only safety flag",()=>{const a=createMtfPaperAccount(now);assert.equal(a.cashAud,100);assert.equal(a.liveTradingEnabled,false);assert.equal(validateMtfPaperAccount(a),true);});
 test("opens a single risk-sized simulated CoinSpot position and retains reserve",()=>{const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});assert.ok(a.openPosition);assert.equal(a.openPosition.coin,"BTC");assert.ok(a.cashAud>=75);assert.ok(a.unrealizedPnlAud<0);assert.ok(a.equityAud<100);assert.ok(a.dailyLossAud>0);assert.equal(a.liveTradingEnabled,false);});
@@ -49,4 +54,20 @@ test("rejects malformed MTF candidates with invalid ATR or crossed quotes",()=>{
  assert.equal(a.equityAud,100);
  assert.equal(a.liveTradingEnabled,false);
  assert.equal(validateMtfPaperAccount(a),true);
+});
+
+test("rejects wide-spread, stale, incomplete-check, malformed-stop and non-paper candidates before sizing",()=>{
+ const base=candidate();
+ const wide={...base,quote:{...base.quote,spreadBps:MTF_PAPER_CONFIG.maxSpreadBps+0.01}};
+ const stale={...base,signal:{...base.signal,signalAt:"2026-11-24T04:00:00.000Z"}};
+ const incomplete={...base,signal:{...base.signal,checks:{...base.signal.checks,volatility:false}}};
+ const badStop={...base,signal:{...base.signal,risk:{initialStopDistance:2000}}};
+ const liveIntent={...base,signal:{...base.signal,execution:{...base.signal.execution,liveTradingEnabled:true}}};
+ const missingSpread={...base,quote:{...base.quote,spreadBps:undefined}};
+ const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[wide,stale,incomplete,badStop,liveIntent,missingSpread],now});
+ assert.equal(a.openPosition,null);
+ assert.equal(a.cashAud,100);
+ assert.equal(a.equityAud,100);
+ assert.deepEqual(a.lastProcessed,{});
+ assert.equal(a.liveTradingEnabled,false);
 });

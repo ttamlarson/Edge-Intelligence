@@ -1,7 +1,7 @@
 // CoinSpot multi-timeframe automated paper ledger. AUD only; never submits exchange orders.
 export const MTF_PAPER_CONFIG = Object.freeze({
   startingCapitalAud: 100, maxAllocationPct: 25, riskBudgetPct: 0.5,
-  feeRate: 0.001, slippageBps: 15, maxDailyLossAud: 3,
+  feeRate: 0.001, slippageBps: 15, maxDailyLossAud: 3, maxSpreadBps: 50,
   maxHoldingDays: 30, initialStopAtr: 2.5, trailingStopAtr: 3
 });
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -79,14 +79,33 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   }
 
   if (!a.openPosition && a.dailyLossAud < MTF_PAPER_CONFIG.maxDailyLossAud) {
-    const candidates = markets.filter(m => validCoin(m.coin) &&
-      m.signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
-      m.quote && Number.isFinite(m.quote.bid) && m.quote.bid > 0 &&
-      Number.isFinite(m.quote.ask) && m.quote.ask >= m.quote.bid &&
-      Number.isFinite(m.signal?.indicators?.atr20) && m.signal.indicators.atr20 > 0 &&
-      m.signal?.risk && Number.isFinite(m.signal.risk.initialStopDistance) &&
-      m.signal.risk.initialStopDistance > 0)
-      .sort((x, y) => Number(y.signal.indicators?.breakoutVotes || 0) - Number(x.signal.indicators?.breakoutVotes || 0));
+    const candidates = markets.filter(m => {
+      const signal = m?.signal, quote = m?.quote, checks = signal?.checks;
+      const signalAt = Date.parse(signal?.signalAt || "");
+      const scanAt = Date.parse(now);
+      const atr = Number(signal?.indicators?.atr20);
+      const stopDistance = Number(signal?.risk?.initialStopDistance);
+      const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
+      const ageAfterSignalClose = scanAt - (signalAt + 4 * 60 * 60 * 1000);
+      const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "breakoutVotes", "liquidity", "volatility"];
+      return validCoin(m?.coin) &&
+        signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
+        signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
+        signal?.execution?.orderIntent === "NONE" &&
+        signal?.execution?.paperOnly === true &&
+        signal?.execution?.liveTradingEnabled === false &&
+        requiredChecks.every(key => checks?.[key] === true) &&
+        quote && Number.isFinite(quote.bid) && quote.bid > 0 &&
+        Number.isFinite(quote.ask) && quote.ask >= quote.bid &&
+        Number.isFinite(quote.last) && quote.last > 0 &&
+        Number.isFinite(quote.spreadBps) && quote.spreadBps >= 0 &&
+        quote.spreadBps <= MTF_PAPER_CONFIG.maxSpreadBps &&
+        Number.isFinite(atr) && atr > 0 &&
+        Number.isFinite(stopDistance) && stopDistance > 0 &&
+        Math.abs(stopDistance - expectedStopDistance) <= Math.max(1e-8, expectedStopDistance * 1e-6) &&
+        Number.isFinite(signalAt) && Number.isFinite(scanAt) &&
+        ageAfterSignalClose >= 0 && ageAfterSignalClose <= 8 * 60 * 60 * 1000;
+    }).sort((x, y) => Number(y.signal.indicators.breakoutVotes || 0) - Number(x.signal.indicators.breakoutVotes || 0));
 
     for (const m of candidates) {
       const signalAt = m.signal.signalAt;
