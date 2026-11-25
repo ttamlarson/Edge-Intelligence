@@ -797,10 +797,28 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
     const fourHour=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.fourHour);
     const previous=updatedMarkets[coin]||{dailyCandles:[],fourHourCandles:[],tradesFetched:0};
+    // The live UTC day is refreshed on every scan. Replace its per-date count
+    // instead of inflating the cumulative trade diagnostic on each refresh.
+    const previousCounts=previous.tradesFetchedByDate&&typeof previous.tradesFetchedByDate==="object"&&!Array.isArray(previous.tradesFetchedByDate)
+      ? previous.tradesFetchedByDate : {};
+    const previousTrackedTrades=Object.values(previousCounts).reduce((sum,value)=>{
+      const count=Number(value);
+      return sum+(Number.isFinite(count)&&count>=0?count:0);
+    },0);
+    const tradesFetchedBase=typeof previous.tradesFetchedBase==="number"&&Number.isFinite(previous.tradesFetchedBase)
+      ? Math.max(0,previous.tradesFetchedBase)
+      : Math.max(0,Number(previous.tradesFetched||0)-previousTrackedTrades);
+    const tradesFetchedByDate={...previousCounts,[targetDate]:trades.length};
+    const trackedTrades=Object.values(tradesFetchedByDate).reduce((sum,value)=>{
+      const count=Number(value);
+      return sum+(Number.isFinite(count)&&count>=0?count:0);
+    },0);
     updatedMarkets[coin]={
       dailyCandles:mergeCoinSpotCandles(previous.dailyCandles,daily,160),
       fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,420),
-      tradesFetched:Number(previous.tradesFetched||0)+trades.length,
+      tradesFetched:tradesFetchedBase+trackedTrades,
+      tradesFetchedBase,
+      tradesFetchedByDate,
       lastHistoryDate:targetDate,
       lastSyncAt:new Date(clock).toISOString()
     };

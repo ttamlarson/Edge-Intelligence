@@ -79,3 +79,56 @@ test("CoinSpot sync retries empty full-day history with epoch seconds and record
   assert.equal(saved.markets.ETH.dailyCandles.length, 1);
   assert.ok(saved.providerProbe.checkedAt);
 });
+
+
+test("CoinSpot live-day refresh replaces per-date trade counts instead of inflating history totals", async () => {
+  const kv = kvStore();
+  const now = "2026-11-25T16:00:00.000Z";
+  const variants = [{ format: "epoch" }, { format: "epoch-string" }, { format: "epoch-ms" }];
+  const probeMarket = coin => ({ coin, readOnlyHistory: { partitionHistory: [{ variants }, { variants }] } });
+  kv.values.set("coinspot-mtf-history-global-v1", JSON.stringify({
+    mode: "COINSPOT_AUD_RESEARCH_ONLY", status: "COLLECTING_LIVE_DAY", startedAt: now,
+    nextDate: "2026-11-25", lastProcessedDate: "2026-11-24",
+    markets: {
+      BTC: { dailyCandles: [], fourHourCandles: [], tradesFetched: 10 },
+      ETH: { dailyCandles: [], fourHourCandles: [], tradesFetched: 20 }
+    },
+    providerProbe: { checkedAt: now, readOnlyStatus: "AUTHENTICATED", markets: [probeMarket("BTC"), probeMarket("ETH")] },
+    lastProviderProbeAt: now, liveTradingEnabled: false
+  }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (!target.endsWith("/orders/market/completed")) throw new Error("Unexpected CoinSpot request: " + target);
+    const body = JSON.parse(options.body || "{}");
+    const coin = body.cointype, price = coin === "BTC" ? 90000 : 2500;
+    const start = Date.parse(body.startdate + "T00:00:00.000Z");
+    const row = (offset, rate, amount) => ({
+      market: coin + "/AUD", solddate: new Date(start + offset).toISOString(),
+      rate, amount, total: rate * amount
+    });
+    return new Response(JSON.stringify({
+      status: "ok", buyorders: [row(3600000, price, 0.01)],
+      sellorders: [row(7200000, price + 1, 0.02)]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const env = { EDGE_KV: kv.binding, COINSPOT_READONLY_KEY: "test-readonly-key", COINSPOT_READONLY_SECRET: "test-readonly-secret" };
+    const first = await __test.syncCoinSpotMtfHistory(env, now);
+    assert.equal(first.status, "COLLECTING_LIVE_DAY");
+    let history = JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+    assert.equal(history.nextDate, "2026-11-25");
+    assert.equal(history.markets.BTC.tradesFetched, 12);
+    assert.equal(history.markets.ETH.tradesFetched, 22);
+    assert.equal(history.markets.BTC.tradesFetchedByDate["2026-11-25"], 2);
+    assert.equal(history.markets.BTC.tradesFetchedBase, 10);
+    const second = await __test.syncCoinSpotMtfHistory(env, "2026-11-25T16:15:00.000Z");
+    assert.equal(second.status, "COLLECTING_LIVE_DAY");
+    history = JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+    assert.equal(history.markets.BTC.tradesFetched, 12);
+    assert.equal(history.markets.ETH.tradesFetched, 22);
+    assert.equal(history.markets.BTC.tradesFetchedByDate["2026-11-25"], 2);
+    assert.equal(history.markets.ETH.tradesFetchedByDate["2026-11-25"], 2);
+    assert.equal(history.liveTradingEnabled, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
