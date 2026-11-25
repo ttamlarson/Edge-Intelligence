@@ -489,128 +489,179 @@ const COINSPOT_MTF_COINS = ["BTC","ETH"];
 const utcDate = timestamp => new Date(timestamp).toISOString().slice(0,10);
 const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+days*86400000).toISOString().slice(0,10);
 
-async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
-  const duration = endMs - startMs;
-  const wholeUtcDay = duration === 86400000 && startMs % 86400000 === 0;
-  const primaryFormat = wholeUtcDay ? "date" : "epoch-ms";
-  const request = async format => {
-    if (budget.calls >= 15) throw new HttpError(503, "CoinSpot history batch reached its 15-request per-market safety budget; retrying this date on the next sync.");
+const COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC = 15;
+const COINSPOT_HISTORY_MIN_PARTITION_MS = 15 * 60 * 1000;
+
+function createCoinSpotHistoryProgress(targetDate, startMs, endMs) {
+  return {
+    targetDate,
+    coins: Object.fromEntries(COINSPOT_MTF_COINS.map(coin => [coin, {
+      windows: [{ startMs, endMs }],
+      trades: [],
+      rawRowsSeen: 0,
+      rawBuyOrders: 0,
+      rawSellOrders: 0,
+      apiCallsTotal: 0,
+      emptyPrimaryResponses: 0,
+      emptyHistoryWindows: 0,
+      dateFormatFallbackHits: 0,
+      queryFormatsAttempted: [],
+      marketsSeen: [],
+      sampleOrderAt: null,
+      saturatedWindows: 0,
+      complete: false,
+      tradeCount: 0
+    }]))
+  };
+}
+
+function validateCoinSpotHistoryProgress(progress, targetDate, startMs, endMs) {
+  if (!progress || progress.targetDate !== targetDate || !progress.coins ||
+      typeof progress.coins !== "object" || Array.isArray(progress.coins)) {
+    throw new HttpError(409, "CoinSpot resumable history state failed validation; stored data was preserved.");
+  }
+  for (const coin of COINSPOT_MTF_COINS) {
+    const market = progress.coins[coin];
+    if (!market || !Array.isArray(market.windows) || market.windows.length > 512 ||
+        !Array.isArray(market.trades) || market.trades.length > 100000 ||
+        typeof market.complete !== "boolean" ||
+        !Number.isSafeInteger(market.apiCallsTotal) || market.apiCallsTotal < 0 ||
+        !Number.isSafeInteger(market.saturatedWindows) || market.saturatedWindows < 0) {
+      throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history state failed validation; stored data was preserved.");
+    }
+    for (const window of market.windows) {
+      if (!Number.isSafeInteger(window?.startMs) || !Number.isSafeInteger(window?.endMs) ||
+          window.startMs < startMs || window.endMs > endMs || window.endMs <= window.startMs ||
+          (window.format !== undefined && !["date", "epoch"].includes(window.format))) {
+        throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history window failed validation; stored data was preserved.");
+      }
+    }
+    for (const trade of market.trades) {
+      if (!Number.isSafeInteger(trade?.timestamp) || trade.timestamp < startMs || trade.timestamp >= endMs ||
+          ![trade.price, trade.amount, trade.totalAud].every(value => Number.isFinite(value) && value > 0)) {
+        throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD trade cache failed validation; stored data was preserved.");
+      }
+    }
+  }
+  return true;
+}
+
+async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC) {
+  const budget = { calls: 0 };
+  const request = async (window, format) => {
+    if (budget.calls >= maxRequests) return null;
     budget.calls++;
-    const range = coinSpotHistoryRangeParams(startMs, endMs, format);
+    progress.apiCallsTotal++;
+    progress.queryFormatsAttempted.push(format);
+    if (progress.queryFormatsAttempted.length > 200) progress.queryFormatsAttempted = progress.queryFormatsAttempted.slice(-200);
+    const range = coinSpotHistoryRangeParams(window.startMs, window.endMs, format);
     const payload = await coinSpotReadOnly(env, "/orders/market/completed", {
       cointype: coin, markettype: "AUD", ...range, limit: 500
     });
     if (!Array.isArray(payload.buyorders) || !Array.isArray(payload.sellorders)) {
       throw new HttpError(502, "CoinSpot historical order response was malformed.");
     }
+    progress.rawBuyOrders += payload.buyorders.length;
+    progress.rawSellOrders += payload.sellorders.length;
+    for (const row of [...payload.buyorders, ...payload.sellorders].slice(0, 6)) {
+      if (row?.market && progress.marketsSeen.length < 6 && !progress.marketsSeen.includes(String(row.market))) {
+        progress.marketsSeen.push(String(row.market));
+      }
+      if (!progress.sampleOrderAt && row?.solddate) progress.sampleOrderAt = String(row.solddate);
+    }
     return payload;
   };
 
-  let payload = await request(primaryFormat);
-  let selectedFormat = primaryFormat;
-  let count = payload.buyorders.length + payload.sellorders.length;
-  budget.queryFormatsAttempted ||= [];
-  budget.queryFormatsAttempted.push(primaryFormat);
+  while (progress.windows.length && budget.calls < maxRequests) {
+    const window = progress.windows[0];
+    const duration = window.endMs - window.startMs;
+    const wholeUtcDay = duration === 86400000 && window.startMs % 86400000 === 0;
+    const format = window.format || (wholeUtcDay ? "date" : "epoch-ms");
+    let payload = await request(window, format);
+    if (!payload) break;
+    let count = payload.buyorders.length + payload.sellorders.length;
 
-  // CoinSpot documents both YYYY-MM-DD and Unix-epoch date filters. Use the
-  // date form for whole UTC days, then retry an empty day once with epoch
-  // seconds. Production probes showed seconds-based sub-day filters return
-  // empty; millisecond epochs are the validated primary representation.
-  if (count === 0 && wholeUtcDay) {
-    budget.emptyPrimaryResponses = (budget.emptyPrimaryResponses || 0) + 1;
-    const fallbackFormat = primaryFormat === "date" ? "epoch" : "date";
-    const fallback = await request(fallbackFormat);
-    budget.queryFormatsAttempted.push(fallbackFormat);
-    const fallbackCount = fallback.buyorders.length + fallback.sellorders.length;
-    if (fallbackCount > count) {
-      payload = fallback;
-      selectedFormat = fallbackFormat;
-      count = fallbackCount;
-      budget.dateFormatFallbackHits = (budget.dateFormatFallbackHits || 0) + 1;
-    } else {
-      budget.emptyHistoryWindows = (budget.emptyHistoryWindows || 0) + 1;
-    }
-  }
-
-  if (count === 0 && !wholeUtcDay) {
-    let sawOutOfRangeCandidate = false;
-    for (const format of ["epoch", "epoch-string"]) {
-      let candidate;
-      try {
-        candidate = await request(format);
-      } catch (error) {
-        budget.queryFormatErrors ||= [];
-        budget.queryFormatErrors.push({ format, message: String(error?.message || error).slice(0, 140) });
+    // The provider probe validated epoch-millisecond filters for sub-day windows.
+    // Do not spend extra requests retrying seconds formats that production has
+    // already shown to return empty ranges.
+    if (wholeUtcDay && format === "date" && count === 0) {
+      progress.emptyPrimaryResponses++;
+      if (budget.calls >= maxRequests) {
+        window.format = "epoch";
+        break;
+      }
+      const fallback = await request(window, "epoch");
+      if (!fallback) {
+        window.format = "epoch";
+        break;
+      }
+      const fallbackCount = fallback.buyorders.length + fallback.sellorders.length;
+      if (fallbackCount > count) {
+        payload = fallback;
+        count = fallbackCount;
+        progress.dateFormatFallbackHits++;
+      } else {
+        progress.emptyHistoryWindows++;
+        progress.windows.shift();
         continue;
       }
-      budget.queryFormatsAttempted.push(format);
-      const candidateCount = candidate.buyorders.length + candidate.sellorders.length;
-      if (candidateCount === 0) continue;
-      const normalizedCandidate = normalizeCoinSpotCompletedOrders({ coin, payload: candidate });
-      if (normalizedCandidate.length === 0) {
-        throw new HttpError(502, "COINSPOT_HISTORY_SCHEMA_MISMATCH: non-empty " + format + " history contained no accepted " + coin + "/AUD trades.");
-      }
-      const outOfRangeCandidate = normalizedCandidate.some(trade => trade.timestamp < startMs || trade.timestamp >= endMs);
-      if (outOfRangeCandidate) {
-        sawOutOfRangeCandidate = true;
-        continue;
-      }
-      payload = candidate;
-      selectedFormat = format;
-      count = candidateCount;
-      break;
     }
-    if (count === 0 && sawOutOfRangeCandidate) {
-      throw new HttpError(502, "COINSPOT_HISTORY_RANGE_MISMATCH: alternate CoinSpot epoch formats returned trades outside the requested UTC window.");
+
+    if (count >= 450) {
+      if (duration <= COINSPOT_HISTORY_MIN_PARTITION_MS) {
+        throw new HttpError(503, "CoinSpot returned a potentially truncated 15-minute history window; no candles were saved.");
+      }
+      const midpoint = Math.floor((window.startMs + window.endMs) / 2 / 1000) * 1000;
+      if (midpoint <= window.startMs || midpoint >= window.endMs) {
+        throw new HttpError(502, "CoinSpot history window could not be safely partitioned.");
+      }
+      progress.windows.splice(0, 1,
+        { startMs: window.startMs, endMs: midpoint },
+        { startMs: midpoint, endMs: window.endMs }
+      );
+      progress.saturatedWindows++;
+      continue;
     }
+
+    const normalizedTrades = normalizeCoinSpotCompletedOrders({ coin, payload });
+    const outOfRangeTrades = normalizedTrades.filter(trade => trade.timestamp < window.startMs || trade.timestamp >= window.endMs);
+    if (outOfRangeTrades.length > 0) {
+      throw new HttpError(502, "COINSPOT_HISTORY_RANGE_MISMATCH: " + coin + "/AUD returned trades outside the requested UTC window.");
+    }
+    const rawRows = [...payload.buyorders, ...payload.sellorders];
+    if (rawRows.length > 0 && normalizedTrades.length === 0) {
+      const sample = rawRows.find(row => row && typeof row === "object") || {};
+      const diagnostic = {
+        marketMatch: sample.market === coin + "/AUD",
+        timestampValid: Number.isFinite(Date.parse(sample.solddate)),
+        pricePositive: Number.isFinite(Number(sample.rate)) && Number(sample.rate) > 0,
+        amountPositive: Number.isFinite(Number(sample.amount)) && Number(sample.amount) > 0,
+        totalPositive: Number.isFinite(Number(sample.total)) && Number(sample.total) > 0
+      };
+      throw new HttpError(502, "COINSPOT_HISTORY_SCHEMA_MISMATCH: non-empty history contained no accepted trades; sample validation=" + JSON.stringify(diagnostic));
+    }
+    if (count === 0) progress.emptyHistoryWindows++;
+    progress.rawRowsSeen += count;
+    progress.trades.push(...normalizedTrades);
+    progress.windows.shift();
   }
 
-  budget.queryDateFormat = selectedFormat;
-  budget.rawBuyOrders = (budget.rawBuyOrders || 0) + payload.buyorders.length;
-  budget.rawSellOrders = (budget.rawSellOrders || 0) + payload.sellorders.length;
-  for (const row of [...payload.buyorders, ...payload.sellorders].slice(0, 6)) {
-    if (row?.market && budget.marketsSeen?.length < 6 && !budget.marketsSeen.includes(String(row.market))) {
-      budget.marketsSeen.push(String(row.market));
+  if (progress.windows.length === 0) {
+    if (progress.saturatedWindows > 0 && progress.trades.length === 0) {
+      throw new HttpError(502, "COINSPOT_HISTORY_PARTITION_EMPTY: " + coin + "/AUD returned saturated history but its validated smaller epoch windows returned no accepted trades.");
     }
-    if (!budget.sampleOrderAt && row?.solddate) budget.sampleOrderAt = String(row.solddate);
-  }
-
-  if (count >= 450) {
-    if (duration <= 15 * 60 * 1000) {
-      throw new HttpError(503, "CoinSpot returned a potentially truncated 15-minute history window; no candles were saved.");
+    const unique = new Map();
+    for (const trade of progress.trades) {
+      const key = [trade.timestamp, trade.price, trade.amount, trade.totalAud].join("|");
+      if (!unique.has(key)) unique.set(key, trade);
     }
-    const midpoint = Math.floor((startMs + endMs) / 2 / 1000) * 1000;
-    if (midpoint <= startMs || midpoint >= endMs) {
-      throw new HttpError(502, "CoinSpot history window could not be safely partitioned.");
-    }
-    const left = await fetchCoinSpotHistoryWindow(env, coin, startMs, midpoint, budget);
-    const right = await fetchCoinSpotHistoryWindow(env, coin, midpoint, endMs, budget);
-    const partitioned = [...left, ...right];
-    if (count > 0 && partitioned.length === 0) {
-      throw new HttpError(502, "COINSPOT_HISTORY_PARTITION_EMPTY: " + coin + "/AUD returned " + count + " raw orders for " + utcDate(startMs) + " but its smaller epoch windows returned no valid trades.");
-    }
-    return partitioned;
+    progress.trades = [...unique.values()].sort((a, b) => a.timestamp - b.timestamp);
+    progress.tradeCount = progress.trades.length;
+    progress.complete = true;
   }
-  const normalizedTrades = normalizeCoinSpotCompletedOrders({ coin, payload });
-  const outOfRangeTrades = normalizedTrades.filter(trade => trade.timestamp < startMs || trade.timestamp >= endMs);
-  if (outOfRangeTrades.length > 0) {
-    throw new HttpError(502, "COINSPOT_HISTORY_RANGE_MISMATCH: " + coin + "/AUD returned trades outside the requested UTC window.");
-  }
-  const trades = normalizedTrades;
-  const rawRows = [...payload.buyorders, ...payload.sellorders];
-  if (rawRows.length > 0 && trades.length === 0) {
-    const sample = rawRows.find(row => row && typeof row === "object") || {};
-    const diagnostic = {
-      marketMatch: sample.market === coin + "/AUD",
-      timestampValid: Number.isFinite(Date.parse(sample.solddate)),
-      pricePositive: Number.isFinite(Number(sample.rate)) && Number(sample.rate) > 0,
-      amountPositive: Number.isFinite(Number(sample.amount)) && Number(sample.amount) > 0,
-      totalPositive: Number.isFinite(Number(sample.total)) && Number(sample.total) > 0
-    };
-    throw new HttpError(502, "COINSPOT_HISTORY_SCHEMA_MISMATCH: non-empty history contained no accepted trades; sample validation=" + JSON.stringify(diagnostic));
-  }
-  return trades;
+  return { complete: progress.complete, calls: budget.calls, pendingWindows: progress.windows.length };
 }
+
 
 async function probeCoinSpotHistory(env, coin, clock) {
   const date = utcDate(clock);
@@ -760,6 +811,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     state.lastBatchDate = state.historyIntegrityRewindFrom;
     state.lastBatch = [];
     state.lastSyncAt = null;
+    state.pendingHistorySync = null;
     state.status = "BACKFILLING";
     state.markets = Object.fromEntries(COINSPOT_MTF_COINS.map(coin => [coin, {
       ...(state.markets[coin] || {}),
@@ -789,47 +841,112 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   }
   const targetDate=state.nextDate<=today?state.nextDate:today;
   const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;
+  if (!Number.isFinite(startMs) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+    return { status:"INVALID_HISTORY_CURSOR", liveTradingEnabled:false };
+  }
+  const pending = state.pendingHistorySync
+    ? structuredClone(state.pendingHistorySync)
+    : createCoinSpotHistoryProgress(targetDate, startMs, endMs);
+  validateCoinSpotHistoryProgress(pending, targetDate, startMs, endMs);
+
   const updatedMarkets={...state.markets};
   const outcomes=[];
   for(const coin of COINSPOT_MTF_COINS){
-    const budget={calls:0,rawBuyOrders:0,rawSellOrders:0,marketsSeen:[],sampleOrderAt:null,emptyPrimaryResponses:0,emptyHistoryWindows:0,dateFormatFallbackHits:0,queryFormatsAttempted:[]};
-    const trades=await fetchCoinSpotHistoryWindow(env,coin,startMs,endMs,budget);
-    const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
-    const fourHour=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.fourHour);
-    const previous=updatedMarkets[coin]||{dailyCandles:[],fourHourCandles:[],tradesFetched:0};
-    // The live UTC day is refreshed on every scan. Replace its per-date count
-    // instead of inflating the cumulative trade diagnostic on each refresh.
-    const previousCounts=previous.tradesFetchedByDate&&typeof previous.tradesFetchedByDate==="object"&&!Array.isArray(previous.tradesFetchedByDate)
-      ? previous.tradesFetchedByDate : {};
-    const previousTrackedTrades=Object.values(previousCounts).reduce((sum,value)=>{
-      const count=Number(value);
-      return sum+(Number.isFinite(count)&&count>=0?count:0);
-    },0);
-    const tradesFetchedBase=typeof previous.tradesFetchedBase==="number"&&Number.isFinite(previous.tradesFetchedBase)
-      ? Math.max(0,previous.tradesFetchedBase)
-      : Math.max(0,Number(previous.tradesFetched||0)-previousTrackedTrades);
-    const tradesFetchedByDate={...previousCounts,[targetDate]:trades.length};
-    const trackedTrades=Object.values(tradesFetchedByDate).reduce((sum,value)=>{
-      const count=Number(value);
-      return sum+(Number.isFinite(count)&&count>=0?count:0);
-    },0);
-    updatedMarkets[coin]={
-      dailyCandles:mergeCoinSpotCandles(previous.dailyCandles,daily,160),
-      fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,420),
-      tradesFetched:tradesFetchedBase+trackedTrades,
-      tradesFetchedBase,
-      tradesFetchedByDate,
-      lastHistoryDate:targetDate,
-      lastSyncAt:new Date(clock).toISOString()
+    const progress=pending.coins[coin];
+    const callsBefore=progress.apiCallsTotal;
+    if(!progress.complete){
+      try {
+        await fetchCoinSpotHistoryProgress(env, coin, progress);
+        if(progress.complete){
+          const trades=progress.trades;
+          const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
+          const fourHour=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.fourHour);
+          const previous=updatedMarkets[coin]||{dailyCandles:[],fourHourCandles:[],tradesFetched:0};
+          const previousCounts=previous.tradesFetchedByDate&&typeof previous.tradesFetchedByDate==="object"&&!Array.isArray(previous.tradesFetchedByDate)
+            ? previous.tradesFetchedByDate : {};
+          const previousTrackedTrades=Object.values(previousCounts).reduce((sum,value)=>{
+            const count=Number(value);
+            return sum+(Number.isFinite(count)&&count>=0?count:0);
+          },0);
+          const tradesFetchedBase=typeof previous.tradesFetchedBase==="number"&&Number.isFinite(previous.tradesFetchedBase)
+            ? Math.max(0,previous.tradesFetchedBase)
+            : Math.max(0,Number(previous.tradesFetched||0)-previousTrackedTrades);
+          const tradesFetchedByDate={...previousCounts,[targetDate]:trades.length};
+          const trackedTrades=Object.values(tradesFetchedByDate).reduce((sum,value)=>{
+            const count=Number(value);
+            return sum+(Number.isFinite(count)&&count>=0?count:0);
+          },0);
+          updatedMarkets[coin]={
+            dailyCandles:mergeCoinSpotCandles(previous.dailyCandles,daily,160),
+            fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,420),
+            tradesFetched:tradesFetchedBase+trackedTrades,
+            tradesFetchedBase,
+            tradesFetchedByDate,
+            lastHistoryDate:targetDate,
+            lastSyncAt:new Date(clock).toISOString()
+          };
+          progress.tradeCount=trades.length;
+          progress.trades=[];
+        }
+      } catch(error) {
+        state={
+          ...state,markets:updatedMarkets,pendingHistorySync:pending,
+          lastSyncAt:new Date(clock).toISOString(),nextDate:targetDate,
+          status:"BACKFILLING",liveTradingEnabled:false
+        };
+        await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
+        throw error;
+      }
+    }
+    outcomes.push({
+      coin,
+      tradeCount:progress.complete?progress.tradeCount:0,
+      partialTradeCount:progress.trades.length,
+      complete:progress.complete,
+      apiCalls:progress.apiCallsTotal-callsBefore,
+      apiCallsTotal:progress.apiCallsTotal,
+      rawBuyOrders:progress.rawBuyOrders,
+      rawSellOrders:progress.rawSellOrders,
+      marketsSeen:progress.marketsSeen,
+      sampleOrderAt:progress.sampleOrderAt,
+      emptyPrimaryResponses:progress.emptyPrimaryResponses,
+      emptyHistoryWindows:progress.emptyHistoryWindows,
+      dateFormatFallbackHits:progress.dateFormatFallbackHits,
+      queryFormatsAttempted:progress.queryFormatsAttempted.slice(-30),
+      pendingWindows:progress.windows.length
+    });
+    state={
+      ...state,markets:updatedMarkets,pendingHistorySync:pending,
+      lastSyncAt:new Date(clock).toISOString(),nextDate:targetDate,
+      status:"BACKFILLING",liveTradingEnabled:false,lastBatch:outcomes
     };
-    outcomes.push({coin,tradeCount:trades.length,dailyBarsAdded:daily.length,fourHourBarsAdded:fourHour.length,apiCalls:budget.calls,rawBuyOrders:budget.rawBuyOrders,rawSellOrders:budget.rawSellOrders,marketsSeen:budget.marketsSeen,sampleOrderAt:budget.sampleOrderAt,emptyPrimaryResponses:budget.emptyPrimaryResponses,emptyHistoryWindows:budget.emptyHistoryWindows,dateFormatFallbackHits:budget.dateFormatFallbackHits,queryFormatsAttempted:budget.queryFormatsAttempted});
+    await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
   }
-  state={...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),lastProcessedDate:targetDate,lastBatchDate:targetDate,
-    nextDate:targetDate<today?shiftUtcDate(targetDate,1):today,
-    status:targetDate<today?"BACKFILLING":"COLLECTING_LIVE_DAY",liveTradingEnabled:false,lastBatch:outcomes};
+
+  const dateComplete=COINSPOT_MTF_COINS.every(coin=>pending.coins[coin].complete);
+  const nextDate=dateComplete
+    ? (targetDate<today?shiftUtcDate(targetDate,1):today)
+    : targetDate;
+  const status=dateComplete&&targetDate===today?"COLLECTING_LIVE_DAY":"BACKFILLING";
+  state={
+    ...state,markets:updatedMarkets,lastSyncAt:new Date(clock).toISOString(),
+    lastProcessedDate:dateComplete?targetDate:state.lastProcessedDate,
+    lastBatchDate:dateComplete?targetDate:state.lastBatchDate,
+    nextDate,status,liveTradingEnabled:false,lastBatch:outcomes,
+    pendingHistorySync:dateComplete?null:pending
+  };
   await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
-  return {status:state.status,processedDate:targetDate,nextDate:state.nextDate,markets:outcomes,providerProbe:state.providerProbe||null,liveTradingEnabled:false};
+  const progressSummary=dateComplete?null:Object.fromEntries(COINSPOT_MTF_COINS.map(coin=>{
+    const market=pending.coins[coin];
+    return [coin,{complete:market.complete,pendingWindows:market.windows.length,partialTradeCount:market.trades.length,apiCallsTotal:market.apiCallsTotal}];
+  }));
+  return {
+    status,processedDate:dateComplete?targetDate:state.lastProcessedDate||null,
+    targetDate,nextDate,dateComplete,progress:progressSummary,
+    markets:outcomes,providerProbe:state.providerProbe||null,liveTradingEnabled:false
+  };
 }
+
 
 async function reviewCoinSpotMtfCandidate(env, market) {
   if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; deterministic risk rules remain in control.", riskFlags: [] };
@@ -888,13 +1005,16 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   }
   let historySync = null, syncError = null, backfillDaysProcessed = 0;
   const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
+  let historyRequestsThisScan = 0;
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
     for (let i = 0; i < backfillDaysRequested; i++) {
       try {
         historySync = await syncCoinSpotMtfHistory(env, new Date(clock));
         if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) break;
+        historyRequestsThisScan += (historySync.markets || []).reduce((sum, market) => sum + Math.max(0, Number(market.apiCalls) || 0), 0);
+        if (historySync.dateComplete !== true) break;
         backfillDaysProcessed++;
-        if (historySync.status === "COLLECTING_LIVE_DAY") break;
+        if (historySync.status === "COLLECTING_LIVE_DAY" || historyRequestsThisScan >= 30) break;
       } catch (error) {
         syncError = String(error?.message || "CoinSpot history sync failed").replace(/\s+/g, " ").slice(0, 220);
         break;
@@ -912,7 +1032,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   const snapshot = {
     ...account, status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
     strategyStatus: strategy.status || "UNKNOWN", historySync,
-    backfillDaysRequested, backfillDaysProcessed, lastScanAt: nowIso,
+    backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
       coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
