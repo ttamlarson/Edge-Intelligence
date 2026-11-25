@@ -197,6 +197,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   const processed = { ...snapshot.lastBarBySymbol };
   let processedBarsThisScan = 0;
   let incompleteSessionBars = 0;
+  let retryableAiFailureCount = 0;
   const openSymbols = () => new Set(portfolio.positions.filter(p => p.status === "OPEN_PAPER").map(p => p.symbol));
 
   for (const symbol of symbols) {
@@ -222,6 +223,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     // are touched in the same candle. A gap below the stop uses the worse open.
     // The close is never treated as a fill.
     const exitedThisBar = new Set();
+    let retryableAiFailure = false;
     for (const position of portfolio.positions.filter(p => p.status === "OPEN_PAPER" && p.symbol === symbol)) {
       const openedMs = Date.parse(position.openedAt || "");
       const markedMs = Date.parse(position.lastMarkedAt || position.openedAt || "");
@@ -266,9 +268,14 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
           riskFlags: ai.riskFlags || [], reason: ai.reason
         };
         if (!ai.approved) {
+          // A provider/configuration failure must not consume the daily-bar cursor.
+          // The same candidate can be reviewed again after the next throttled scan.
+          retryableAiFailure = !["AI_BLOCKED_PAPER_CANDIDATE", "AI_BLOCKED_INVALID_INPUT"].includes(ai.status);
+          if (retryableAiFailure) retryableAiFailureCount++;
           signals.push({
             symbol, status: ai.status, observedAt: candidate.observedAt,
             deterministicStatus: candidate.status, ai: aiSummary,
+            retryable: retryableAiFailure,
             reason: ai.reason
           });
         } else {
@@ -278,8 +285,10 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
         signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
       }
     }
-    processed[symbol] = latest.timestamp;
-    processedBarsThisScan++;
+    if (!retryableAiFailure) {
+      processed[symbol] = latest.timestamp;
+      processedBarsThisScan++;
+    }
   }
 
   // AI probability is intentionally not a ranking input until a sufficiently large
@@ -317,7 +326,11 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   const next = {
     ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
-    status: data.rows === 0 ? "NO_DATA" : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR", portfolio, lastScanAt: scannedAt,
+    status: data.rows === 0 ? "NO_DATA" : retryableAiFailureCount > 0
+      ? processedBarsThisScan > 0 ? "SCAN_COMPLETED_WITH_AI_RETRIES" : "AI_REVIEW_RETRY_PENDING"
+      : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR",
+    aiRetryPendingCount: retryableAiFailureCount,
+    portfolio, lastScanAt: scannedAt,
     lastAttemptAt: scannedAt, lastError: null,
     lastBarBySymbol: processed,
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
