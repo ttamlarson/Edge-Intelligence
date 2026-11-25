@@ -194,3 +194,6 @@ The scheduled paper runner is deliberately limited to one historical UTC day per
 
 
 The provider health probe checks two epoch-second 12-hour windows for each market and reports in-range versus out-of-range trades. Saturated daily responses whose child windows yield no accepted trades raise `COINSPOT_HISTORY_PARTITION_EMPTY`; out-of-window records raise `COINSPOT_HISTORY_RANGE_MISMATCH`. Neither case advances the historical cursor.
+
+
+On first run after this integrity migration, legacy history state whose last batch contains raw completed orders but zero accepted trades is rewound one additional UTC day. The last-batch date is recorded as a one-time marker so provider failures cannot repeatedly move the cursor backwards. The previously skipped date and the last processed date are then replayed under the new partition and timestamp checks.
