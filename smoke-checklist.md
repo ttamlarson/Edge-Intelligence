@@ -99,3 +99,7 @@
 - Close an AI-reviewed position through the automated daily-bar stop/target path and confirm the review metadata survives in trade history. Confirm manual closes are excluded from AI calibration diagnostics.
 - Confirm the AI calibration report uses the latest chronological holdout, reports Brier/reliability diagnostics, and remains explicitly uncalibrated / not model-trained.
 - Confirm all paper controls remain authoritative: 1% risk budget, AUD 200 position cap, AUD 100 cash reserve, fees and no live order route.
+
+## Scheduled DataCedar timeout regression
+- [x] Scheduled ASX Cron calls pass `timeoutMs: 0` and do not construct `AbortSignal.timeout()` outside an HTTP request context; deterministic Worker-runtime regression test added.
+- [ ] Verify the scheduled ASX path against a real DataCedar ASX symbol only after the operator has confirmed the data-use rights and the approved ticker universe.
