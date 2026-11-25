@@ -224,6 +224,7 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory.length,2);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].validAudTrades,0);
+  assert.equal(history.providerProbe.markets[0].readOnlyHistory.outOfRangeTrades,1000);
  }finally{globalThis.fetch=originalFetch;}
 });
 
