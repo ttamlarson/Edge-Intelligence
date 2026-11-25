@@ -4,6 +4,7 @@ import {
 } from "./autonomous-engine.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { evaluateAsxAiDecision } from "./asx-ai-advisor.js";
+import { calculateAsxAiCalibration } from "./asx-ai-calibration.js";
 
 const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
@@ -106,11 +107,11 @@ function validateSnapshot(value) {
 export async function readAsxAutopilot(env) {
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", configured: false, liveTradingEnabled: false };
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
-  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
+  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
   const snapshot = validateSnapshot(parsed);
-  return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) };
 }
 
 function isAutopilotConfigured(env) {
@@ -140,7 +141,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
   const previousScanMs = Date.parse(snapshot.lastScanAt || "");
   if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
-    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
+    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
   }
   let data;
   try {
@@ -153,7 +154,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       failedScanCount: (Number.isInteger(snapshot.failedScanCount) ? snapshot.failedScanCount : 0) + 1
     };
     await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(failed));
-    return { ...failed, configured: true, symbols, performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+    return { ...failed, configured: true, symbols, performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) };
   }
 
   let portfolio = snapshot.portfolio;
@@ -195,7 +196,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (stopHit || targetHit) {
         const exitPrice = stopHit ? Math.min(position.stopPrice, latest.open) : position.targetPrice;
         const closed = closePaperPosition(portfolio, position.id, exitPrice, {
-          closedAt: latest.timestamp, now: nowMs
+          closedAt: latest.timestamp, now: nowMs, exitType: "AUTOMATED_PAPER_DAILY_BAR_EXIT"
         });
         if (closed.accepted) {
           portfolio = closed.portfolio;
@@ -219,10 +220,13 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (candidate.status === "PAPER_CANDIDATE") {
         const ai = await evaluateAsxAiDecision({
           candidate, bars: completedBars, apiKey: env.OPENAI_API_KEY,
-          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl
+          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl, now: nowMs
         });
         const aiSummary = {
           status: ai.status, decision: ai.decision || null, confidence: ai.confidence ?? null,
+          predictedWinProbability: ai.predictedWinProbability ?? null, model: ai.model || null,
+          reviewedAt: ai.reviewedAt || null, reviewId: ai.reviewId || null,
+          inputProvenance: ai.inputProvenance || null,
           thesis: ai.thesis || null, counterThesis: ai.counterThesis || null,
           riskFlags: ai.riskFlags || [], reason: ai.reason
         };
@@ -233,9 +237,18 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
             reason: ai.reason
           });
         } else {
-          const opened = openPaperPosition(portfolio, candidate, {
+          const aiReviewedCandidate = {
+            ...candidate,
+            aiReview: {
+              status: ai.status, decision: ai.decision, confidence: ai.confidence,
+              predictedWinProbability: ai.predictedWinProbability, riskFlags: ai.riskFlags,
+              model: ai.model, reviewedAt: ai.reviewedAt, reviewId: ai.reviewId,
+              inputProvenance: ai.inputProvenance
+            }
+          };
+          const opened = openPaperPosition(portfolio, aiReviewedCandidate, {
             id: `asx-auto-${symbol}-${latest.timestamp.slice(0, 10)}`,
-            openedAt: scannedAt, now: nowMs
+            openedAt: ai.reviewedAt || scannedAt, now: nowMs
           });
           if (opened.accepted) {
             portfolio = opened.portfolio;
@@ -265,7 +278,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     symbols, rowsBySymbol: data.rowsBySymbol, aiReviewConfigured: Boolean(env.OPENAI_API_KEY)
   };
   await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(next));
-  return { ...next, performance: calculateAsxPaperPerformance(portfolio) };
+  return { ...next, performance: calculateAsxPaperPerformance(portfolio), aiCalibration: calculateAsxAiCalibration(portfolio.closedTrades) };
 }
 
 export const __test = { STORAGE_KEY, initialSnapshot, validateSnapshot, configuredSymbols };

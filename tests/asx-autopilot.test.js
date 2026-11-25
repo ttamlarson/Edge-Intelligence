@@ -134,6 +134,7 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
   assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
   assert.equal(result.portfolio.closedTrades.length, 1);
   assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
+  assert.equal(result.portfolio.closedTrades[0].exitType, "AUTOMATED_PAPER_DAILY_BAR_EXIT");
   assert.ok(result.signals.some(signal => signal.status === "POSITION_CLOSED_PAPER" && /stop-first.*gap-aware/i.test(signal.reason)));
   assert.equal(result.signals.some(signal => signal.status === "OPEN_REJECTED" || signal.status === "OPENED_PAPER"), false);
 });
@@ -257,7 +258,7 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
   const store = kv(JSON.stringify(seeded));
   const decision = {
-    decision: "APPROVE", confidence: 82,
+    decision: "APPROVE", confidence: 82, predicted_win_probability: 0.62,
     thesis: "The supplied trend and breakout context are internally consistent.",
     counter_thesis: "A breakout can fail after the observation date.",
     risk_flags: []
@@ -278,4 +279,8 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const opened = result.signals.find(signal => signal.status === "OPENED_PAPER");
   assert.equal(opened.ai.status, "AI_APPROVED_PAPER_CANDIDATE");
   assert.equal(opened.ai.confidence, 82);
+  assert.equal(opened.ai.predictedWinProbability, 0.62);
+  const openPosition = result.portfolio.positions.find(position => position.status === "OPEN_PAPER");
+  assert.equal(openPosition.aiReview.reviewId, opened.ai.reviewId);
+  assert.match(openPosition.aiReview.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
 });
