@@ -606,24 +606,34 @@ async function probeCoinSpotHistory(env, coin, clock) {
   const midpoint = startMs + 12 * 60 * 60 * 1000;
   const partitionHistory = [];
   for (const [windowStart, windowEnd] of [[startMs, midpoint], [midpoint, endMs]]) {
-    const range = coinSpotHistoryRangeParams(windowStart, windowEnd, "epoch");
-    const part = await coinSpotReadOnly(env, "/orders/market/completed", {
-      cointype: coin, markettype: "AUD", ...range, limit: 500
-    });
-    if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
-      throw new Error("CoinSpot sub-day history probe returned a malformed response.");
+    const variants = [];
+    for (const format of ["epoch", "epoch-string", "epoch-ms"]) {
+      try {
+        const range = coinSpotHistoryRangeParams(windowStart, windowEnd, format);
+        const part = await coinSpotReadOnly(env, "/orders/market/completed", {
+          cointype: coin, markettype: "AUD", ...range, limit: 500
+        });
+        if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
+          throw new Error("CoinSpot sub-day history probe returned a malformed response.");
+        }
+        const normalizedPartTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
+        const partTrades = normalizedPartTrades.filter(trade => trade.timestamp >= windowStart && trade.timestamp < windowEnd);
+        const outOfRangeTrades = normalizedPartTrades.length - partTrades.length;
+        variants.push({
+          format, rawBuyOrders: part.buyorders.length, rawSellOrders: part.sellorders.length,
+          validAudTrades: partTrades.length, outOfRangeTrades,
+          sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
+        });
+      } catch (error) {
+        variants.push({ format, status: "ERROR", message: String(error?.message || error).slice(0, 180) });
+      }
     }
-    const normalizedPartTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
-    const partTrades = normalizedPartTrades.filter(trade => trade.timestamp >= windowStart && trade.timestamp < windowEnd);
-    const outOfRangeTrades = normalizedPartTrades.length - partTrades.length;
+    const numericEpoch = variants.find(variant => variant.format === "epoch") || {};
     partitionHistory.push({
       startAt: new Date(windowStart).toISOString(),
       endAt: new Date(windowEnd).toISOString(),
-      rawBuyOrders: part.buyorders.length,
-      rawSellOrders: part.sellorders.length,
-      validAudTrades: partTrades.length,
-      outOfRangeTrades,
-      sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
+      ...numericEpoch,
+      variants
     });
   }
   return {
@@ -712,7 +722,11 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
   const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
-    state.providerProbe.markets.some(market => !Array.isArray(market.readOnlyHistory?.partitionHistory) || market.readOnlyHistory.partitionHistory.length !== 2);
+    state.providerProbe.markets.some(market =>
+      !Array.isArray(market.readOnlyHistory?.partitionHistory) ||
+      market.readOnlyHistory.partitionHistory.length !== 2 ||
+      market.readOnlyHistory.partitionHistory.some(window => !Array.isArray(window.variants) || window.variants.length !== 3)
+    );
   if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000 || needsPartitionProbe) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
