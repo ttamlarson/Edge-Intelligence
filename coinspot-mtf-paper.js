@@ -82,7 +82,8 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
     const candidates = markets.filter(m => validCoin(m.coin) &&
       m.signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
       m.quote && Number.isFinite(m.quote.bid) && m.quote.bid > 0 &&
-      Number.isFinite(m.quote.ask) && m.quote.ask > 0 &&
+      Number.isFinite(m.quote.ask) && m.quote.ask >= m.quote.bid &&
+      Number.isFinite(m.signal?.indicators?.atr20) && m.signal.indicators.atr20 > 0 &&
       m.signal?.risk && Number.isFinite(m.signal.risk.initialStopDistance) &&
       m.signal.risk.initialStopDistance > 0)
       .sort((x, y) => Number(y.signal.indicators?.breakoutVotes || 0) - Number(x.signal.indicators?.breakoutVotes || 0));
