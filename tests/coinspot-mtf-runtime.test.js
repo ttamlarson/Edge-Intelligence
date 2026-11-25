@@ -271,12 +271,14 @@ test("CoinSpot sync rewinds legacy dates whose prior batches had raw rows but ze
  };
  try{
   const result=await __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T12:00:00.000Z");
-  assert.equal(result.processedDate,"2026-08-19");
+  assert.equal(result.processedDate,"2026-07-28");
   const saved=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(saved.historyIntegrityRewindFrom,"2026-08-20");
-  assert.equal(saved.lastProcessedDate,"2026-08-19");
-  assert.equal(saved.lastBatchDate,"2026-08-19");
-  assert.equal(saved.nextDate,"2026-08-20");
+  assert.equal(saved.historyIntegrityFullRewindFrom,"2026-07-28");
+  assert.ok(saved.historyIntegrityFullRewindAt);
+  assert.equal(saved.lastProcessedDate,"2026-07-28");
+  assert.equal(saved.lastBatchDate,"2026-07-28");
+  assert.equal(saved.nextDate,"2026-07-29");
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
