@@ -62,3 +62,52 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   assert.equal(account.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
+
+test("CoinSpot read-only transport retries once with a fresh signed nonce",async()=>{
+ const originalFetch=globalThis.fetch,calls=[];
+ globalThis.fetch=async(url,options)=>{
+  const body=JSON.parse(options.body);
+  calls.push({url:String(url),body,headers:options.headers});
+  if(calls.length===1) throw new TypeError("simulated transient network reset");
+  return new Response(JSON.stringify({status:"ok"}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  const result=await __test.coinSpotReadOnly({COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"/status");
+  assert.equal(result.status,"ok");
+  assert.equal(calls.length,2);
+  assert.ok(calls[1].body.nonce>calls[0].body.nonce);
+  assert.ok(calls.every(call=>call.url.endsWith("/api/v2/ro/status")));
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("CoinSpot timeout is explicit and an incomplete history date is not written",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ let calls=0;
+ globalThis.fetch=async()=>{
+  calls++;
+  const error=new Error("simulated timeout");
+  error.name="TimeoutError";
+  throw error;
+ };
+ try{
+  await assert.rejects(
+   ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T06:00:00.000Z"),
+   /COINSPOT_TIMEOUT/
+  );
+  assert.equal(calls,2);
+  assert.equal(kv.values.has("coinspot-mtf-history-global-v1"),false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("CoinSpot read-only adapter blocks every non-read-only endpoint",async()=>{
+ const originalFetch=globalThis.fetch;
+ let calls=0;
+ globalThis.fetch=async()=>{calls++;throw new Error("must not be called");};
+ try{
+  await assert.rejects(
+   ()=>__test.coinSpotReadOnly({COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"/my/buy"),
+   /only permits read-only/
+  );
+  assert.equal(calls,0);
+ }finally{globalThis.fetch=originalFetch;}
+});
