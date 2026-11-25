@@ -40,7 +40,7 @@ function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{toas
 function money(n,currency=null){return formatMoney(n,currency)}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount();loadCoinSpotMtfStrategy()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
+function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount();loadCoinSpotMtfStrategy();loadCoinSpotMtfPaper()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.page)));
 document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.goto)));
 $("dismissNotice").onclick=()=>{$("dismissNotice").closest(".notice").remove()};
@@ -257,6 +257,23 @@ async function loadCoinSpotMarkets(){
   status.textContent="Market data unavailable";
  }finally{if(button){button.disabled=false;button.textContent="Refresh market data"}}
 }
+async function loadCoinSpotMtfPaper(runNow=false){
+ const panel=$("coinSpotMtfPaperPanel");if(!panel)return;
+ const button=$("coinSpotMtfPaperRun");if(button){button.disabled=true;button.textContent=runNow?"Running scan…":"Loading…";}
+ try{
+  const a=await api("/api/crypto/coinspot/mtf-paper",runNow?{method:"POST",body:JSON.stringify({})}:{});
+  const fmt=v=>money(Number(v)||0,"AUD");
+  $("mtfPaperEquity").textContent=fmt(a.equityAud);$("mtfPaperCash").textContent=fmt(a.cashAud);
+  $("mtfPaperRealized").textContent=fmt(a.realizedPnlAud);$("mtfPaperDailyLoss").textContent=fmt(a.dailyLossAud);
+  const when=a.lastScanAt?" · Last scan "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth"):"";
+  $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
+  $("mtfPaperPositionTitle").textContent=a.openPosition?"OPEN · "+a.openPosition.pair:"No open paper position";
+  $("mtfPaperPositionDetail").textContent=a.openPosition?"Entry "+fmt(a.openPosition.entryPrice)+" · stop "+fmt(a.openPosition.trailingStop)+" · quantity "+Number(a.openPosition.quantity).toFixed(8)+" · signal "+a.openPosition.signalAt:"One position maximum. No real exchange orders are submitted.";
+  $("mtfPaperMarkets").innerHTML=(a.markets||[]).map(m=>'<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · '+Number(m.tradesFetched||0)+' trades</small><em>'+esc(m.aiReview?.assessment||m.aiReview?.status||"AI review pending")+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small></article>').join("")||'<div class="empty">Waiting for validated CoinSpot history.</div>';
+  $("mtfPaperTrades").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.pair)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+esc(fmt(t.pnlAud))+'</b></div>').join(""):'<div class="empty">No automated paper trades recorded yet.</div>';
+ }catch(e){$("coinSpotMtfPaperStatus").textContent="PAPER ENGINE UNAVAILABLE · "+e.message;}
+ finally{if(button){button.disabled=false;button.textContent="Run paper scan now";}}
+}
 async function loadCoinSpotMtfStrategy(syncNow=false){
  const panel=$("coinSpotMtfPanel"),button=$("coinSpotMtfSyncBtn"),status=$("coinSpotMtfStatus"),progress=$("coinSpotMtfProgress"),container=$("coinSpotMtfMarkets");
  if(!panel||!status||!container)return;
@@ -317,6 +334,7 @@ async function closeCoinSpotPaper(){const b=$("cryptoPaperCloseBtn");b.disabled=
 async function searchMarkets(cursor=null){const q=$("marketSearch").value.trim(),platform=$("venueFilter").value;const body={q,platform:platform==="all"?undefined:platform,limit:40,...(cursor?{cursor}:{})};$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">Loading market data...</td></tr>`;try{const data=await api("/api/markets?"+new URLSearchParams(Object.entries(body).filter(([,v])=>v!==undefined)));const rows=(data.markets||[]).map(normalize);markets=rows;nextMarketCursor=data.next_cursor||null;$("marketRows").innerHTML=rows.length?rows.map(m=>`<tr><td><div class="table-market">${esc(m.title)}</div><div class="table-sub">${esc(m.id)} | ${esc(m.quoteType||"quote type unverified")} | ${m.observedAt?esc(formatDateTime(m.observedAt,$("auTimezone")?.value)):"time unknown"} | ${esc(m.freshness||"freshness unknown")}</div></td><td>${esc(venueLabel(m.platform))}<div class="table-sub">jurisdiction: ${esc(m.raw?.jurisdiction||"unverified")}</div></td><td>${m.yes==null?"unavailable":m.yes.toFixed(1)+"%"}</td><td>${m.volume?.amount!=null?esc(money(m.volume.amount,m.volume.currency)):"Currency unavailable"}</td><td><button class="small-btn" data-watch="${esc(m.id)}">Save</button></td></tr>`).join(""):`<tr><td colspan="5" class="empty">No markets returned for these filters.</td></tr>`;const next=$("marketNext");if(next){next.hidden=!nextMarketCursor;next.disabled=false}bindWatch();$("connectionText").textContent="Provider response received"}catch(e){nextMarketCursor=null;$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">${esc(e.message)} Configure the backend and confirm credentials and venue access.</td></tr>`;if($("marketNext"))$("marketNext").hidden=true}}
 if($("cryptoRefreshBtn"))$("cryptoRefreshBtn").onclick=loadCoinSpotMarkets;
 $("coinSpotMtfSyncBtn")?.addEventListener("click",()=>loadCoinSpotMtfStrategy(true));
+$("coinSpotMtfPaperRun")?.addEventListener("click",()=>loadCoinSpotMtfPaper(true));
 $("cryptoAutoPaperRefresh")?.addEventListener("click",()=>loadAutomatedCryptoPaper(true));
 loadAutomatedCryptoPaper();
 $("coinSpotAccountRefresh")?.addEventListener("click",loadCoinSpotAccount);
