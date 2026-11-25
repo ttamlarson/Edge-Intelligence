@@ -520,6 +520,9 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
 async function reviewCoinSpotMtfCandidate(env, market) {
   if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; deterministic risk rules remain in control.", riskFlags: [] };
   if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") return null;
+  const cacheKey = "coinspot-mtf-ai-review:" + market.coin + ":" + market.signal.signalAt;
+  const cached = await env.EDGE_KV?.get(cacheKey);
+  if (cached) { try { return JSON.parse(cached); } catch { /* invalid advisory cache is ignored */ } }
   const packet = {
     pair: market.pair, quote: market.quote, signal: market.signal,
     strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; breakout above at least two of prior 20/55/100-bar Donchian highs.",
@@ -547,7 +550,9 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     if(!output) for(const item of payload.output||[]) for(const part of item.content||[]) if(part.text) output=part.text;
     const parsed=JSON.parse(output);
     if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||typeof parsed.summary!=="string"||!Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6) throw new Error("AI response schema mismatch");
-    return {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
+    const review = {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
+    await env.EDGE_KV?.put(cacheKey, JSON.stringify(review), {expirationTtl: 86400});
+    return review;
   } catch {
     return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; deterministic safeguards remain authoritative.",riskFlags:[]};
   } finally { clearTimeout(timeout); }
