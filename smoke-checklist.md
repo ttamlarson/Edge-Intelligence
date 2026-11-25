@@ -111,3 +111,14 @@
 - [ ] Confirm stop/trailing/time exits use conservative stop-first and gap handling in the eventual backtester.
 - [ ] Confirm the module never submits orders and liveTradingEnabled remains false.
 - [ ] Do not promote to paper execution until verified CoinSpot AUD daily/four-hour data, venue costs, next-quote fills, chronological out-of-sample tests and forward paper evidence are available.
+
+
+## CoinSpot-native MTF strategy integration
+
+- [ ] Verify Read Only API key can access `/orders/market/completed` for BTC/AUD and ETH/AUD.
+- [ ] Verify HMAC signature and nonce ordering on repeated historical requests.
+- [ ] Verify historical fetch splits saturated windows and never saves truncated results.
+- [ ] Confirm candles are derived only from actual CoinSpot AUD completed orders; missing 4h/daily intervals are not filled.
+- [ ] Confirm 110 completed daily and 210 completed 4h candles plus freshness and spread checks are required before any candidate signal.
+- [ ] Confirm strategy status is authenticated, rate-limited, and never places an exchange order.
+- [ ] Confirm scheduled backfill advances one UTC day per 15-minute cron and preserves history on errors.
