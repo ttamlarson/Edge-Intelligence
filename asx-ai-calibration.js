@@ -117,19 +117,49 @@ export function calculateAsxAiCalibration(closedTrades, {
   }
 
   rows.sort((a, b) => a.closedAt - b.closedAt || a.reviewedAt - b.reviewedAt);
-  const splitIndex = Math.floor(rows.length * (1 - holdoutFraction));
-  const referenceRows = rows.slice(0, splitIndex);
-  const outOfSampleRows = rows.slice(splitIndex);
-  const reference = scoreRows(referenceRows);
-  const baselineProbability = referenceRows.length >= minimumReferenceSamples
-    ? reference.observedWinRate
-    : null;
-  const outOfSample = scoreRows(outOfSampleRows, baselineProbability);
-  const status = outOfSampleRows.length < minimumOutOfSampleSamples
-    ? "INSUFFICIENT_OUT_OF_SAMPLE_SAMPLE"
-    : outOfSampleRows.length < 100
-      ? "EARLY_CALIBRATION_MONITORING"
-      : "CALIBRATION_MONITORING_ONLY";
+  const modelVersions = [...new Set(rows.map(row => row.model))].sort();
+  const diagnoseModel = modelRows => {
+    const splitIndex = Math.floor(modelRows.length * (1 - holdoutFraction));
+    const referenceRows = modelRows.slice(0, splitIndex);
+    const outOfSampleRows = modelRows.slice(splitIndex);
+    const reference = scoreRows(referenceRows);
+    const baselineProbability = referenceRows.length >= minimumReferenceSamples
+      ? reference.observedWinRate
+      : null;
+    const outOfSample = scoreRows(outOfSampleRows, baselineProbability);
+    const status = outOfSampleRows.length < minimumOutOfSampleSamples
+      ? "INSUFFICIENT_OUT_OF_SAMPLE_SAMPLE"
+      : outOfSampleRows.length < 100
+        ? "EARLY_CALIBRATION_MONITORING"
+        : "CALIBRATION_MONITORING_ONLY";
+    return {
+      model: modelRows[0]?.model || null,
+      status,
+      referenceSampleCount: referenceRows.length,
+      outOfSampleSampleCount: outOfSampleRows.length,
+      reference,
+      outOfSample,
+      meanSubjectiveConfidencePct: outOfSampleRows.length
+        ? round4(outOfSampleRows.reduce((sum, row) => sum + row.confidence, 0) / outOfSampleRows.length)
+        : null,
+      referenceWindow: referenceRows.length ? {
+        firstClosedAt: new Date(referenceRows[0].closedAt).toISOString(),
+        lastClosedAt: new Date(referenceRows.at(-1).closedAt).toISOString()
+      } : null,
+      outOfSampleWindow: outOfSampleRows.length ? {
+        firstClosedAt: new Date(outOfSampleRows[0].closedAt).toISOString(),
+        lastClosedAt: new Date(outOfSampleRows.at(-1).closedAt).toISOString()
+      } : null
+    };
+  };
+  const modelDiagnostics = modelVersions.map(model =>
+    diagnoseModel(rows.filter(row => row.model === model))
+  );
+  const mixedModels = modelVersions.length > 1;
+  const single = modelDiagnostics[0] || null;
+  const status = mixedModels
+    ? "MIXED_MODEL_VERSIONS_SEPARATE_DIAGNOSTICS"
+    : single?.status || "INSUFFICIENT_OUT_OF_SAMPLE_SAMPLE";
 
   return {
     status,
@@ -138,30 +168,25 @@ export function calculateAsxAiCalibration(closedTrades, {
     method: "CHRONOLOGICAL_HOLDOUT_RELIABILITY_DIAGNOSTICS_NO_FITTING",
     sampleBasis: "APPROVED_AI_REVIEWS_WITH_AUTOMATED_DAILY_BAR_EXITS_ONLY",
     totalEligibleTrades: rows.length,
-    referenceSampleCount: referenceRows.length,
-    outOfSampleSampleCount: outOfSampleRows.length,
+    referenceSampleCount: mixedModels ? 0 : single?.referenceSampleCount || 0,
+    outOfSampleSampleCount: mixedModels ? 0 : single?.outOfSampleSampleCount || 0,
     minimumReferenceSamples,
     minimumOutOfSampleSamples,
     holdoutFraction,
-    reference,
-    outOfSample,
-    meanSubjectiveConfidencePct: outOfSampleRows.length
-      ? round4(outOfSampleRows.reduce((sum, row) => sum + row.confidence, 0) / outOfSampleRows.length)
-      : null,
-    modelVersions: [...new Set(rows.map(row => row.model))].sort(),
+    reference: mixedModels ? null : single?.reference || scoreRows([]),
+    outOfSample: mixedModels ? null : single?.outOfSample || scoreRows([]),
+    modelDiagnostics,
+    meanSubjectiveConfidencePct: mixedModels ? null : single?.meanSubjectiveConfidencePct ?? null,
+    modelVersions,
     sourceLabels: [...new Set(rows.map(row => row.source))].sort(),
     manualExitExcludedCount,
     invalidReviewCount,
     duplicateReviewCount,
-    referenceWindow: referenceRows.length ? {
-      firstClosedAt: new Date(referenceRows[0].closedAt).toISOString(),
-      lastClosedAt: new Date(referenceRows.at(-1).closedAt).toISOString()
-    } : null,
-    outOfSampleWindow: outOfSampleRows.length ? {
-      firstClosedAt: new Date(outOfSampleRows[0].closedAt).toISOString(),
-      lastClosedAt: new Date(outOfSampleRows.at(-1).closedAt).toISOString()
-    } : null,
-    interpretation: "Predicted win probability is an uncalibrated model estimate. The earlier chronological reference sample supplies the fixed baseline probability for the later holdout; the holdout is never used to set that baseline. These are outcome diagnostics, not model training, probability correction or evidence of future profitability. Only approved reviews with automated daily-bar exits are included; manual exits are excluded.",
+    referenceWindow: mixedModels ? null : single?.referenceWindow || null,
+    outOfSampleWindow: mixedModels ? null : single?.outOfSampleWindow || null,
+    interpretation: mixedModels
+      ? "Multiple model versions are present. No pooled calibration metric is reported because their predictions must not be mixed; inspect the separate chronological diagnostics for each version. These are outcome diagnostics, not model training, probability correction or evidence of future profitability."
+      : "Predicted win probability is an uncalibrated model estimate. The earlier chronological reference sample supplies the fixed baseline probability for the later holdout; the holdout is never used to set that baseline. These are outcome diagnostics, not model training, probability correction or evidence of future profitability. Only approved reviews with automated daily-bar exits are included; manual exits are excluded.",
     liveTradingEnabled: false
   };
 }
