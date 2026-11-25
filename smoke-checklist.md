@@ -161,3 +161,5 @@
 - [ ] Compare numeric seconds, string seconds and millisecond timestamps for each 12-hour history window; adopt only a representation with validated in-range BTC/AUD or ETH/AUD trades.
 
 - [ ] Confirm sub-day millisecond epoch queries return valid in-range trades before any seconds-based fallback is attempted.
+
+- [ ] Verify the one-time full-history migration resets only derived BTC/ETH candle caches and trade counters, preserves the paper ledger, and begins at `today - 120` exactly once.
