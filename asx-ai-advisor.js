@@ -34,10 +34,13 @@ function validateInput(candidate, bars) {
   for (const bar of bars) {
     const timestamp = Date.parse(bar?.timestamp || "");
     const open = finite(bar?.open), high = finite(bar?.high), low = finite(bar?.low);
-    const close = finite(bar?.close), volume = finite(bar?.volume);
+    const close = finite(bar?.close);
+    const rawVolume = bar?.volume;
+    const volume = rawVolume == null ? null : finite(rawVolume);
     if (!Number.isFinite(timestamp) || timestamp <= previous ||
-        open === null || high === null || low === null || close === null || volume === null ||
-        open <= 0 || high <= 0 || low <= 0 || close <= 0 || volume < 0 ||
+        open === null || high === null || low === null || close === null ||
+        (rawVolume != null && (volume === null || volume < 0)) ||
+        open <= 0 || high <= 0 || low <= 0 || close <= 0 ||
         high < Math.max(open, close) || low > Math.min(open, close) || low > high) {
       return { valid: false, reason: "AI review rejected invalid, unordered or incomplete source OHLCV bars." };
     }
@@ -141,6 +144,8 @@ export async function evaluateAsxAiDecision({
     latestBarAt: validated.bars.at(-1).timestamp,
     barsProvided: validated.bars.length,
     barsReviewed: recentBars.length,
+    volumeBarsAvailable: recentBars.filter(bar => bar.volume !== null).length,
+    volumeBarsMissing: recentBars.filter(bar => bar.volume === null).length,
     fingerprintAlgorithm: "SHA-256",
     fingerprint
   };
@@ -172,7 +177,7 @@ export async function evaluateAsxAiDecision({
           content: "You are EDGE's conservative ASX paper-trading risk reviewer. Evaluate only the supplied source observations and deterministic candidate. The source label is not independent proof of licensing or accuracy. Do not invent facts, prices, news, fundamentals or market data. Do not calculate or change entry, stop, target, quantity, fees, capital, risk limits or execution settings. This is a model-assisted review layer, not a trained predictive model and not an order instruction. Return the exact JSON schema. Confidence is subjective reasoning confidence, not a probability. predicted_win_probability is your uncalibrated estimate, from 0 to 1, that this exact paper candidate closes with positive net P&L after the supplied fee assumptions under its fixed stop/target rules. Do not imply this probability is calibrated or proven. APPROVE only when evidence is coherent and risks are acceptably bounded."
         }, {
           role: "user",
-          content: "Review this ASX daily-bar paper candidate. The supplied bars and provenance packet are the only market evidence. Identify data limitations, trend quality, breakout context, volatility and cost/risk asymmetry. Do not treat deterministic screening as proof. Return the required structured JSON.\n\n" + JSON.stringify(packet)
+          content: "Review this ASX daily-bar paper candidate. The supplied bars and provenance packet are the only market evidence. If volume is absent, explicitly disclose that limitation and do not infer volume confirmation. Identify data limitations, trend quality, breakout context, volatility and cost/risk asymmetry. Do not treat deterministic screening as proof. Return the required structured JSON.\n\n" + JSON.stringify(packet)
         }],
         text: { format: { type: "json_schema", name: "edge_asx_ai_review", strict: true, schema: DECISION_SCHEMA } }
       }),

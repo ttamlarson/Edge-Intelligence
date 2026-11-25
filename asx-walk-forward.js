@@ -24,8 +24,8 @@ function normalizeCosts(value = {}) {
 }
 
 function normalizeBars(bars) {
-  if (!Array.isArray(bars) || bars.length < 111 || bars.length > 5000) {
-    throw new TypeError("At least 111 and no more than 5,000 completed daily bars are required for three-fold walk-forward validation.");
+  if (!Array.isArray(bars) || bars.length < 51 || bars.length > 5000) {
+    throw new TypeError("At least 51 and no more than 5,000 completed daily bars are required.");
   }
   let previous = -Infinity;
   return bars.map((bar, index) => {
@@ -173,10 +173,11 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
       const targetHit = bar.high >= sizing.targetPrice;
       if (stopHit || targetHit) {
         exitIndex = index;
+        const gapBelowStop = stopHit && bar.open < sizing.stopPrice;
         exitPrice = stopHit ? Math.min(sizing.stopPrice, bar.open) : sizing.targetPrice;
         exitReason = stopHit && targetHit
-          ? "STOP_FIRST_BOTH_TOUCHED"
-          : stopHit && bar.open < sizing.stopPrice
+          ? gapBelowStop ? "STOP_FIRST_BOTH_TOUCHED_GAP_WORSE_OPEN" : "STOP_FIRST_BOTH_TOUCHED"
+          : gapBelowStop
             ? "STOP_GAP_WORSE_OPEN"
             : stopHit ? "STOP" : "TARGET";
         break;
@@ -263,6 +264,8 @@ export function walkForwardAsxStrategy({
   }
   const data = normalizeBars(bars);
   const feeAssumptions = normalizeCosts(costs);
+  const minimumHistoryBars = Math.max(51, Math.ceil(foldCount * 20 / (1 - trainFraction)));
+  if (data.length < minimumHistoryBars) throw new TypeError("At least " + minimumHistoryBars + " daily bars are required for the selected prior-history and fold windows.");
   const testStartIndex = Math.floor(data.length * trainFraction);
   const testBars = data.length - testStartIndex;
   if (testStartIndex < 51 || testBars < foldCount * 20) {

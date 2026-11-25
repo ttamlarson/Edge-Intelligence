@@ -91,7 +91,7 @@
 
 ## ASX research validation (paper only)
 
-- Import an authorised AUD daily OHLC dataset with at least 111 completed bars for a ticker; verify the source label and date range shown in the walk-forward report.
+- Import an authorised AUD daily OHLC dataset with at least 150 completed bars for a ticker; verify the source label and date range shown in the walk-forward report.
 - Run chronological walk-forward validation. Confirm each fold reports prior-history and test windows, next-session-open entry timestamps, modeled costs, stop-first exits, a buy-and-hold reference and a separate reset virtual account.
 - Confirm datasets shorter than the minimum history, unordered timestamps, invalid OHLC and non-AUD assumptions are rejected.
 - Confirm fewer than 30 pooled out-of-sample trades is labelled insufficient and never presented as evidence of profitability.

@@ -115,6 +115,24 @@ test("AI advisor rejects invalid provenance before calling the model", async () 
   assert.equal(called, false);
 });
 
+
+test("AI advisor preserves missing provider volume as missing rather than inventing it", async () => {
+  let requestBody;
+  const barsWithoutVolume = bars.map(({ volume, ...bar }) => bar);
+  const result = await evaluateAsxAiDecision({
+    candidate, bars: barsWithoutVolume, apiKey: "test",
+    fetchImpl: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return aiResponse(approve);
+    }
+  });
+  assert.equal(result.approved, true);
+  assert.equal(result.inputProvenance.volumeBarsAvailable, 0);
+  assert.equal(result.inputProvenance.volumeBarsMissing, 30);
+  const packet = JSON.parse(requestBody.input[1].content.split("\\n\\n").at(-1));
+  assert.equal(packet.recentDailyBars.at(-1).volume, null);
+});
+
 test("AI advisor blocks provider errors, redirects and timeouts without approving", async () => {
   const providerError = await evaluateAsxAiDecision({
     candidate, bars, apiKey: "test", fetchImpl: async () => new Response("unavailable", { status: 503 })

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { walkForwardAsxStrategy } from "../asx-walk-forward.js";
+import { evaluateAsxSwingSetup } from "../autonomous-engine.js";
 
 function makeBars(count = 210) {
   return Array.from({ length: count }, (_, index) => {
@@ -40,7 +41,7 @@ test("ASX walk-forward uses chronological prior history and next-session open en
 
 test("ASX walk-forward rejects invalid, unordered, non-AUD and insufficient history", () => {
   const bars = makeBars();
-  assert.throws(() => walkForwardAsxStrategy({ symbol: "BHP", bars: bars.slice(0, 100), source: "fixture" }), /111|51 prior bars/i);
+  assert.throws(() => walkForwardAsxStrategy({ symbol: "BHP", bars: bars.slice(0, 100), source: "fixture" }), /150|51 prior bars/i);
   assert.throws(() => walkForwardAsxStrategy({ symbol: "BHP", bars, source: "fixture", currency: "USD" }), /AUD/i);
   const unordered = bars.slice();
   unordered[10] = { ...unordered[10], timestamp: unordered[9].timestamp };
@@ -65,6 +66,39 @@ test("ASX walk-forward uses fee-aware next-open sizing and does not relax determ
   assert.equal(withFees.liveTradingEnabled, false);
   assert.ok(withFees.folds.every(fold => fold.riskRejectCount >= 0));
   assert.ok(noFees.folds.every(fold => fold.trades.every(trade => trade.notionalAud <= 200)));
+});
+
+
+test("ASX walk-forward resolves same-bar stop/target ambiguity stop-first and gap-aware", () => {
+  const bars = makeBars();
+  const testStart = Math.floor(bars.length * 0.6);
+  const signalIndex = testStart - 1;
+  const noFees = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
+  const signalBar = bars[signalIndex];
+  const candidate = evaluateAsxSwingSetup({
+    symbol: "BHP", bars: bars.slice(0, signalIndex + 1),
+    source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: signalBar.timestamp, equityAud: 5000, cashAud: 5000,
+    openPositions: 0, now: Date.parse(signalBar.timestamp) + 10 * 60 * 60 * 1000,
+    costs: noFees
+  });
+  assert.equal(candidate.status, "PAPER_CANDIDATE");
+  const gapBarIndex = signalIndex + 2;
+  const gapOpen = candidate.stopPrice - 0.05;
+  bars[gapBarIndex] = {
+    timestamp: bars[gapBarIndex].timestamp,
+    open: gapOpen,
+    high: candidate.targetPrice + 0.05,
+    low: candidate.stopPrice - 0.1,
+    close: candidate.stopPrice - 0.07
+  };
+  const result = walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    startingCapitalAud: 5000, costs: noFees
+  });
+  const firstTrade = result.folds[0].trades[0];
+  assert.equal(firstTrade.exitPrice, gapOpen);
+  assert.equal(firstTrade.exitReason, "STOP_FIRST_BOTH_TOUCHED_GAP_WORSE_OPEN");
 });
 
 test("ASX walk-forward does not let future bars change an earlier fold result", () => {
