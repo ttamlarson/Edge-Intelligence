@@ -535,7 +535,14 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
   if (count === 0 && !wholeUtcDay) {
     let sawOutOfRangeCandidate = false;
     for (const format of ["epoch-string", "epoch-ms"]) {
-      const candidate = await request(format);
+      let candidate;
+      try {
+        candidate = await request(format);
+      } catch (error) {
+        budget.queryFormatErrors ||= [];
+        budget.queryFormatErrors.push({ format, message: String(error?.message || error).slice(0, 140) });
+        continue;
+      }
       budget.queryFormatsAttempted.push(format);
       const candidateCount = candidate.buyorders.length + candidate.sellorders.length;
       if (candidateCount === 0) continue;
