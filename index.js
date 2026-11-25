@@ -1373,5 +1373,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
