@@ -200,3 +200,6 @@ On first run after this integrity migration, legacy history state whose last bat
 
 
 The daily diagnostic probe compares three sub-day timestamp representations—numeric Unix seconds, stringified Unix seconds and Unix milliseconds—for both 12-hour windows. These are diagnostics only: a format is not adopted for backfill until it returns valid trades inside the exact requested UTC window. The backfill remains paper-only and fails closed on empty or out-of-range partitions.
+
+
+When a numeric epoch partition is empty, the backfill now tries stringified epoch seconds and millisecond epoch values in sequence. It adopts the first non-empty representation only when every normalized trade falls inside the requested UTC window; errors or out-of-range data fail closed.
