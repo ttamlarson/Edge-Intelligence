@@ -76,7 +76,7 @@ export function parseDataCedarBars(payload, symbols, { retrievedAt = new Date().
   };
 }
 
-export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl = fetch, now = new Date() } = {}) {
+export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl = fetch, now = new Date(), timeoutMs = 10_000 } = {}) {
   const tickers = normalizeDataCedarSymbols(symbols);
   const today = now.toISOString().slice(0, 10);
   const defaultFrom = new Date(now.getTime() - 365 * 86_400_000).toISOString().slice(0, 10);
@@ -87,15 +87,18 @@ export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl 
     throw new Error("The free Explorer integration is limited to a maximum 366-day daily-bar request.");
   }
   if (typeof apiKey !== "string" || !apiKey.trim() || apiKey.length > 512) throw new Error("DataCedar API key is not configured.");
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 120_000) throw new Error("DataCedar timeout must be zero (disabled) or an integer up to 120000 milliseconds.");
   const url = new URL(`${BASE_URL}/stocks/bars`);
   url.search = new URLSearchParams({
     symbols: tickers.map(ticker => `asx:${ticker}`).join(","),
     timeframe: "1d", from: start, to: end, adjustment: "raw", order: "asc", limit: "50000"
   }).toString();
-  const response = await fetchImpl(url, {
-    headers: { "X-API-Key": apiKey, Accept: "application/json" },
-    signal: AbortSignal.timeout(10_000)
-  });
+  const requestOptions = { headers: { "X-API-Key": apiKey, Accept: "application/json" } };
+  // AbortSignal.timeout() requires an active request context in some Workers
+  // runtimes. Scheduled events pass timeoutMs: 0 and rely on Cloudflare scheduled
+  // event execution limits instead.
+  if (timeoutMs > 0) requestOptions.signal = AbortSignal.timeout(timeoutMs);
+  const response = await fetchImpl(url, requestOptions);
   if (response.url && new URL(response.url).hostname !== "api.datacedar.com") throw new Error("DataCedar redirected to an unexpected host.");
   const contentLength = Number(response.headers.get("Content-Length"));
   if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) throw new Error("DataCedar response exceeds the 4 MB limit.");
