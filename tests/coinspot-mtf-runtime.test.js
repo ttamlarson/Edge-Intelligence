@@ -57,7 +57,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   assert.equal(result.markets.length,2);
   assert.equal(result.markets[0].signalStatus,"WARMUP_REQUIRED");
   const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
-  assert.equal(history.lastProcessedDate,"2026-07-29");
+  assert.equal(history.lastProcessedDate,"2026-07-31");
   const account=JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));
   assert.equal(account.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
