@@ -281,3 +281,31 @@ test("CoinSpot sub-day probe detects a provider that returns out-of-window trade
   assert.equal(probe.partitionHistory[1].outOfRangeTrades,1);
  }finally{globalThis.fetch=originalFetch;}
 });
+
+
+test("CoinSpot history rejects valid trades returned outside the requested UTC date",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
+  if(target.endsWith("/orders/market/completed")){
+   const body=JSON.parse(options.body||"{}"),coin=body.cointype;
+   const date=typeof body.startdate==="string"?body.startdate:new Date(Number(body.startdate)*1000).toISOString().slice(0,10);
+   const timestamp=date==="2026-07-28"?"2026-07-29T00:00:00.000Z":date+"T10:00:00.000Z";
+   const row={market:coin+"/AUD",solddate:timestamp,rate:coin==="BTC"?90000:2500,amount:0.01,total:coin==="BTC"?900:25};
+   return new Response(JSON.stringify({status:"ok",buyorders:[row],sellorders:[]}),{status:200});
+  }
+  if(target.includes("/pubapi/v2/orders/completed/")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
+  throw new Error("Unexpected CoinSpot URL: "+target);
+ };
+ try{
+  await assert.rejects(
+   ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T12:00:00.000Z"),
+   /COINSPOT_HISTORY_RANGE_MISMATCH/
+  );
+  const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  assert.equal(history.nextDate,"2026-07-28");
+  assert.equal(history.lastProcessedDate,undefined);
+  assert.equal(history.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
