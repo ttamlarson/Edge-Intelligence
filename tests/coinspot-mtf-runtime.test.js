@@ -398,3 +398,87 @@ test("CoinSpot MTF scheduled failures remain visible to Cloudflare Cron Events",
  assert.ok(pending instanceof Promise);
  await assert.rejects(pending, /paper ledger storage unavailable/);
 });
+
+
+test("CoinSpot MTF readiness counts only completed candles and exposes stored partial bars", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const now="2026-11-25T12:00:00.000Z";
+ const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const daily=Array.from({length:110},(_,i)=>({
+  timestamp:new Date(Date.parse("2026-08-08T00:00:00.000Z")+i*day).toISOString(),
+  open:100,high:101,low:99,close:100,volume:1
+ }));
+ const fourHourBars=Array.from({length:210},(_,i)=>({
+  timestamp:new Date(Date.parse("2026-10-21T16:00:00.000Z")+i*fourHours).toISOString(),
+  open:100,high:101,low:99,close:100,volume:1
+ }));
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-25",liveTradingEnabled:false,
+  markets:{
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:123,lastHistoryDate:"2026-11-25"},
+   ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}
+  }
+ }));
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
+  const btc=result.markets.find(m=>m.coin==="BTC");
+  assert.equal(btc.signalStatus,"WARMUP_REQUIRED");
+  assert.equal(btc.history.dailyCandles,109);
+  assert.equal(btc.history.fourHourCandles,209);
+  assert.equal(btc.history.storedDailyCandles,110);
+  assert.equal(btc.history.storedFourHourCandles,210);
+  assert.equal(btc.history.lastCompletedDailyAt,"2026-11-24T00:00:00.000Z");
+  assert.equal(btc.history.lastCompletedFourHourAt,"2026-11-25T08:00:00.000Z");
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("CoinSpot MTF scheduled success emits a structured paper-only runtime summary", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch,originalLog=console.log;
+ const variants=[{format:"epoch"},{format:"epoch-string"},{format:"epoch-ms"}];
+ const probeMarket=coin=>({coin,pair:coin+"/AUD",readOnlyHistory:{partitionHistory:[
+  {variants},{variants}
+ ]}});
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-20",
+  markets:{
+   BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},
+   ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}
+  },
+  providerProbe:{markets:[probeMarket("BTC"),probeMarket("ETH")]},
+  lastProviderProbeAt:new Date().toISOString(),
+  liveTradingEnabled:false
+ }));
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
+ const messages=[];
+ console.log=(...args)=>messages.push(args.join(" "));
+ let pending;
+ try{
+  await worker.scheduled({scheduledTime:Date.parse("2026-11-25T09:15:00.000Z")},{
+   EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-readonly-key",COINSPOT_READONLY_SECRET:"test-readonly-secret"
+  },{waitUntil:promise=>{pending=promise;}});
+  assert.ok(pending instanceof Promise);
+  await pending;
+  const line=messages.find(message=>message.includes('"event":"COINSPOT_MTF_SCAN"'));
+  assert.ok(line);
+  const summary=JSON.parse(line);
+  assert.equal(summary.paperOnly,true);
+  assert.equal(summary.liveTradingEnabled,false);
+  assert.equal(summary.backfill.requested,4);
+  assert.equal(summary.backfill.processed,4);
+  assert.deepEqual(summary.markets.map(m=>m.pair),["BTC/AUD","ETH/AUD"]);
+  assert.equal(summary.ledger.equityAud,100);
+  assert.equal(summary.ledger.openPosition,null);
+  assert.ok(!line.includes("test-readonly-key"));
+  assert.ok(!line.includes("test-readonly-secret"));
+ }finally{
+  globalThis.fetch=originalFetch;
+  console.log=originalLog;
+ }
+});
