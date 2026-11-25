@@ -492,7 +492,7 @@ const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+d
 async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
   const duration = endMs - startMs;
   const wholeUtcDay = duration === 86400000 && startMs % 86400000 === 0;
-  const primaryFormat = wholeUtcDay ? "date" : "epoch";
+  const primaryFormat = wholeUtcDay ? "date" : "epoch-ms";
   const request = async format => {
     if (budget.calls >= 15) throw new HttpError(503, "CoinSpot history batch reached its 15-request per-market safety budget; retrying this date on the next sync.");
     budget.calls++;
@@ -514,8 +514,8 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
 
   // CoinSpot documents both YYYY-MM-DD and Unix-epoch date filters. Use the
   // date form for whole UTC days, then retry an empty day once with epoch
-  // seconds. Sub-day recursive partitions always use epoch seconds so they
-  // cannot accidentally widen back to the entire UTC day.
+  // seconds. Production probes showed seconds-based sub-day filters return
+  // empty; millisecond epochs are the validated primary representation.
   if (count === 0 && wholeUtcDay) {
     budget.emptyPrimaryResponses = (budget.emptyPrimaryResponses || 0) + 1;
     const fallbackFormat = primaryFormat === "date" ? "epoch" : "date";
@@ -534,7 +534,7 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
 
   if (count === 0 && !wholeUtcDay) {
     let sawOutOfRangeCandidate = false;
-    for (const format of ["epoch-string", "epoch-ms"]) {
+    for (const format of ["epoch", "epoch-string"]) {
       let candidate;
       try {
         candidate = await request(format);
