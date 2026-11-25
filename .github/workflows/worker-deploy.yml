@@ -12,6 +12,8 @@ on:
       - "asx-autopilot.js"
       - "asx-ai-advisor.js"
       - "asx-ai-calibration.js"
+      - "asx-walk-forward.js"
+      - "crypto-ai-advisor.js"
       - "binance-market-data.js"
       - "autonomous-engine.js"
       - "crypto-engine.js"
@@ -53,6 +55,8 @@ jobs:
           npm test
           npm run check
           node --check asx-ai-calibration.js
+          node --check asx-walk-forward.js
+          node --check crypto-ai-advisor.js
 
       - name: Install Wrangler
         run: npm install --global wrangler
