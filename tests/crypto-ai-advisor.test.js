@@ -64,17 +64,18 @@ test("crypto AI review fails closed when the model key is missing", async () => 
 test("crypto AI review rejects future, incomplete and oversized data before provider calls", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls++; };
-  const future = candles.map(x => ({ ...x }));
-  future[future.length - 1].timestamp = "2026-11-25T09:00:00.000Z";
+  const shifted = candles.map((bar, index) => ({
+    ...bar,
+    timestamp: new Date(Date.parse("2026-11-25T07:00:00.000Z") - (candles.length - 1 - index) * 3600000).toISOString()
+  }));
   const result = await reviewCryptoWalkForward({
-    ...base, candles: future, apiKey: "test-only", fetchImpl
+    ...base, candles: shifted, now: Date.parse("2026-11-25T06:00:00.000Z"),
+    apiKey: "test-only", fetchImpl
   });
   assert.equal(result.status, "AI_BLOCKED_INVALID_INPUT");
   assert.match(result.reason, /future-dated/i);
-  const incomplete = candles.map(x => ({ ...x }));
-  incomplete[incomplete.length - 1].timestamp = "2026-11-25T07:00:00.000Z";
   const incompleteResult = await reviewCryptoWalkForward({
-    ...base, candles: incomplete, now: Date.parse("2026-11-25T07:30:00.000Z"),
+    ...base, candles: shifted, now: Date.parse("2026-11-25T07:30:00.000Z"),
     apiKey: "test-only", fetchImpl
   });
   assert.equal(incompleteResult.status, "AI_BLOCKED_INVALID_INPUT");
