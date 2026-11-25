@@ -111,7 +111,7 @@
 
       <section class="page" id="page-crypto">
         <div class="welcome-row"><div><div class="eyebrow">COINSPOT · AUD SPOT MARKETS</div><h1>Crypto <em>watchtower.</em></h1><p class="muted">Live public market quotes and recent completed trades. No exchange account or API key required for this feed.</p></div><button class="primary-btn" id="cryptoRefreshBtn">Refresh market data</button></div>
-        <div class="notice"><span>ⓘ</span><div><b>Research and paper mode only</b><p>Live trading is disabled. CoinSpot's public feed does not provide a verified hourly OHLC history here, so EDGE will not generate trade signals or claim a backtest from sampled trades.</p></div></div>
+        <div class="notice"><span>ⓘ</span><div><b>Research and paper mode only</b><p>Live trading is disabled. EDGE now builds historical daily and 4-hour candles from CoinSpot Read Only completed BTC/AUD and ETH/AUD market orders. Signals remain locked until history is complete and validated.</p></div></div>
         <div class="metric-grid">
           <article class="metric-card"><span>STARTING PAPER CAPITAL</span><strong>$100.00</strong><small>AUD · fixed simulation allocation</small></article>
           <article class="metric-card"><span>MAX DEPLOYMENT</span><strong>$50.00</strong><small>Per strategy guardrail</small></article>
@@ -131,6 +131,11 @@
           <div class="result-section"><h4>MARKET SCANNER · 10 USDT PAIRS</h4><div id="autoPaperMarkets" class="integration-grid"><div class="empty">Waiting for the first scheduled market scan.</div></div></div>
           <div class="result-section"><h4>RECENT AUTOMATED PAPER TRADES</h4><div id="autoPaperHistory" class="market-list"><div class="empty">No completed automated trades yet.</div></div></div>
           <p class="muted tiny">Strategy: EMA 20/50/200 alignment, RSI 50–68, rising MACD momentum, ADX strength filter and ATR-based risk levels. Entry/exit costs are modelled; historical and paper performance do not guarantee future returns. The ledger is shared across authenticated EDGE users.</p>
+        </div>
+        <div class="panel" id="coinSpotMtfPanel">
+          <div class="panel-head"><div><h3>EDGE multi-timeframe breakout · CoinSpot AUD</h3><p>Native CoinSpot completed orders · daily trend + 4-hour Donchian breakout · automated historical warm-up</p></div><button class="secondary-btn" id="coinSpotMtfSyncBtn">Sync next history day</button></div>
+          <div class="notice"><span>ⓘ</span><div><b>READ-ONLY DATA · PAPER CANDIDATES ONLY</b><p>CoinSpot history is being backfilled one UTC day per 15-minute Worker run. The strategy needs at least 110 completed daily candles and 210 completed 4-hour candles per market. Missing intervals are not invented. No exchange orders are submitted.</p></div></div>
+          <div class="result-section"><h4 id="coinSpotMtfStatus">HISTORY SYNC NOT STARTED</h4><p id="coinSpotMtfProgress">Waiting for the first CoinSpot history sync.</p><div id="coinSpotMtfMarkets" class="integration-grid"><div class="empty">No validated CoinSpot history yet.</div></div></div>
         </div>
         <div class="section-heading"><div><h2>CoinSpot AUD markets</h2><p id="cryptoStatus">Not yet refreshed · prices are not loaded</p></div></div>
         <div id="cryptoMarketRows" class="integration-grid"><div class="empty">Select Refresh market data to load BTC/AUD and ETH/AUD.</div></div>
