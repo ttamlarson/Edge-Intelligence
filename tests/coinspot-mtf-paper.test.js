@@ -37,3 +37,16 @@ test("daily loss circuit includes open mark-to-market loss and closes at the lim
  assert.ok(a.dailyLossAud>=MTF_PAPER_CONFIG.maxDailyLossAud);
  assert.equal(a.liveTradingEnabled,false);
 });
+
+
+test("rejects malformed MTF candidates with invalid ATR or crossed quotes",()=>{
+ const base=candidate();
+ const badAtr={...base,signal:{...base.signal,indicators:{...base.signal.indicators,atr20:0}}};
+ const crossed={...candidate("ETH"),quote:{bid:101000,ask:100000,last:100500}};
+ const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[badAtr,crossed],now});
+ assert.equal(a.openPosition,null);
+ assert.equal(a.cashAud,100);
+ assert.equal(a.equityAud,100);
+ assert.equal(a.liveTradingEnabled,false);
+ assert.equal(validateMtfPaperAccount(a),true);
+});
