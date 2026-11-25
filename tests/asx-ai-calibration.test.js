@@ -6,16 +6,19 @@ function trade(index, probability, outcome, exitType = "AUTOMATED_PAPER_DAILY_BA
   const reviewedAt = new Date(Date.UTC(2026, 0, index + 1, 0)).toISOString();
   const openedAt = new Date(Date.UTC(2026, 0, index + 1, 1)).toISOString();
   const closedAt = new Date(Date.UTC(2026, 0, index + 2, 0)).toISOString();
+  const fingerprint = String(index).padStart(64, "0");
   return {
     id: "trade-" + index, status: "CLOSED_PAPER", exitType,
     openedAt, closedAt, profitLossAud: outcome ? 10 : -8,
     aiReview: {
       status: "AI_APPROVED_PAPER_CANDIDATE", decision: "APPROVE",
       confidence: 82, predictedWinProbability: probability,
-      riskFlags: [], model: "test-model", reviewId: "review-" + index, reviewedAt,
+      riskFlags: [], model: "test-model",
+      reviewId: "review-" + index + "-" + fingerprint.slice(0, 16), reviewedAt,
       inputProvenance: {
-        source: "Synthetic test fixture only", currency: "AUD",
-        fingerprint: String(index).padStart(64, "0")
+        source: "Synthetic test fixture only", sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
+        currency: "AUD", observedAt: new Date(Date.parse(reviewedAt) - 3600000).toISOString(),
+        barsProvided: 55, barsReviewed: 30, fingerprintAlgorithm: "SHA-256", fingerprint
       }
     }
   };
@@ -27,9 +30,10 @@ test("AI calibration uses a chronological holdout and reports Brier and reliabil
   assert.equal(result.status, "EARLY_CALIBRATION_MONITORING");
   assert.equal(result.isCalibrated, false);
   assert.equal(result.trainedModel, false);
-  assert.equal(result.trainingSampleCount, 30);
+  assert.equal(result.referenceSampleCount, 30);
   assert.equal(result.outOfSampleSampleCount, 10);
   assert.equal(result.outOfSample.sampleCount, 10);
+  assert.equal(result.outOfSample.baselineProbability, 0.5);
   assert.equal(typeof result.outOfSample.brierScore, "number");
   assert.equal(typeof result.outOfSample.expectedCalibrationError, "number");
   assert.equal(result.outOfSample.reliabilityBins.length > 0, true);
@@ -62,4 +66,18 @@ test("AI calibration never claims a result from a small or empty sample", () => 
   const empty = calculateAsxAiCalibration([]);
   assert.equal(empty.status, "INSUFFICIENT_OUT_OF_SAMPLE_SAMPLE");
   assert.equal(empty.isCalibrated, false);
+});
+
+
+test("AI holdout baseline is estimated only from earlier reference outcomes", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => trade(i, 0.6, i < 30));
+  const result = calculateAsxAiCalibration(rows, {
+    holdoutFraction: 0.25, minimumReferenceSamples: 30, minimumOutOfSampleSamples: 5
+  });
+  assert.equal(result.reference.observedWinRate, 1);
+  assert.equal(result.outOfSample.observedWinRate, 0);
+  assert.equal(result.outOfSample.baselineProbability, 1);
+  assert.equal(result.outOfSample.baselineBrierScore, 1);
+  assert.equal(result.outOfSample.brierScore, 0.36);
+  assert.equal(result.outOfSample.brierSkillScore, 0.64);
 });
