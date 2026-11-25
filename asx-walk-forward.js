@@ -9,6 +9,37 @@ import {
 const round2 = value => Math.round((value + Number.EPSILON) * 100) / 100;
 const round4 = value => Math.round((value + Number.EPSILON) * 10000) / 10000;
 const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+const SYDNEY_FORMATTER = new Intl.DateTimeFormat("en-AU", {
+  timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+});
+
+function sydneyClock(value) {
+  const ms = value instanceof Date ? value.getTime() : Number(value);
+  if (!Number.isFinite(ms)) return null;
+  const parts = SYDNEY_FORMATTER.formatToParts(new Date(ms));
+  const fields = Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+  return {
+    date: fields.year + "-" + fields.month + "-" + fields.day,
+    minutes: Number(fields.hour) * 60 + Number(fields.minute)
+  };
+}
+
+function validateResearchClock(bars, now) {
+  const nowMs = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
+  if (!Number.isFinite(nowMs)) throw new TypeError("A valid research as-of clock is required.");
+  const latestMs = Date.parse(bars.at(-1).timestamp);
+  if (latestMs > nowMs + 5 * 60_000) {
+    throw new TypeError("Historical ASX data contains a future-dated daily bar relative to the research clock.");
+  }
+  const latestClock = sydneyClock(latestMs);
+  const currentClock = sydneyClock(nowMs);
+  if (!latestClock || !currentClock || latestClock.date > currentClock.date ||
+      (latestClock.date === currentClock.date && currentClock.minutes < 17 * 60)) {
+    throw new TypeError("The latest ASX daily bar may be incomplete; wait until 17:00 Sydney time or use the previous completed session.");
+  }
+  return nowMs;
+}
 
 function normalizeCosts(value = {}) {
   const costs = {
@@ -95,7 +126,7 @@ function benchmarkFold(bars, startIndex, endIndex, startingCapitalAud, costs) {
     if (entryCost && notional + entryCost.totalAud <= maxSpend + 0.01) break;
     shares--;
   }
-  if (shares < 1) return { status: "NO_BENCHMARK_POSITION", returnPct: 0, profitLossAud: 0, shares: 0 };
+  if (shares < 1) return { status: "NO_BENCHMARK_POSITION", returnPct: null, profitLossAud: null, shares: 0 };
   const notional = shares * entryPrice;
   const entryCost = estimateAsxSideCost(notional, costs);
   const exitCost = estimateAsxSideCost(shares * exitPrice, costs);
@@ -252,7 +283,7 @@ export function walkForwardAsxStrategy({
   symbol, bars, source, currency = "AUD",
   startingCapitalAud = EDGE_STARTING_CAPITAL_AUD,
   trainFraction = 0.6, foldCount = 3, minimumOutOfSampleTrades = 30,
-  costs = {}
+  costs = {}, now = Date.now()
 } = {}) {
   const ticker = String(symbol || "").toUpperCase();
   if (!/^[A-Z0-9.]{2,12}$/.test(ticker) || typeof source !== "string" || !source.trim() ||
@@ -263,6 +294,7 @@ export function walkForwardAsxStrategy({
     throw new TypeError("Invalid ASX walk-forward symbol, source, AUD currency, capital or fold assumptions.");
   }
   const data = normalizeBars(bars);
+  const asOf = validateResearchClock(data, now);
   const feeAssumptions = normalizeCosts(costs);
   const minimumHistoryBars = Math.max(51, Math.ceil(foldCount * 20 / (1 - trainFraction)));
   if (data.length < minimumHistoryBars) throw new TypeError("At least " + minimumHistoryBars + " daily bars are required for the selected prior-history and fold windows.");
@@ -312,6 +344,7 @@ export function walkForwardAsxStrategy({
     currency: "AUD",
     source,
     sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
+    asOf: new Date(asOf).toISOString(),
     data: {
       bars: data.length,
       firstBarAt: data[0].timestamp,
