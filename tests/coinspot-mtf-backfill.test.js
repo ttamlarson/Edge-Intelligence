@@ -13,7 +13,7 @@ function kvStore() {
   };
 }
 
-test("CoinSpot MTF runner backfills two UTC dates per scan and remains paper-only", async () => {
+test("CoinSpot MTF runner backfills four UTC dates per scan and remains paper-only", async () => {
   const kv = kvStore();
   const now = "2026-11-25T12:00:00.000Z";
   const probeMarket = coin => ({
@@ -86,10 +86,10 @@ test("CoinSpot MTF runner backfills two UTC dates per scan and remains paper-onl
       COINSPOT_READONLY_SECRET: "test-readonly-secret"
     }, now);
 
-    assert.equal(result.backfillDaysRequested, 2);
-    assert.equal(result.backfillDaysProcessed, 2);
-    assert.equal(result.historySync.processedDate, "2026-07-29");
-    assert.equal(result.historySync.nextDate, "2026-07-30");
+    assert.equal(result.backfillDaysRequested, 4);
+    assert.equal(result.backfillDaysProcessed, 4);
+    assert.equal(result.historySync.processedDate, "2026-07-31");
+    assert.equal(result.historySync.nextDate, "2026-08-01");
     assert.equal(result.status, "BACKFILLING");
     assert.equal(result.paperOnly, true);
     assert.equal(result.liveTradingEnabled, false);
@@ -97,15 +97,15 @@ test("CoinSpot MTF runner backfills two UTC dates per scan and remains paper-onl
     assert.equal(result.openPosition, null);
     assert.equal(result.closedTrades.length, 0);
     assert.ok(result.markets.every(market => market.signalStatus === "WARMUP_REQUIRED"));
-    assert.equal(calls.filter(call => call.target.endsWith("/orders/market/completed")).length, 4);
+    assert.equal(calls.filter(call => call.target.endsWith("/orders/market/completed")).length, 8);
     assert.equal(calls.filter(call => call.target.includes("/pubapi/v2/latest/")).length, 2);
 
     const history = JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
-    assert.equal(history.nextDate, "2026-07-30");
+    assert.equal(history.nextDate, "2026-08-01");
     assert.equal(history.liveTradingEnabled, false);
     for (const coin of ["BTC", "ETH"]) {
-      assert.equal(history.markets[coin].dailyCandles.length, 2);
-      assert.equal(history.markets[coin].fourHourCandles.length, 2);
+      assert.equal(history.markets[coin].dailyCandles.length, 4);
+      assert.equal(history.markets[coin].fourHourCandles.length, 4);
     }
 
     const account = JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));

@@ -854,7 +854,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
   } finally { clearTimeout(timeout); }
 }
 
-async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 2) {
+async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
   if (!Number.isFinite(clock)) throw new HttpError(400, "Invalid paper scan clock.");
