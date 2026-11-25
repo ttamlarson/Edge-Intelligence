@@ -530,6 +530,8 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     summary:{type:"string",maxLength:700},
     riskFlags:{type:"array",maxItems:6,items:{type:"string",maxLength:180}}
   }, required:["assessment","summary","riskFlags"] };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
@@ -537,7 +539,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
         input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote, spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
           {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
         text:{format:{type:"json_schema",name:"edge_coinspot_signal_review",strict:true,schema}}
-      }), redirect:"error", signal:AbortSignal.timeout(12000)
+      }), redirect:"error", signal:controller.signal
     });
     if (!response.ok) return {status:"AI_REVIEW_PROVIDER_ERROR",summary:"AI review provider returned HTTP "+response.status+".",riskFlags:[]};
     const payload=await response.json();
@@ -548,7 +550,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     return {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
   } catch {
     return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; deterministic safeguards remain authoritative.",riskFlags:[]};
-  }
+  } finally { clearTimeout(timeout); }
 }
 
 async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
