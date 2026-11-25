@@ -97,7 +97,7 @@ test("ASX autopilot forwards disabled timeout for scheduled provider calls", asy
       return new Response(JSON.stringify({ data: { "asx:BHP": [] } }), { headers: { "Content-Type": "application/json" } });
     }
   });
-  assert.equal(result.status, "SCAN_COMPLETED");
+  assert.equal(result.status, "NO_DATA");
   assert.equal(Object.hasOwn(requestedOptions, "signal"), false);
   assert.equal(result.liveTradingEnabled, false);
 });
