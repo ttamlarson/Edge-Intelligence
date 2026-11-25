@@ -10,8 +10,12 @@ function kvStore() {
 
 test("CoinSpot MTF sync backfills one UTC day per run using read-only historical orders",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
- globalThis.fetch=async(url,options)=>{
-  calls.push({url:String(url),method:options.method,body:JSON.parse(options.body)});
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url),method=options.method||"GET",body=options.body?JSON.parse(options.body):null;
+  calls.push({url:target,method,body});
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:101,last:100.5}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
   return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  try {
@@ -19,9 +23,11 @@ test("CoinSpot MTF sync backfills one UTC day per run using read-only historical
   const first=await __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},now);
   assert.equal(first.status,"BACKFILLING");
   assert.equal(first.processedDate,"2026-07-28");
-  assert.equal(calls.length,2);
-  assert.ok(calls.every(call=>call.url.endsWith("/orders/market/completed")&&call.method==="POST"));
-  assert.ok(calls.every(call=>call.body.markettype==="AUD"&&call.body.limit===500));
+  assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,8);
+  assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
+  const historyCalls=calls.filter(call=>call.url.endsWith("/orders/market/completed"));
+  assert.ok(historyCalls.every(call=>call.method==="POST"&&call.body.markettype==="AUD"&&call.body.limit===500));
   const stored=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(stored.liveTradingEnabled,false);
   assert.equal(stored.markets.BTC.dailyCandles.length,0);
@@ -49,13 +55,20 @@ test("CoinSpot MTF status keeps signals blocked during warm-up but still retriev
 
 test("CoinSpot MTF paper runner advances history and creates a paper-only AUD ledger",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
- globalThis.fetch=async(url,options)=>{
-  calls.push({url:String(url),body:JSON.parse(options.body)});
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url),method=options.method||"GET",body=options.body?JSON.parse(options.body):null;
+  calls.push({url:target,method,body});
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:101,last:100.5}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
   return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z");
-  assert.equal(calls.length,8);
+  assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
+  assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
+  assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/latest/")).length,2);
   assert.equal(result.mode,"COINSPOT_MTF_AUTOMATED_PAPER");
   assert.equal(result.cashAud,100);
   assert.equal(result.liveTradingEnabled,false);
@@ -86,7 +99,7 @@ test("CoinSpot read-only transport retries once with a fresh signed nonce",async
  }finally{globalThis.fetch=originalFetch;}
 });
 
-test("CoinSpot timeout is explicit and an incomplete history date is not written",async()=>{
+test("CoinSpot timeout persists provider diagnostics but does not advance incomplete history",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch;
  let calls=0;
  globalThis.fetch=async()=>{
@@ -100,8 +113,11 @@ test("CoinSpot timeout is explicit and an incomplete history date is not written
    ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T06:00:00.000Z"),
    /COINSPOT_TIMEOUT/
   );
-  assert.equal(calls,2);
-  assert.equal(kv.values.has("coinspot-mtf-history-global-v1"),false);
+  assert.equal(calls,10);
+  const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  assert.equal(history.providerProbe.readOnlyStatus,"FAILED");
+  assert.equal(history.nextDate,"2026-07-28");
+  assert.equal(history.lastProcessedDate,undefined);
  }finally{globalThis.fetch=originalFetch;}
 });
 
