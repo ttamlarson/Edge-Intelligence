@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { __test } from "../index.js";
+import worker, { __test } from "../index.js";
 import { createMtfPaperAccount, processMtfPaperAccount } from "../coinspot-mtf-paper.js";
 
 function kvStore() {
@@ -188,5 +188,29 @@ test("CoinSpot refuses to advance a historical date when non-empty rows fail tra
   assert.equal(history.nextDate,"2026-07-28");
   assert.equal(history.lastProcessedDate,undefined);
   assert.equal(history.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("CoinSpot MTF cron is isolated from the Binance paper scanner", async () => {
+ const originalFetch=globalThis.fetch;
+ const store=new Map(), calls=[];
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  calls.push(target);
+  if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
+  if(target.includes("/orders/market/completed")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
+  if(target.includes("/pubapi/v2/orders/completed/")) return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
+  if(target.includes("/pubapi/v2/latest/")) return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:101,last:100.5}}),{status:200});
+  throw new Error("Unexpected scheduled request: "+target);
+ };
+ try{
+  const pending=[];
+  await worker.scheduled({cron:__test.COINSPOT_MTF_CRON},{
+   EDGE_KV:{get:async key=>store.get(key)||null,put:async(key,value)=>store.set(key,value)},
+   COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"
+  },{waitUntil:promise=>pending.push(promise)});
+  await Promise.all(pending);
+  assert.ok(calls.some(url=>url.includes("coinspot.com.au")));
+  assert.ok(calls.every(url=>!url.includes("binance")));
  }finally{globalThis.fetch=originalFetch;}
 });
