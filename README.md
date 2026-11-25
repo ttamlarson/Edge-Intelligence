@@ -161,3 +161,8 @@ No market data is generated or substituted. The walk-forward panel uses only the
 
 
 ASX autopilot candidate selection is now risk-aware and deterministic across the configured ticker set. AI-approved candidates are ranked lexicographically by higher fee-adjusted net reward/risk, higher estimated net target profit, then lower consumption of the fixed risk budget; ticker is the final tie-breaker. The uncalibrated AI win-probability estimate is deliberately excluded from ranking until a sufficiently large chronological outcome sample exists. Portfolio controls still decide whether any ranked candidate can actually open.
+
+
+## Multi-timeframe crypto breakout research candidate
+
+`edge-mtf-breakout-strategy.js` implements a deterministic, long-only signal and risk-sizing engine for the separately documented EDGE MTF Donchian Ensemble V1. It requires verified, contiguous completed daily and four-hour OHLCV series; checks the daily EMA100 regime, four-hour EMA50/EMA200 trend and slope, two-of-three prior Donchian breakouts, spread, volume and volatility; and exposes risk sizing and exit calculations. The module is deliberately isolated from exchange execution: it creates no orders, is not wired to live trading, and returns paper-only candidate signals. Tests use synthetic fixtures solely to exercise code paths, not to claim strategy performance. Production use still requires a real multi-timeframe data adapter, fee/slippage-aware chronological backtester, CoinSpot quote/fill reconciliation and forward paper validation.
