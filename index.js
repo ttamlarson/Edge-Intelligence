@@ -854,7 +854,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
   } finally { clearTimeout(timeout); }
 }
 
-async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 1) {
+async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 2) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
   if (!Number.isFinite(clock)) throw new HttpError(400, "Invalid paper scan clock.");
@@ -868,12 +868,14 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 1) {
     try { account = JSON.parse(stored); validateMtfPaperAccount(account); }
     catch { throw new HttpError(409, "CoinSpot MTF paper ledger failed validation; existing data was preserved."); }
   }
-  let historySync = null, syncError = null;
+  let historySync = null, syncError = null, backfillDaysProcessed = 0;
+  const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
-    for (let i = 0; i < Math.max(1, Math.min(4, Number(backfillDays) || 1)); i++) {
+    for (let i = 0; i < backfillDaysRequested; i++) {
       try {
         historySync = await syncCoinSpotMtfHistory(env, new Date(clock));
         if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) break;
+        backfillDaysProcessed++;
         if (historySync.status === "COLLECTING_LIVE_DAY") break;
       } catch (error) {
         syncError = String(error?.message || "CoinSpot history sync failed").replace(/\s+/g, " ").slice(0, 220);
@@ -891,7 +893,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 1) {
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
     ...account, status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
-    strategyStatus: strategy.status || "UNKNOWN", historySync, lastScanAt: nowIso,
+    strategyStatus: strategy.status || "UNKNOWN", historySync,
+    backfillDaysRequested, backfillDaysProcessed, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
       coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
