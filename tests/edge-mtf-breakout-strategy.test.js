@@ -84,7 +84,7 @@ test("exit helper applies trailing stop, daily reversal and maximum holding peri
     entryPrice: 100, highestCompletedClose: 100, atr20: 2,
     fourHourClose: 99, dailyTrendBullish: false, ageDays: 1
   });
-  assert.equal(reversal.reason, "ATR_TRAILING_STOP");
+  assert.equal(reversal.reason, "DAILY_TREND_REVERSAL");
   const timed = getEdgeBreakoutExit({
     entryPrice: 100, highestCompletedClose: 110, atr20: 2,
     fourHourClose: 105, dailyTrendBullish: true, ageDays: 30
