@@ -46,7 +46,8 @@ tag = "v1"
 new_sqlite_classes = ["CoinSpotExecutionCoordinator"]
 
 [triggers]
-crons = ["*/15 * * * *"]
+# CoinSpot MTF is staggered from the Binance scanner to keep subrequests isolated.
+crons = ["*/15 * * * *", "7,22,37,52 * * * *"]
 
 # Staging uses isolated KV and rate-limit namespaces. Replace all placeholders before `--env staging`.
 [env.staging]
