@@ -83,6 +83,24 @@ test("ASX autopilot validates DataCedar data, records a paper-only scan and neve
   assert.equal(persisted.portfolio.cashAud, 500);
 });
 
+test("ASX autopilot forwards disabled timeout for scheduled provider calls", async () => {
+  const now = Date.parse("2026-11-23T07:00:00Z");
+  const store = kv();
+  let requestedOptions;
+  const result = await runAsxAutopilot({
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", EDGE_KV: store.binding
+  }, {
+    now: new Date(now), timeoutMs: 0,
+    fetchImpl: async (_url, options) => {
+      requestedOptions = options;
+      return new Response(JSON.stringify({ data: { "asx:BHP": [] } }), { headers: { "Content-Type": "application/json" } });
+    }
+  });
+  assert.equal(result.status, "SCAN_COMPLETED");
+  assert.equal(Object.hasOwn(requestedOptions, "signal"), false);
+  assert.equal(result.liveTradingEnabled, false);
+});
 test("ASX autopilot processes each daily bar only once", async () => {
   const now = Date.parse("2026-11-23T07:00:00Z");
   const store = kv();
