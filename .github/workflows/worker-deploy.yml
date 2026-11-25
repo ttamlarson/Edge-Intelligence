@@ -19,6 +19,7 @@ on:
       - "crypto-engine.js"
       - "coinspot.js"
       - "coinspot-history.js"
+      - "coinspot-mtf-paper.js"
       - "edge-mtf-breakout-strategy.js"
       - "coinspot-paper.js"
       - "crypto-auto-paper.js"

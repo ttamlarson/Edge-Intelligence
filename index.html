@@ -137,6 +137,21 @@
           <div class="notice"><span>ⓘ</span><div><b>READ-ONLY DATA · PAPER CANDIDATES ONLY</b><p>CoinSpot history is being backfilled one UTC day per 15-minute Worker run. The strategy needs at least 110 completed daily candles and 210 completed 4-hour candles per market. Missing intervals are not invented. No exchange orders are submitted.</p></div></div>
           <div class="result-section"><h4 id="coinSpotMtfStatus">HISTORY SYNC NOT STARTED</h4><p id="coinSpotMtfProgress">Waiting for the first CoinSpot history sync.</p><div id="coinSpotMtfMarkets" class="integration-grid"><div class="empty">No validated CoinSpot history yet.</div></div></div>
         </div>
+        <div class="panel" id="coinSpotMtfPaperPanel">
+          <div class="panel-head"><div><h3>Automated AI-assisted paper trading · AUD</h3><p>Uses the CoinSpot multi-timeframe breakout signals and public BTC/AUD + ETH/AUD quotes. AI reviews candidates for risk context; deterministic controls remain authoritative.</p></div><button class="primary-btn" id="coinSpotMtfPaperRun">Run paper scan now</button></div>
+          <div class="notice"><span>ⓘ</span><div><b>SIMULATED ORDERS ONLY · NO REAL MONEY</b><p>Virtual starting capital AUD 100 · maximum 25% allocation · 0.5% risk budget · 0.1% fee and 0.15% slippage per side · AUD 3 daily loss stop. One open position maximum. AI cannot override these rules.</p></div></div>
+          <p id="coinSpotMtfPaperStatus" class="muted">Waiting for first automated paper scan.</p>
+          <div class="metric-grid">
+            <article class="metric-card"><span>VIRTUAL EQUITY</span><strong id="mtfPaperEquity">$100.00</strong><small>AUD · marked to market</small></article>
+            <article class="metric-card"><span>AVAILABLE CASH</span><strong id="mtfPaperCash">$100.00</strong><small>AUD</small></article>
+            <article class="metric-card"><span>REALIZED P&L</span><strong id="mtfPaperRealized">$0.00</strong><small>AUD · after costs</small></article>
+            <article class="metric-card"><span>DAILY LOSS USED</span><strong id="mtfPaperDailyLoss">$0.00</strong><small>Maximum AUD 3.00</small></article>
+          </div>
+          <div class="result-section"><h4 id="mtfPaperPositionTitle">No open paper position</h4><p id="mtfPaperPositionDetail" class="muted">The system scans BTC/AUD and ETH/AUD every 15 minutes.</p></div>
+          <div class="result-section"><h4>COINSPOT SIGNALS & AI RISK REVIEWS</h4><div id="mtfPaperMarkets" class="integration-grid"><div class="empty">Waiting for validated CoinSpot history.</div></div></div>
+          <div class="result-section"><h4>RECENT AUTOMATED PAPER TRADES</h4><div id="mtfPaperTrades" class="market-list"><div class="empty">No automated paper trades yet.</div></div></div>
+          <p class="muted tiny">AI commentary is advisory only. Paper performance is not evidence of future profitability. Real-money trading remains disabled.</p>
+        </div>
         <div class="section-heading"><div><h2>CoinSpot AUD markets</h2><p id="cryptoStatus">Not yet refreshed · prices are not loaded</p></div></div>
         <div id="cryptoMarketRows" class="integration-grid"><div class="empty">Select Refresh market data to load BTC/AUD and ETH/AUD.</div></div>
         <div class="section-heading"><div><h2>CoinSpot account connection</h2><p>Optional private read-only connection. No trading or withdrawal permissions are required or used.</p></div><button class="secondary-btn" id="coinSpotAccountRefresh">Check CoinSpot account</button></div>

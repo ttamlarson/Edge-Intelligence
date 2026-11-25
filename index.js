@@ -6,6 +6,7 @@ import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, COINSPOT_INTERVALS } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal } from "./edge-mtf-breakout-strategy.js";
+import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
@@ -516,6 +517,116 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   return {status:state.status,processedDate:targetDate,nextDate:state.nextDate,markets:outcomes,liveTradingEnabled:false};
 }
 
+async function reviewCoinSpotMtfCandidate(env, market) {
+  if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; deterministic risk rules remain in control.", riskFlags: [] };
+  if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") return null;
+  const cacheKey = "coinspot-mtf-ai-review:" + market.coin + ":" + market.signal.signalAt;
+  const cached = await env.EDGE_KV?.get(cacheKey);
+  if (cached) { try { return JSON.parse(cached); } catch { /* invalid advisory cache is ignored */ } }
+  const packet = {
+    pair: market.pair, quote: market.quote, signal: market.signal,
+    strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; breakout above at least two of prior 20/55/100-bar Donchian highs.",
+    constraints: { spotOnly: true, paperOnly: true, maximumAllocationPct: 25, riskBudgetPct: 0.5, initialStopAtr: 2.5, trailingStopAtr: 3, maxHoldingDays: 30 }
+  };
+  const schema = { type:"object", additionalProperties:false, properties:{
+    assessment:{type:"string",enum:["LOW_CONCERN","CAUTION","HIGH_CONCERN"]},
+    summary:{type:"string",maxLength:700},
+    riskFlags:{type:"array",maxItems:6,items:{type:"string",maxLength:180}}
+  }, required:["assessment","summary","riskFlags"] };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({model:env.OPENAI_MODEL||"gpt-6.2-astra",max_output_tokens:500,
+        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote, spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
+          {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
+        text:{format:{type:"json_schema",name:"edge_coinspot_signal_review",strict:true,schema}}
+      }), redirect:"error", signal:controller.signal
+    });
+    if (!response.ok) return {status:"AI_REVIEW_PROVIDER_ERROR",summary:"AI review provider returned HTTP "+response.status+".",riskFlags:[]};
+    const payload=await response.json();
+    let output=payload.output_text||"";
+    if(!output) for(const item of payload.output||[]) for(const part of item.content||[]) if(part.text) output=part.text;
+    const parsed=JSON.parse(output);
+    if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||typeof parsed.summary!=="string"||!Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6) throw new Error("AI response schema mismatch");
+    const review = {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
+    await env.EDGE_KV?.put(cacheKey, JSON.stringify(review), {expirationTtl: 86400});
+    return review;
+  } catch {
+    return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; deterministic safeguards remain authoritative.",riskFlags:[]};
+  } finally { clearTimeout(timeout); }
+}
+
+async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
+  if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
+  const clock = now instanceof Date ? now.getTime() : Date.parse(now);
+  if (!Number.isFinite(clock)) throw new HttpError(400, "Invalid paper scan clock.");
+  const nowIso = new Date(clock).toISOString();
+  const accountKey = "coinspot-mtf-paper-global-v1";
+  const statusKey = "coinspot-mtf-paper-status-global-v1";
+  let account;
+  const stored = await env.EDGE_KV.get(accountKey);
+  if (!stored) account = createMtfPaperAccount(nowIso);
+  else {
+    try { account = JSON.parse(stored); validateMtfPaperAccount(account); }
+    catch { throw new HttpError(409, "CoinSpot MTF paper ledger failed validation; existing data was preserved."); }
+  }
+  let historySync = null, syncError = null;
+  if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
+    for (let i = 0; i < Math.max(1, Math.min(4, Number(backfillDays) || 1)); i++) {
+      try {
+        historySync = await syncCoinSpotMtfHistory(env, new Date(clock));
+        if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) break;
+        if (historySync.status === "COLLECTING_LIVE_DAY") break;
+      } catch (error) {
+        syncError = String(error?.message || "CoinSpot history sync failed").replace(/[\\r\\n\\t]+/g, " ").slice(0, 220);
+        break;
+      }
+    }
+  } else syncError = "CoinSpot Read Only API credentials are not configured.";
+  let strategy;
+  try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock)); }
+  catch (error) { strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false }; syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220); }
+  const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
+    coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market)
+  })));
+  account = processMtfPaperAccount(account, { markets: strategy.markets || [], now: nowIso });
+  await env.EDGE_KV.put(accountKey, JSON.stringify(account));
+  const snapshot = {
+    ...account, status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
+    strategyStatus: strategy.status || "UNKNOWN", historySync, lastScanAt: nowIso,
+    lastError: syncError, markets: (strategy.markets || []).map(m => ({
+      coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
+      signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
+      spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
+      fourHourCandles: m.history?.fourHourCandles || 0, tradesFetched: m.history?.tradesFetched || 0,
+      checks: m.signal?.checks || null, signalError: m.signalError || null,
+      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
+    })),
+    paperOnly: true, liveTradingEnabled: false
+  };
+  await env.EDGE_KV.put(statusKey, JSON.stringify(snapshot));
+  return snapshot;
+}
+
+async function getCoinSpotMtfPaper(env) {
+  if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
+  const [stored, status] = await Promise.all([
+    env.EDGE_KV.get("coinspot-mtf-paper-global-v1"),
+    env.EDGE_KV.get("coinspot-mtf-paper-status-global-v1")
+  ]);
+  let account = createMtfPaperAccount();
+  if (stored) {
+    try { account = JSON.parse(stored); validateMtfPaperAccount(account); }
+    catch { throw new HttpError(409, "CoinSpot MTF paper ledger failed validation; existing data was preserved."); }
+  }
+  if (!status) return { ...account, status: "WAITING_FOR_FIRST_PAPER_SCAN", markets: [], liveTradingEnabled: false };
+  let snapshot;
+  try { snapshot = JSON.parse(status); } catch { throw new HttpError(502, "CoinSpot MTF paper status is invalid JSON."); }
+  return { ...snapshot, ...account, markets: snapshot.markets || [], lastScanAt: snapshot.lastScanAt || null, status: snapshot.status || "PAPER_ENGINE_WAITING", liveTradingEnabled: false };
+}
+
 async function getCoinSpotMtfStrategy(env,now=new Date()) {
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
   let state;
@@ -642,6 +753,14 @@ async function handle(request, env, ctx) {
     return reply(snapshot);
   }
 
+  if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "coinspot-mtf-paper-account");
+    return reply(await getCoinSpotMtfPaper(env));
+  }
+  if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "POST") {
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "coinspot-mtf-paper-run");
+    return reply(await runCoinSpotMtfPaper(env));
+  }
   if (requestUrl.pathname.startsWith("/api/crypto/coinspot/paper")) {
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
     const storageKey = await userKey("crypto-paper", principal.sub);
@@ -841,7 +960,7 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
-    if (env.EDGE_KV && env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) ctx.waitUntil(syncCoinSpotMtfHistory(env).catch(() => null));
+    if (env.EDGE_KV && env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
     if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
@@ -850,5 +969,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

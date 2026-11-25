@@ -1,0 +1,96 @@
+// CoinSpot multi-timeframe automated paper ledger. AUD only; never submits exchange orders.
+export const MTF_PAPER_CONFIG = Object.freeze({
+  startingCapitalAud: 100, maxAllocationPct: 25, riskBudgetPct: 0.5,
+  feeRate: 0.001, slippageBps: 15, maxDailyLossAud: 3,
+  maxHoldingDays: 30, initialStopAtr: 2.5, trailingStopAtr: 3
+});
+const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const validCoin = coin => coin === "BTC" || coin === "ETH";
+const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
+export function createMtfPaperAccount(now = new Date().toISOString()) {
+  return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", currency:"AUD", startingCapitalAud:100,
+    cashAud:100, realizedPnlAud:0, unrealizedPnlAud:0, equityAud:100, dailyLossAud:0,
+    day:now.slice(0,10), openPosition:null, closedTrades:[], lastProcessed:{},
+    liveTradingEnabled:false, updatedAt:now };
+}
+export function validateMtfPaperAccount(a) {
+  if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
+      a.startingCapitalAud!==100 || a.liveTradingEnabled!==false ||
+      !Number.isFinite(a.cashAud) || a.cashAud<0 || !Number.isFinite(a.realizedPnlAud) ||
+      !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
+      !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed))
+    throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
+  if (a.openPosition && (!validCoin(a.openPosition.coin) ||
+      !Number.isFinite(a.openPosition.quantity) || a.openPosition.quantity<=0 ||
+      !Number.isFinite(a.openPosition.entryPrice) || a.openPosition.entryPrice<=0 ||
+      !Number.isFinite(a.openPosition.stopPrice) || !Number.isFinite(a.openPosition.atr) ||
+      !Number.isFinite(a.openPosition.highestPrice) || !a.openPosition.signalAt))
+    throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
+  return true;
+}
+function closePosition(a, bid, now, reason) {
+  const p=a.openPosition, exit=quoteCost(bid), gross=p.quantity*exit;
+  const exitFee=gross*MTF_PAPER_CONFIG.feeRate, proceeds=gross-exitFee;
+  const pnl=proceeds-p.entryCost;
+  a.cashAud=round(a.cashAud+proceeds); a.realizedPnlAud=round(a.realizedPnlAud+pnl);
+  a.closedTrades.push({id:p.id,coin:p.coin,pair:p.pair,openedAt:p.openedAt,closedAt:now,
+    signalAt:p.signalAt,entryPrice:p.entryPrice,exitPrice:exit,quantity:p.quantity,
+    entryFeeAud:p.entryFeeAud,exitFeeAud:round(exitFee),pnlAud:round(pnl),reason,
+    strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
+  a.closedTrades=a.closedTrades.slice(-200); a.openPosition=null; a.unrealizedPnlAud=0;
+  a.dailyLossAud=round(a.closedTrades.filter(t=>t.closedAt.slice(0,10)===now.slice(0,10))
+    .reduce((sum,t)=>sum+Math.max(0,-t.pnlAud),0));
+}
+export function processMtfPaperAccount(account, {markets=[], now=new Date().toISOString()}={}) {
+  let a=account ? structuredClone(account) : createMtfPaperAccount(now);
+  validateMtfPaperAccount(a);
+  if (a.day!==now.slice(0,10)) { a.day=now.slice(0,10); a.dailyLossAud=0; }
+  const byCoin=new Map(markets.filter(m=>validCoin(m.coin)).map(m=>[m.coin,m]));
+  const p=a.openPosition;
+  if (p) {
+    const m=byCoin.get(p.coin), q=m?.quote, s=m?.signal;
+    if (q && Number.isFinite(q.bid) && q.bid>0) {
+      p.highestPrice=Math.max(p.highestPrice,Number(q.last)||q.bid);
+      p.trailingStop=Math.max(p.trailingStop,p.highestPrice-MTF_PAPER_CONFIG.trailingStopAtr*p.atr);
+      const heldDays=(Date.parse(now)-Date.parse(p.openedAt))/86400000;
+      const reason=q.bid<=Math.max(p.stopPrice,p.trailingStop)?"TRAILING_STOP":
+        s && (s.checks?.dailyTrend===false || s.checks?.fourHourTrend===false)?"TREND_REVERSAL":
+        heldDays>=MTF_PAPER_CONFIG.maxHoldingDays?"MAX_HOLD":null;
+      if(reason) closePosition(a,q.bid,now,reason);
+      else {
+        const mark=quoteCost(q.bid),gross=p.quantity*mark,fee=gross*MTF_PAPER_CONFIG.feeRate;
+        a.unrealizedPnlAud=round(gross-fee-p.entryCost);
+        a.equityAud=round(a.cashAud+gross-fee);
+      }
+    }
+  }
+  if (!a.openPosition && a.dailyLossAud<MTF_PAPER_CONFIG.maxDailyLossAud) {
+    const candidates=markets.filter(m=>validCoin(m.coin)&&m.signal?.status==="BUY_CANDIDATE_PAPER_ONLY"&&
+      m.quote&&Number.isFinite(m.quote.ask)&&m.quote.ask>0&&m.signal?.risk&&
+      Number.isFinite(m.signal.risk.initialStopDistance)&&m.signal.risk.initialStopDistance>0)
+      .sort((x,y)=>Number(y.signal.indicators?.breakoutVotes||0)-Number(x.signal.indicators?.breakoutVotes||0));
+    for(const m of candidates) {
+      const signalAt=m.signal.signalAt;
+      if(!signalAt||a.lastProcessed[m.coin]===signalAt) continue;
+      a.lastProcessed[m.coin]=signalAt;
+      const ask=m.quote.ask, entry=ask*(1+MTF_PAPER_CONFIG.slippageBps/10000);
+      const equity=Math.max(0,a.equityAud||a.cashAud);
+      const riskBudget=equity*MTF_PAPER_CONFIG.riskBudgetPct/100;
+      const allocation=Math.min(equity*MTF_PAPER_CONFIG.maxAllocationPct/100,a.cashAud);
+      const stopDistance=m.signal.risk.initialStopDistance;
+      const quantity=Math.floor(Math.min(riskBudget/stopDistance,allocation/(entry*(1+MTF_PAPER_CONFIG.feeRate)))*1e8)/1e8;
+      const notional=quantity*entry,fee=notional*MTF_PAPER_CONFIG.feeRate,entryCost=notional+fee;
+      if(quantity<=0||entryCost<10||entryCost>a.cashAud) continue;
+      a.cashAud=round(a.cashAud-entryCost);
+      a.openPosition={id:m.coin+"-"+signalAt,coin:m.coin,pair:m.coin+"/AUD",openedAt:now,
+        signalAt,referenceAsk:ask,entryPrice:entry,quantity,notionalAud:round(notional),
+        entryFeeAud:round(fee),entryCost:round(entryCost),
+        stopPrice:entry-stopDistance, trailingStop:entry-stopDistance,
+        atr:Number(m.signal.indicators.atr20),highestPrice:entry,status:"OPEN_PAPER_ONLY"};
+      a.unrealizedPnlAud=0;a.equityAud=round(a.cashAud+entryCost);break;
+    }
+  }
+  a.equityAud=round(a.cashAud+(a.openPosition?a.openPosition.entryCost:0)+a.unrealizedPnlAud);
+  a.updatedAt=now;a.liveTradingEnabled=false;
+  return a;
+}
