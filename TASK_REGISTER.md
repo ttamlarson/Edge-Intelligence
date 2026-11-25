@@ -238,3 +238,5 @@ Updated after local implementation and automated verification on `edge-productio
 - Remaining data blocker: numeric epoch sub-day filters returned zero rows despite valid full-day BTC/AUD history. Next diagnostic pass must test string-epoch and millisecond-epoch representations before accepting any historical candles.
 
 - Added diagnostic comparisons for numeric epoch seconds, stringified epoch seconds and epoch milliseconds across both 12-hour windows. These alternate representations are not used for candle generation until a probe confirms in-range trades.
+
+- Backfill now retries empty numeric-epoch partitions with stringified epoch seconds and millisecond epoch values, accepting only non-empty responses whose normalized trades all fall inside the exact requested UTC interval.
