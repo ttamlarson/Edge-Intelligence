@@ -143,3 +143,10 @@
 - [ ] Verify recursive completed-order history requests stop at the 16-request per-market/day safety budget and do not advance incomplete dates.
 - [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
 - [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.
+
+
+### CoinSpot scheduled-workload isolation
+
+- [ ] Verify UTC :00 runs the other scheduled research engines without starting CoinSpot MTF.
+- [ ] Verify UTC :15, :30 and :45 run CoinSpot MTF without concurrent Binance, ASX or prediction-provider scans.
+- [ ] Confirm one UTC history date is processed per CoinSpot slot and the historical warm-up remains within the agreed 24–48-hour target when dates are retrievable within the 16-request budget.
