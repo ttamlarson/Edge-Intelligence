@@ -184,7 +184,7 @@ document.addEventListener("click", async event => {
    "AI research review: "+(review.status||"UNKNOWN"),
    "Decision: "+(review.decision||"Not authorised")+" · model suggestion: "+(review.modelDecision||"—"),
    "Subjective confidence: "+(review.confidence==null?"—":review.confidence+"%")+" · evidence quality: "+(review.evidenceQuality||"—"),
-   "Deterministic gate: "+(review.deterministicGateMet?"met":"not met")+" · advance allowed: "+(review.advanceAllowed?"yes, to extended paper observation only":"no"),
+   "Deterministic gate: "+(review.deterministicGateMet?"met":"not met")+" · AI recommendation: "+(review.advanceAllowed?"consider extended paper observation (not started)":"do not advance"),
    "Thesis: "+(review.thesis||"—"),
    "Counter-thesis: "+(review.counterThesis||"—"),
    "Risk flags: "+((review.riskFlags||[]).join("; ")||"None declared"),
