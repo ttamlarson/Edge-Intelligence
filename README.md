@@ -161,3 +161,7 @@ No market data is generated or substituted. The walk-forward panel uses only the
 
 
 ASX autopilot candidate selection is now risk-aware and deterministic across the configured ticker set. AI-approved candidates are ranked lexicographically by higher fee-adjusted net reward/risk, higher estimated net target profit, then lower consumption of the fixed risk budget; ticker is the final tie-breaker. The uncalibrated AI win-probability estimate is deliberately excluded from ranking until a sufficiently large chronological outcome sample exists. Portfolio controls still decide whether any ranked candidate can actually open.
+
+## Scheduled DataCedar runtime safety
+
+The ASX scanner uses a request-context timeout for authenticated HTTP-triggered fetches. The scheduled Cron path explicitly disables `AbortSignal.timeout()` because scheduled events do not have an active inbound Request context in all Workers runtimes. This does not change provider limits, scan cadence, paper-account rules or the opt-in boundary. The scheduled ASX scanner remains disabled unless `ASX_AUTOPILOT_ENABLED=true` is configured; no ticker universe or data-use rights are inferred from the presence of the API key.
