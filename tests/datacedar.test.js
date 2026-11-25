@@ -66,6 +66,18 @@ test("DataCedar rejects missing key, unexpected redirects, invalid JSON and prov
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", fetchImpl: async () => new Response(JSON.stringify({ error: { code: "HISTORY_LIMIT_EXCEEDED" } }), { status: 403 }) }), /plan window/);
 });
 
+test("DataCedar scheduled fetch can disable request-context timeout signals", async () => {
+  let requestedOptions;
+  const result = await fetchDataCedarBars({
+    symbols: ["BHP"], apiKey: "server-only-test-key", timeoutMs: 0,
+    fetchImpl: async (_url, options) => {
+      requestedOptions = options;
+      return new Response(JSON.stringify({ data: { "asx:BHP": [] } }), { headers: { "Content-Type": "application/json" } });
+    }
+  });
+  assert.equal(result.status, "no_data");
+  assert.equal(Object.hasOwn(requestedOptions, "signal"), false);
+});
 test("DataCedar accepts only valid date windows within one year", async () => {
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", from: "2025-11-01", to: "2026-11-18", now: new Date("2026-11-18T00:00:00Z"), fetchImpl: async () => new Response(JSON.stringify({ data: {} })) }), /maximum 366-day/);
   await assert.rejects(fetchDataCedarBars({ symbols: ["BHP"], apiKey: "key", from: "2026-02-30", now: new Date("2026-11-18T00:00:00Z"), fetchImpl: async () => new Response(JSON.stringify({ data: {} })) }), /valid YYYY-MM-DD/);
