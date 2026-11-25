@@ -1140,6 +1140,17 @@ async function handle(request, env, ctx) {
   return reply({ error: "Not found" }, 404);
 }
 
+function isCoinSpotMtfScheduleSlot(event, env) {
+  if (!env.EDGE_KV || !env.COINSPOT_READONLY_KEY || !env.COINSPOT_READONLY_SECRET) return false;
+  const scheduledTime = Number(event?.scheduledTime);
+  const minute = Number.isFinite(scheduledTime)
+    ? new Date(scheduledTime).getUTCMinutes()
+    : new Date().getUTCMinutes();
+  // The other scheduled engines share this Worker invocation's subrequest
+  // budget. Reserve :00 for them and use :15/:30/:45 for CoinSpot MTF alone.
+  return minute > 0 && minute % 15 === 0;
+}
+
 export default {
   async fetch(request, env, ctx) {
     try { return await handle(request, env, ctx); }
@@ -1151,8 +1162,11 @@ export default {
     }
   },
   async scheduled(_event, env, ctx) {
+    if (isCoinSpotMtfScheduleSlot(_event, env)) {
+      ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
+      return;
+    }
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
-    if (env.EDGE_KV && env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
     if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
@@ -1161,5 +1175,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
