@@ -200,7 +200,7 @@ export async function reviewCryptoWalkForward({
     const advanceAllowed = finalDecision === "ADVANCE_TO_FORWARD_PAPER_REVIEW" &&
       deterministicGateMet && decision.confidence >= 75 && riskFlags.length === 0;
     const status = advanceAllowed
-      ? "AI_ADVANCED_TO_FORWARD_PAPER_REVIEW"
+      ? "AI_RECOMMENDS_FORWARD_PAPER_OBSERVATION"
       : finalDecision === "REJECT" ? "AI_REJECTED_RESEARCH_CANDIDATE"
         : !deterministicGateMet && decision.decision === "ADVANCE_TO_FORWARD_PAPER_REVIEW"
           ? "AI_HELD_DETERMINISTIC_GATE_NOT_MET"
@@ -213,7 +213,7 @@ export async function reviewCryptoWalkForward({
       riskFlags, limitations: decision.limitations,
       deterministicGateMet,
       reason: advanceAllowed
-        ? "AI review and the independent deterministic walk-forward gates both support extended forward paper observation only."
+        ? "The AI review and independent deterministic walk-forward gates support considering extended forward paper observation only; no observation job was started."
         : "No trade or live execution is authorised. The deterministic research gates and AI review remain advisory safeguards.",
       model, reviewedAt: new Date(clock).toISOString(), reviewId, inputProvenance,
       research: {
