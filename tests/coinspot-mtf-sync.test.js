@@ -229,8 +229,12 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
     assert.equal(result.dateComplete, true);
     assert.equal(result.processedDate, "2026-07-28");
     assert.equal(result.nextDate, "2026-07-29");
-    assert.equal(allCalls.filter(call => call.coin === "BTC").length, 63);
-    assert.equal(allCalls.filter(call => call.coin === "ETH").length, 63);
+    for (const coin of ["BTC", "ETH"]) {
+      const marketCalls = allCalls.filter(call => call.coin === coin);
+      const ranges = marketCalls.map(call => call.startMs + ":" + call.duration);
+      assert.equal(new Set(ranges).size, ranges.length, coin + " history windows must not be fetched twice");
+      assert.ok(marketCalls.length > 15, coin + " dense date should require more than one bounded sync chunk");
+    }
     const history = JSON.parse(store.get("coinspot-mtf-history-global-v1"));
     assert.equal(history.pendingHistorySync, null);
     assert.equal(history.lastProcessedDate, "2026-07-28");
