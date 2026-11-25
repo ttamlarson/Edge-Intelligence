@@ -1,10 +1,11 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
 import { createPaperPortfolio, calculatePaperPortfolioEquity, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
-import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
+import { backtestCoinSpotTrend, walkForwardCoinSpotTrend } from "./coinspot-strategy.js";
 import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
 import { backtestRegimeAdaptiveBreakout } from "./regime-adaptive-breakout.js";
 import { backtestTrendFollowingIndicators } from "./trend-following-indicators.js";
 import { parseBinanceKlineCsv, parseBinanceUsdtSymbols } from "./crypto-csv.js";
+import { walkForwardAsxStrategy } from "./asx-walk-forward.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -26,6 +27,7 @@ const venues = [
  ["Metaculus","metaculus","No verified integration configured"],
 ];
 let state = loadState();
+const cryptoResearchReports = new Map();
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const initialTimeZone = VALID_TIME_ZONES.includes(state.timeZone) ? state.timeZone : VALID_TIME_ZONES.includes(browserTimeZone) ? browserTimeZone : "Australia/Sydney";
 if ($("auTimezone")) $("auTimezone").value = initialTimeZone;
@@ -90,12 +92,24 @@ async function fetchBinanceHourlyHistory(symbol, days=365) {
  for(let i=1;i<candles.length;i++)if(Date.parse(candles[i].timestamp)-Date.parse(candles[i-1].timestamp)<=0)throw new Error("Binance history contains duplicate or unordered candles for "+symbol+".");
  return {metadata:{source:"Binance public Spot API ("+new URL(sourceHost).hostname+")",exchange:"Binance",symbol,quoteAsset:symbol.endsWith("USDT")?"USDT":"UNKNOWN",timeframe:"1h",candleCount:candles.length,firstCandleAt:candles[0].timestamp,lastCandleAt:candles.at(-1).timestamp},quality:{missingIntervals:candles.slice(1).filter((x,i)=>Date.parse(x.timestamp)-Date.parse(candles[i].timestamp)!==3600000).length},candles};
 }
+function runCryptoWalkForward(parsed,symbol,quoteAsset) {
+ try {
+  return walkForwardCoinSpotTrend({
+   candles:parsed.candles,market:symbol,
+   source:parsed.metadata.source||"User-supplied historical OHLCV",
+   quoteCurrency:quoteAsset
+  });
+ } catch(error) {
+  return {status:"BLOCKED",reason:error.message};
+ }
+}
 async function runCryptoCandlesBacktest(parsed,symbol,quoteAsset) {
  const result=backtestCoinSpotTrend({candles:parsed.candles,quoteCurrency:quoteAsset});
  const adaptive=backtestAdaptiveRegime({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
  const breakout=backtestRegimeAdaptiveBreakout({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
  const trendFollowing=backtestTrendFollowingIndicators({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
- return {...parsed,result,adaptive,breakout,trendFollowing};
+ const walkForward=runCryptoWalkForward(parsed,symbol,quoteAsset);
+ return {...parsed,result,adaptive,breakout,trendFollowing,walkForward};
 }
 async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
  const parsed = parseBinanceKlineCsv(await file.text(), { symbol, quoteAsset, exchange: "Binance via CryptoFetch" });
@@ -103,10 +117,12 @@ async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
  const adaptive = backtestAdaptiveRegime({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
  const breakout = backtestRegimeAdaptiveBreakout({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
  const trendFollowing = backtestTrendFollowingIndicators({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
- return { ...parsed, result, adaptive, breakout, trendFollowing };
+ const walkForward = runCryptoWalkForward(parsed, symbol, quoteAsset);
+ return { ...parsed, result, adaptive, breakout, trendFollowing, walkForward };
 }
 function renderCryptoBacktest(label, imported) {
  const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
+ cryptoResearchReports.set(m.symbol, imported);
  const moneyQ=value=>new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0)+" "+q;
  const cards=[
   ["OUT-OF-SAMPLE NET P&L",moneyQ(r.outOfSample.netPnlQuote),r.outOfSample.trades+" closed trades"],
@@ -125,10 +141,66 @@ function renderCryptoBacktest(label, imported) {
  const tf=imported.trendFollowing;
  const tfRender=(period,model)=>{const variants=model.variants.map(v=>{const x=v.outOfSample;const cells=[["OOS NET P&L",moneyQ(x.netPnlQuote),x.trades+" closed trades"],["WIN RATE",x.winRatePct+"%",x.wins+" winners"],["PROFIT FACTOR",x.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",x.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(v.inSample.netPnlQuote),v.inSample.trades+" trades"],["ASSESSMENT",v.assessment,"Research only · no live orders"]];return '<div class="result-section"><h5>'+esc(v.label)+' · '+esc(v.assessment)+'</h5><div class="metric-grid">'+cells.map(c=>'<article class="metric-card"><span>'+esc(c[0])+'</span><strong>'+esc(c[1])+'</strong><small>'+esc(c[2])+'</small></article>').join("")+'</div><p>'+x.trades+' closed OOS trades from '+x.evaluatedBars+' bars · '+esc(x.dateRange.from||"—")+' → '+esc(x.dateRange.to||"—")+' · '+x.eligibleSignals+' qualifying signals. Minimum: '+tf.sample.minimumOutOfSampleTrades+' trades.</p></div>';}).join("");return '<div class="result-section"><h4>TREND-FOLLOWING INDICATORS v2 · '+period+'</h4><p>'+esc(tf.methodology)+' Costs: '+(tf.costs.feeRate*100).toFixed(2)+'% fee per side, '+tf.costs.slippageBps+' bps slippage and '+tf.costs.spreadBps+' bps spread. Risk: '+tf.risk.perTradePct+'% per trade; '+tf.risk.maxAllocationPct+'% maximum allocation.</p>'+variants+'</div>';};
  const trendFollowingHtml=tfRender("1H",tf.oneHour)+tfRender("4H",tf.fourHour);
+ const wf=imported.walkForward||{},wfSummary=wf.summary||{};
+ const wfPct=value=>Number.isFinite(value)?Number(value).toFixed(2)+"%":"—";
+ const walkForwardHtml=wf.status==="BLOCKED"
+  ? '<div class="result-section"><h4>CHRONOLOGICAL WALK-FORWARD · BLOCKED</h4><p>'+esc(wf.reason||"Insufficient validated hourly data.")+'</p></div>'
+  : '<div class="result-section"><h4>CHRONOLOGICAL WALK-FORWARD · FIXED RULES</h4><p>'+esc(wf.methodology||"")+'</p><div class="metric-grid">'+[
+    ["OOS TRADES",wfSummary.totalOutOfSampleTrades??0,"Across independent folds"],
+    ["MEAN FOLD RETURN",wfPct(wfSummary.meanFoldReturnPct),"Each fold resets virtual capital"],
+    ["BUY/HOLD REFERENCE",wfPct(wfSummary.meanBenchmarkReturnPct),"Separate 50% allocation"],
+    ["MEAN DRAWDOWN",wfPct(wfSummary.meanFoldMaxDrawdownPct),"Net liquidation mark"],
+    ["PROFIT FACTOR",wfSummary.pooledProfitFactor??"Unavailable","After modelled costs"],
+    ["ASSESSMENT",wfSummary.assessment||"UNKNOWN","Research only · no live orders"]
+   ].map(c=>'<article class="metric-card"><span>'+esc(c[0])+'</span><strong>'+esc(c[1])+'</strong><small>'+esc(c[2])+'</small></article>').join("")+'</div>'+
+   (wf.folds||[]).map(fold=>'<p class="market-meta">Fold '+fold.fold+': '+fold.trades+' trades · return '+wfPct(fold.returnPct)+' · buy/hold '+wfPct(fold.benchmark?.returnPct)+' · drawdown '+wfPct(fold.maxDrawdownPct)+'</p>').join("")+
+   '<p class="muted tiny">Chronological expanding-history validation; fixed parameters, no fitting. Source: '+esc(wf.source||m.source||"User supplied")+' · '+esc(wf.data?.firstBarAt||"")+' → '+esc(wf.data?.lastBarAt||"")+'. Source and data-use rights are not independently verified. Small samples are not evidence of profitability.</p><button class="secondary-btn" type="button" data-crypto-ai-review="'+esc(m.symbol)+'">Run AI research review</button><div class="market-meta" id="cryptoAiReview-'+esc(m.symbol)+'"></div></div>';
  const skipLabels={positionOpen:"Position already open",dailyLossLimit:"Daily loss limit",trendFilter:"Trend filter",rsiFilter:"RSI filter",volatilityFilter:"ATR / volatility filter",insufficientCapitalOrRisk:"Capital or risk sizing"};
  const skipRows=Object.entries(o.skipped||{}).map(([key,value])=>`<tr><td>${esc(skipLabels[key]||key)}</td><td>${value}</td></tr>`).join("");
- return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><div class="result-section"><h4>ALTERNATIVE · EDGE ACTIVE MOMENTUM v1</h4><p>${esc(active.methodology)}</p><div class="metric-grid">${activeCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${av.trades} closed trades from ${av.evaluatedBars} bars · ${esc(av.dateRange.from||"—")} → ${esc(av.dateRange.to||"—")}. This is a separate research candidate, not a validated replacement.</p></div><div class="result-section"><h4>NEW CANDIDATE · REGIME-ADAPTIVE BREAKOUT v1 · 4H</h4><p>${esc(br.methodology)} Risk ${br.risk.perTradePct}% of equity per trade; maximum allocation ${br.risk.maxAllocationPct}%; initial stop ${br.risk.initialStopAtr} ATR; trailing stop ${br.risk.trailingStopAtr} ATR. Uses complete 4-hour candles aggregated from hourly history; incomplete buckets are discarded.</p><div class="metric-grid">${breakoutCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${bo.trades} closed trades from ${bo.evaluatedBars} bars · ${esc(bo.dateRange.from||"—")} → ${esc(bo.dateRange.to||"—")}; ${bo.eligibleSignals} qualifying entry signals. ${br.sample.fourHourCandles} complete 4h candles; ${br.sample.outOfSampleCandles} OOS candles. Research candidate only; not approved for live trading.</p></div>'+trendFollowingHtml+'<p class="muted tiny">Data provenance: ${esc(m.source||"User-supplied historical CSV")}, ${esc(m.exchange||"Binance")} ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
+ return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><div class="result-section"><h4>ALTERNATIVE · EDGE ACTIVE MOMENTUM v1</h4><p>${esc(active.methodology)}</p><div class="metric-grid">${activeCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${av.trades} closed trades from ${av.evaluatedBars} bars · ${esc(av.dateRange.from||"—")} → ${esc(av.dateRange.to||"—")}. This is a separate research candidate, not a validated replacement.</p></div><div class="result-section"><h4>NEW CANDIDATE · REGIME-ADAPTIVE BREAKOUT v1 · 4H</h4><p>${esc(br.methodology)} Risk ${br.risk.perTradePct}% of equity per trade; maximum allocation ${br.risk.maxAllocationPct}%; initial stop ${br.risk.initialStopAtr} ATR; trailing stop ${br.risk.trailingStopAtr} ATR. Uses complete 4-hour candles aggregated from hourly history; incomplete buckets are discarded.</p><div class="metric-grid">${breakoutCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${bo.trades} closed trades from ${bo.evaluatedBars} bars · ${esc(bo.dateRange.from||"—")} → ${esc(bo.dateRange.to||"—")}; ${bo.eligibleSignals} qualifying entry signals. ${br.sample.fourHourCandles} complete 4h candles; ${br.sample.outOfSampleCandles} OOS candles. Research candidate only; not approved for live trading.</p></div>'+walkForwardHtml+trendFollowingHtml+'<p class="muted tiny">Data provenance: ${esc(m.source||"User-supplied historical CSV")}, ${esc(m.exchange||"Binance")} ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
 }
+
+document.addEventListener("click", async event => {
+ const button=event.target?.closest?.("[data-crypto-ai-review]");
+ if(!button)return;
+ const symbol=button.dataset.cryptoAiReview;
+ const imported=cryptoResearchReports.get(symbol);
+ const target=$("cryptoAiReview-"+symbol);
+ if(!imported||!target)return;
+ const candles=imported.candles||[];
+ if(candles.length>5000){target.textContent="AI review is limited to 5,000 completed hourly candles. The deterministic local backtest remains available.";return;}
+ button.disabled=true;button.textContent="Reviewing research…";
+ target.textContent="Recomputing the fixed-rule walk-forward on the Worker and requesting a structured AI critique. No orders can be placed.";
+ try{
+  const review=await api("/api/crypto/research/review",{
+   method:"POST",
+   body:JSON.stringify({
+    market:symbol,quoteCurrency:imported.metadata.quoteAsset,
+    source:imported.metadata.source||"User-supplied historical OHLCV",candles
+   })
+  });
+  const provenance=review.inputProvenance||{};
+  const lines=[
+   "AI research review: "+(review.status||"UNKNOWN"),
+   "Decision: "+(review.decision||"Not authorised")+" · model suggestion: "+(review.modelDecision||"—"),
+   "Subjective confidence: "+(review.confidence==null?"—":review.confidence+"%")+" · evidence quality: "+(review.evidenceQuality||"—"),
+   "Deterministic gate: "+(review.deterministicGateMet?"met":"not met")+" · AI recommendation: "+(review.advanceAllowed?"consider extended paper observation (not started)":"do not advance"),
+   "Thesis: "+(review.thesis||"—"),
+   "Counter-thesis: "+(review.counterThesis||"—"),
+   "Risk flags: "+((review.riskFlags||[]).join("; ")||"None declared"),
+   "Limitations: "+((review.limitations||[]).join("; ")||"—"),
+   "Walk-forward assessment: "+(review.research?.summary?.assessment||"Unavailable"),
+   "Provenance: "+(provenance.barsProvided||0)+" bars · SHA-256 "+(provenance.fingerprint||"").slice(0,16)+"… · source not independently verified",
+   review.reason||"",
+   "Model-assisted critique only; not a trained predictor, profitability claim or trade instruction."
+  ].filter(Boolean);
+  target.innerHTML=lines.map(line=>"<div>"+esc(line)+"</div>").join("");
+ }catch(error){
+  target.textContent="AI review unavailable: "+(error?.message||"Request failed")+". No research advancement or trade was authorised.";
+ }finally{
+  button.disabled=false;button.textContent="Run AI research review";
+ }
+});
 $("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
  const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults"),button=$("fetchCryptoHistoryBtn");
  let symbols; try { symbols=parseBinanceUsdtSymbols($("cryptoHistorySymbols")?.value||""); } catch(error) { status.textContent=error.message; return; }
@@ -369,6 +441,8 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
   const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
   if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
   asxUniverse=data.barsBySymbol||{};
+  $("asxSource").value="DataCedar ASX historical daily bars";
+  $("asxWalkForwardResults").innerHTML="";
   const markUpdate=updatePaperMarksFromBars(asxPortfolio,asxUniverse);
   if(markUpdate.markedSymbols.length){asxPortfolio=markUpdate.portfolio;saveAsx()}
   asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
@@ -382,6 +456,34 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
  }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
  finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
 });
+
+$("asxWalkForwardBtn")?.addEventListener("click",()=>{
+ const button=$("asxWalkForwardBtn"),status=$("asxWalkForwardStatus"),results=$("asxWalkForwardResults");
+ const symbols=Object.keys(asxUniverse||{});
+ if(!symbols.length){status.textContent="Import authorised ASX daily bars or fetch DataCedar history before running validation.";return}
+ button.disabled=true;button.textContent="Running chronological validation…";status.textContent="Running fixed-rule, next-session-open walk-forward simulations. No sample data is inserted.";
+ const source=$("asxSource")?.value.trim()||"DataCedar ASX historical daily bars";
+ const reports=[];
+ for(const symbol of symbols){
+  try{
+   reports.push(walkForwardAsxStrategy({
+    symbol,bars:asxUniverse[symbol],source,currency:"AUD",
+    startingCapitalAud:asxPortfolio.startingCapitalAud,
+    trainFraction:0.6,foldCount:3,minimumOutOfSampleTrades:30
+   }));
+  }catch(error){reports.push({symbol,status:"BLOCKED",reason:error.message})}
+ }
+ const pct=value=>Number.isFinite(value)?Number(value).toFixed(2)+"%":"—";
+ results.innerHTML=reports.map(report=>{
+  if(report.status==="BLOCKED")return '<div class="position-card"><div><b>'+esc(report.symbol)+' · BLOCKED</b><div class="market-meta">'+esc(report.reason)+'</div></div></div>';
+  const summary=report.summary||{};
+  const folds=(report.folds||[]).map(fold=>'<div class="market-meta">Fold '+fold.fold+': '+fold.tradeCount+' trades · return '+pct(fold.returnPct)+' · buy/hold '+pct(fold.benchmark?.returnPct)+' · drawdown '+pct(fold.maxDrawdownPct)+'</div>').join("");
+  return '<div class="position-card"><div><b>'+esc(report.symbol)+' · '+esc(summary.assessment||"UNKNOWN")+'</b><div class="market-meta">Out-of-sample trades '+(summary.totalOutOfSampleTrades??0)+' · win rate '+pct(summary.pooledWinRatePct)+' · profit factor '+(summary.pooledProfitFactor==null?"—":Number(summary.pooledProfitFactor).toFixed(2))+'</div><div class="market-meta">Mean fold return '+pct(summary.meanFoldReturnPct)+' · buy/hold reference '+pct(summary.meanBenchmarkReturnPct)+' · mean drawdown '+pct(summary.meanFoldMaxDrawdownPct)+'</div><div class="market-meta">Source: '+esc(report.source)+' · '+esc(report.data?.firstBarAt||"")+" to "+esc(report.data?.lastBarAt||"")+'</div>'+folds+'<div class="market-meta">'+esc(report.disclaimer||"")+'</div></div></div>';
+ }).join("")||'<div class="empty">No walk-forward results were produced.</div>';
+ status.textContent="Completed "+reports.length+" symbol validation(s). Each fold resets virtual capital; pooled results are not one compounded account. Source labels are not independently verified.";
+ button.disabled=false;button.textContent="Run chronological walk-forward";
+});
+
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
 async function loadAsxAutopilotStatus(){
  const status=$("asxAutoStatus");if(!status)return;
@@ -396,7 +498,11 @@ async function loadAsxAutopilotStatus(){
   const metric=(label,value,detail)=>'<article class="metric-card"><span>'+label+'</span><strong>'+value+'</strong><small>'+detail+'</small></article>';
   $("asxAutoPerformance").innerHTML=metric("CLOSED TRADES",String(p.tradeCount??0),"Realized sample only")+metric("WIN RATE",p.winRatePct==null?"—":p.winRatePct.toFixed(1)+"%","Wins / all closed trades")+metric("PROFIT FACTOR",p.profitFactor==null?"—":p.profitFactor.toFixed(2),"Gross profit / gross loss")+metric("NET REALIZED P&amp;L",p.totalRealizedProfitLossAud==null?"—":aud(p.totalRealizedProfitLossAud),"After simulated fees")+metric("MAX DRAWDOWN",p.maxRealizedDrawdownAud==null?"—":aud(p.maxRealizedDrawdownAud)+" · "+(p.maxRealizedDrawdownPct??0).toFixed(2)+"%","Realized equity curve only");
   $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
-  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% confidence)':'')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+  const calibration=a.aiCalibration||{};const oos=calibration.outOfSample||{};const sample=calibration.outOfSampleSampleCount??0;const minimum=calibration.minimumOutOfSampleSamples??30;
+  const mixedModels=calibration.status==="MIXED_MODEL_VERSIONS_SEPARATE_DIAGNOSTICS";
+  const modelDiagnostics=(calibration.modelDiagnostics||[]).map(item=>item.model+": "+item.outOfSampleSampleCount+" OOS · Brier "+(item.outOfSample?.brierScore==null?"—":Number(item.outOfSample.brierScore).toFixed(4))).join("; ");
+  $("asxAutoCalibration").textContent="AI win-probability audit: "+(calibration.status||"UNKNOWN")+" · "+(mixedModels?"separate per-model holdouts":"chronological holdout "+sample+"/"+minimum+" trades")+(oos.brierScore==null?"":" · Brier "+Number(oos.brierScore).toFixed(4))+(oos.expectedCalibrationError==null?"":" · calibration error "+Number(oos.expectedCalibrationError).toFixed(4))+(modelDiagnostics?" · "+modelDiagnostics:"")+" · diagnostic only; no model training or calibration claim.";
+  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% subjective confidence)':'')+(s.ai?.predictedWinProbability==null?'':' · uncalibrated win estimate '+(Number(s.ai.predictedWinProbability)*100).toFixed(0)+'%')+(s.candidateRank==null?'':' · risk rank #'+esc(s.candidateRank)+' · net R/R '+esc(s.ranking?.rewardRiskAfterCosts)+' · net target $'+esc(s.ranking?.expectedNetTargetProfitAud)+' · risk budget use '+esc(s.ranking?.riskBudgetUtilizationPct)+'%')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
  }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
 }
 $("asxAutoScanBtn")?.addEventListener("click",async()=>{

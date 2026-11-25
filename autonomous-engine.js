@@ -188,16 +188,40 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   if (!candidate || candidate.status !== "PAPER_CANDIDATE" || candidate.executable !== false || candidate.simulatedOnly !== true) return { accepted: false, reason: "Only validated paper candidates can be opened." };
 
   const symbol = candidate.symbol;
+  const candidateObservedTimestamp = Date.parse(candidate.observedAt || "");
+  const aiReview = candidate.aiReview;
+  if (aiReview !== undefined) {
+    const provenance = aiReview?.inputProvenance;
+    const reviewedTimestamp = Date.parse(aiReview?.reviewedAt || "");
+    const validAiReview = aiReview?.status === "AI_APPROVED_PAPER_CANDIDATE" &&
+      aiReview?.decision === "APPROVE" && Number.isFinite(aiReview?.confidence) &&
+      aiReview.confidence >= 75 && aiReview.confidence <= 100 &&
+      Number.isFinite(aiReview?.predictedWinProbability) &&
+      aiReview.predictedWinProbability >= 0 && aiReview.predictedWinProbability <= 1 &&
+      Array.isArray(aiReview?.riskFlags) && aiReview.riskFlags.length === 0 &&
+      typeof aiReview?.model === "string" && aiReview.model.length > 0 &&
+      typeof aiReview?.reviewId === "string" && aiReview.reviewId.length > 0 &&
+      Number.isFinite(reviewedTimestamp) && reviewedTimestamp >= candidateObservedTimestamp && reviewedTimestamp <= now + 5 * 60_000 &&
+      provenance?.currency === "AUD" && provenance?.source === candidate.source &&
+      Date.parse(provenance?.observedAt || "") === Date.parse(candidate.observedAt || "") &&
+      provenance?.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" &&
+      Number.isInteger(provenance?.barsProvided) && provenance.barsProvided >= 51 &&
+      provenance?.barsReviewed === 30 && provenance?.fingerprintAlgorithm === "SHA-256" &&
+      typeof provenance?.fingerprint === "string" && /^[a-f0-9]{64}$/i.test(provenance.fingerprint) &&
+      aiReview.reviewId.endsWith(provenance.fingerprint.slice(0, 16));
+    if (!validAiReview) return { accepted: false, reason: "AI review provenance or approval metadata is invalid." };
+  }
   const shares = num(candidate.shares), entryPrice = roundPrice(num(candidate.entryReference));
   const stopPrice = roundPrice(num(candidate.stopPrice)), targetPrice = roundPrice(num(candidate.targetPrice));
   const reportedNotional = num(candidate.notionalAud), notional = shares * entryPrice, entryCosts = num(candidate.estimatedEntryCostsAud);
-  const observedAt = Date.parse(candidate.observedAt || ""), openedTimestamp = Date.parse(openedAt || "");
+  const observedAt = candidateObservedTimestamp, openedTimestamp = Date.parse(openedAt || "");
   if (typeof symbol !== "string" || !/^[A-Z0-9.]{2,12}$/.test(symbol) || candidate.currency !== "AUD" ||
       typeof candidate.source !== "string" || !candidate.source.trim() ||
       !Number.isFinite(observedAt) || !Number.isFinite(now) || observedAt > now + 5 * 60_000 || now - observedAt > EDGE_MAX_DAILY_BAR_AGE_MS) {
     return { accepted: false, reason: "Candidate provenance or freshness is invalid." };
   }
-  if (!Number.isFinite(openedTimestamp) || openedTimestamp > now + 5 * 60_000 || openedTimestamp < observedAt - 5 * 60_000) {
+  if (!Number.isFinite(openedTimestamp) || openedTimestamp > now + 5 * 60_000 || openedTimestamp < observedAt - 5 * 60_000 ||
+      (aiReview && Date.parse(aiReview.reviewedAt) > openedTimestamp)) {
     return { accepted: false, reason: "Opening timestamp must follow the source observation and cannot be future-dated." };
   }
   if (!Number.isInteger(shares) || shares < 1 ||
@@ -256,7 +280,7 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   const debit = round2(notional + entryCosts);
   if (debit > EDGE_MAX_POSITION_AUD) return { accepted: false, reason: "Position plus entry costs exceeds the AUD 200 paper allocation cap." };
   if (debit > portfolio.cashAud - EDGE_MIN_CASH_RESERVE_AUD) return { accepted: false, reason: "Insufficient cash after preserving the minimum reserve." };
-  const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), entryCostBreakdown: { ...expectedEntryCost }, debitAud: debit, costAssumptions: costs, openedAt, status: "OPEN_PAPER" };
+  const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), entryCostBreakdown: { ...expectedEntryCost }, debitAud: debit, costAssumptions: costs, openedAt, status: "OPEN_PAPER", ...(aiReview ? { aiReview: { ...aiReview, inputProvenance: { ...aiReview.inputProvenance } } } : {}) };
   return {
     accepted: true,
     portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position], closedTrades: portfolio.closedTrades || [] },
@@ -374,11 +398,12 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
   return { valid: true, symbols: symbols.sort(), barsBySymbol: grouped, rows: Object.values(grouped).reduce((n,b)=>n+b.length,0), latestBar: Object.values(grouped).flat().reduce((a,b)=>a.timestamp>b.timestamp?a:b).timestamp };
 }
 
-export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt = new Date().toISOString(), costs, now = Date.now() } = {}) {
+export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt = new Date().toISOString(), costs, now = Date.now(), exitType = "MANUAL_PAPER_CLOSE" } = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) return { accepted: false, reason: "Simulation-only portfolio required." };
   if (portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) || !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
     return { accepted: false, reason: "Paper portfolio cash or trade history is invalid." };
   }
+  if (!["MANUAL_PAPER_CLOSE", "AUTOMATED_PAPER_DAILY_BAR_EXIT"].includes(exitType)) return { accepted: false, reason: "Paper exit type is invalid." };
   const index = portfolio.positions.findIndex(p => p?.id === positionId && p.status === "OPEN_PAPER");
   if (index < 0) return { accepted: false, reason: "Open paper position not found." };
   const position = portfolio.positions[index], price = num(exitPrice);
@@ -401,7 +426,7 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   // resulting negative net proceeds rather than making the simulated trade
   // impossible to close; the portfolio itself must never overdraw.
   if (!Number.isFinite(proceeds) || !Number.isFinite(nextCash) || nextCash < 0) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
-  const closed = { ...position, status: "CLOSED_PAPER", exitPrice: normalizedPrice, exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, exitCostBreakdown: { ...exitCost }, exitCostAssumptions, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType: "MANUAL_PAPER_CLOSE" };
+  const closed = { ...position, status: "CLOSED_PAPER", exitPrice: normalizedPrice, exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, exitCostBreakdown: { ...exitCost }, exitCostAssumptions, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType };
   const positions = portfolio.positions.slice(); positions[index] = closed;
   return { accepted: true, portfolio: { ...portfolio, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
 }

@@ -2,6 +2,7 @@ import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } 
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
+import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
@@ -502,6 +503,19 @@ async function handle(request, env, ctx) {
   if (requestUrl.pathname === "/api/asx/autopilot/scan" && request.method === "POST") {
     await routeLimit(env.WRITE_LIMITER, principal.sub, "asx-autopilot-scan");
     return reply(await runAsxAutopilot(env));
+  }
+  if (requestUrl.pathname === "/api/crypto/research/review" && request.method === "POST") {
+    await routeLimit(env.AI_LIMITER, principal.sub, "crypto-research-review");
+    const body = await readJson(request, 1_000_000);
+    return reply(await reviewCryptoWalkForward({
+      market: body.market,
+      quoteCurrency: body.quoteCurrency,
+      source: body.source,
+      candles: body.candles,
+      apiKey: env.OPENAI_API_KEY,
+      model: env.OPENAI_MODEL || "gpt-6.2-astra",
+      now: Date.now()
+    }));
   }
   if (requestUrl.pathname === "/api/crypto/auto-paper/account" && (request.method === "GET" || request.method === "POST")) {
     await routeLimit(request.method === "POST" ? env.WRITE_LIMITER : env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");

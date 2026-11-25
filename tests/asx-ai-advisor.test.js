@@ -12,15 +12,15 @@ const candidate = {
   rewardRiskAfterCosts: 2, reason: "Deterministic candidate."
 };
 const bars = Array.from({ length: 60 }, (_, i) => ({
-  timestamp: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
-  open: 40 + i * .08, high: 40.5 + i * .08, low: 39.8 + i * .08,
-  close: 40.2 + i * .08, volume: 100000 + i
+  timestamp: new Date(Date.parse(candidate.observedAt) - (59 - i) * 86400000).toISOString(),
+  open: 40 + i * 0.08, high: 40.5 + i * 0.08, low: 39.8 + i * 0.08,
+  close: 40.2 + i * 0.08, volume: 100000 + i
 }));
 const aiResponse = decision => new Response(JSON.stringify({ output_text: JSON.stringify(decision) }), {
   status: 200, headers: { "Content-Type": "application/json" }
 });
 const approve = {
-  decision: "APPROVE", confidence: 82,
+  decision: "APPROVE", confidence: 82, predicted_win_probability: 0.62,
   thesis: "The supplied trend and breakout context are internally consistent.",
   counter_thesis: "A breakout can fail after the observation date.",
   risk_flags: []
@@ -32,27 +32,37 @@ test("AI advisor fails closed when the OpenAI secret is not configured", async (
   assert.equal(result.approved, false);
 });
 
-test("AI advisor approves only a valid high-confidence decision with no risk flags", async () => {
+test("AI advisor uses strict structured output and records a SHA-256 source fingerprint", async () => {
   let request;
   const result = await evaluateAsxAiDecision({
     candidate, bars, apiKey: "test-only",
     fetchImpl: async (url, init) => {
       request = { url, init, body: JSON.parse(init.body) };
       return aiResponse(approve);
-    }
+    },
+    now: Date.parse(candidate.observedAt) + 1000
   });
   assert.equal(result.status, "AI_APPROVED_PAPER_CANDIDATE");
   assert.equal(result.approved, true);
   assert.equal(result.confidence, 82);
+  assert.equal(result.predictedWinProbability, 0.62);
   assert.equal(request.url, "https://api.openai.com/v1/responses");
   assert.equal(request.init.headers.Authorization, "Bearer test-only");
-  assert.equal(request.body.text.format.type, "json_object");
-  assert.match(request.body.input[0].content, /Do not invent facts/);
+  assert.equal(request.body.text.format.type, "json_schema");
+  assert.equal(request.body.text.format.strict, true);
+  assert.equal(request.body.text.format.schema.additionalProperties, false);
+  assert.equal(request.body.text.format.schema.required.includes("predicted_win_probability"), true);
+  assert.match(request.body.input[0].content, /not a trained predictive model/i);
   assert.match(request.body.input[1].content, /recentDailyBars/);
   assert.equal(request.body.input[1].content.includes("undefined"), false);
+  assert.match(result.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(result.inputProvenance.barsProvided, 60);
+  assert.equal(result.inputProvenance.barsReviewed, 30);
+  assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
+  assert.equal(result.reviewId.includes(result.inputProvenance.fingerprint.slice(0, 16)), true);
 });
 
-test("AI advisor blocks low confidence and any declared risk flag", async () => {
+test("AI advisor blocks low confidence, risk flags and non-approval decisions", async () => {
   const low = await evaluateAsxAiDecision({
     candidate, bars, apiKey: "test",
     fetchImpl: async () => aiResponse({ ...approve, confidence: 74 })
@@ -63,9 +73,6 @@ test("AI advisor blocks low confidence and any declared risk flag", async () => 
     fetchImpl: async () => aiResponse({ ...approve, risk_flags: ["Possible breakout exhaustion"] })
   });
   assert.equal(flagged.approved, false);
-});
-
-test("AI advisor blocks review, reject and malformed model output", async () => {
   for (const decision of ["REVIEW", "REJECT"]) {
     const result = await evaluateAsxAiDecision({
       candidate, bars, apiKey: "test",
@@ -73,12 +80,58 @@ test("AI advisor blocks review, reject and malformed model output", async () => 
     });
     assert.equal(result.approved, false);
   }
-  const malformed = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test",
-    fetchImpl: async () => aiResponse({ ...approve, confidence: 101 })
+});
+
+test("AI advisor blocks missing or malformed probability output", async () => {
+  for (const malformedDecision of [
+    { ...approve, predicted_win_probability: undefined },
+    { ...approve, predicted_win_probability: 1.01 },
+    { ...approve, confidence: 101 }
+  ]) {
+    const result = await evaluateAsxAiDecision({
+      candidate, bars, apiKey: "test",
+      fetchImpl: async () => aiResponse(malformedDecision)
+    });
+    assert.equal(result.status, "AI_BLOCKED_INVALID_DECISION");
+    assert.equal(result.approved, false);
+  }
+});
+
+test("AI advisor rejects invalid provenance before calling the model", async () => {
+  let called = false;
+  const invalidCandidates = [
+    { ...candidate, source: "" },
+    { ...candidate, observedAt: "2026-11-21T06:00:00.000Z" },
+    { ...candidate, executable: true }
+  ];
+  for (const invalidCandidate of invalidCandidates) {
+    const result = await evaluateAsxAiDecision({
+      candidate: invalidCandidate, bars, apiKey: "test",
+      fetchImpl: async () => { called = true; return aiResponse(approve); }
+    });
+    assert.equal(result.status, "AI_BLOCKED_INVALID_INPUT");
+    assert.equal(result.approved, false);
+  }
+  assert.equal(called, false);
+});
+
+
+test("AI advisor preserves missing provider volume as missing rather than inventing it", async () => {
+  let requestBody;
+  const barsWithoutVolume = bars.map(({ volume, ...bar }) => bar);
+  const result = await evaluateAsxAiDecision({
+    candidate, bars: barsWithoutVolume, apiKey: "test",
+    fetchImpl: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return aiResponse(approve);
+    }
   });
-  assert.equal(malformed.status, "AI_BLOCKED_INVALID_DECISION");
-  assert.equal(malformed.approved, false);
+  assert.equal(result.approved, true);
+  assert.equal(result.inputProvenance.volumeBarsAvailable, 0);
+  assert.equal(result.inputProvenance.volumeBarsMissing, 30);
+  const userContent = requestBody.input[1].content;
+  const packet = JSON.parse(userContent.slice(userContent.lastIndexOf("\n\n") + 2));
+  assert.equal(packet.recentDailyBars.at(-1).volume, null);
 });
 
 test("AI advisor blocks provider errors, redirects and timeouts without approving", async () => {
@@ -100,15 +153,4 @@ test("AI advisor blocks provider errors, redirects and timeouts without approvin
   });
   assert.equal(timeout.status, "AI_BLOCKED_PROVIDER_ERROR");
   assert.equal(timeout.approved, false);
-});
-
-test("AI advisor rejects incomplete candidate provenance before calling the model", async () => {
-  let called = false;
-  const result = await evaluateAsxAiDecision({
-    candidate: { ...candidate, executable: true }, bars, apiKey: "test",
-    fetchImpl: async () => { called = true; return aiResponse(approve); }
-  });
-  assert.equal(result.status, "AI_BLOCKED_INVALID_INPUT");
-  assert.equal(result.approved, false);
-  assert.equal(called, false);
 });

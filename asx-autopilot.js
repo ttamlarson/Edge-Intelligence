@@ -4,6 +4,7 @@ import {
 } from "./autonomous-engine.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { evaluateAsxAiDecision } from "./asx-ai-advisor.js";
+import { calculateAsxAiCalibration } from "./asx-ai-calibration.js";
 
 const STORAGE_KEY = "asx-auto-paper-v1";
 const MAX_SIGNAL_HISTORY = 100;
@@ -106,11 +107,11 @@ function validateSnapshot(value) {
 export async function readAsxAutopilot(env) {
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", configured: false, liveTradingEnabled: false };
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
-  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) }; }
+  if (!raw) { const snapshot = initialSnapshot(); return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) }; }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error("Automated ASX paper ledger is invalid JSON."); }
   const snapshot = validateSnapshot(parsed);
-  return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+  return { ...snapshot, configured: isAutopilotConfigured(env), aiReviewConfigured: Boolean(env?.OPENAI_API_KEY), symbols: configuredSymbols(env), performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) };
 }
 
 function isAutopilotConfigured(env) {
@@ -122,6 +123,40 @@ function configuredSymbols(env) {
   if (env?.ASX_AUTOPILOT_ENABLED !== "true") return [];
   try { return normalizeDataCedarSymbols(env.ASX_AUTOPILOT_SYMBOLS || ""); }
   catch { return []; }
+}
+
+export function rankAsxCandidates(items) {
+  if (!Array.isArray(items)) return [];
+  const ranked = items.map(item => {
+    const candidate = item?.candidate || {};
+    const rewardRisk = Number.isFinite(candidate.rewardRiskAfterCosts) ? candidate.rewardRiskAfterCosts : Number.NEGATIVE_INFINITY;
+    const targetProfit = Number.isFinite(candidate.estimatedNetTargetProfitAud) ? candidate.estimatedNetTargetProfitAud : Number.NEGATIVE_INFINITY;
+    const stopLoss = Number.isFinite(candidate.estimatedNetStopLossAud) ? candidate.estimatedNetStopLossAud : Number.POSITIVE_INFINITY;
+    const riskBudget = Number.isFinite(candidate.riskBudgetAud) && candidate.riskBudgetAud > 0 ? candidate.riskBudgetAud : null;
+    const utilization = riskBudget ? stopLoss / riskBudget : Number.POSITIVE_INFINITY;
+    return { ...item, _rankMetrics: { rewardRisk, targetProfit, stopLoss, utilization, riskBudget } };
+  });
+  ranked.sort((a, b) =>
+    b._rankMetrics.rewardRisk - a._rankMetrics.rewardRisk ||
+    b._rankMetrics.targetProfit - a._rankMetrics.targetProfit ||
+    a._rankMetrics.utilization - b._rankMetrics.utilization ||
+    String(a.symbol || a.candidate?.symbol || "").localeCompare(String(b.symbol || b.candidate?.symbol || ""))
+  );
+  return ranked.map((item, index) => {
+    const metrics = item._rankMetrics;
+    const { _rankMetrics, ...clean } = item;
+    return {
+      ...clean,
+      rank: index + 1,
+      ranking: {
+        method: "NET_REWARD_RISK_THEN_NET_TARGET_PROFIT_THEN_RISK_BUDGET_UTILIZATION",
+        rewardRiskAfterCosts: Number.isFinite(metrics.rewardRisk) ? metrics.rewardRisk : null,
+        expectedNetTargetProfitAud: Number.isFinite(metrics.targetProfit) ? metrics.targetProfit : null,
+        expectedNetStopLossAud: Number.isFinite(metrics.stopLoss) ? metrics.stopLoss : null,
+        riskBudgetUtilizationPct: Number.isFinite(metrics.utilization) ? Math.round(metrics.utilization * 10000) / 100 : null
+      }
+    };
+  });
 }
 
 export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch } = {}) {
@@ -140,7 +175,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
   const previousScanMs = Date.parse(snapshot.lastScanAt || "");
   if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
-    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
+    return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
   }
   let data;
   try {
@@ -153,14 +188,16 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       failedScanCount: (Number.isInteger(snapshot.failedScanCount) ? snapshot.failedScanCount : 0) + 1
     };
     await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(failed));
-    return { ...failed, configured: true, symbols, performance: calculateAsxPaperPerformance(snapshot.portfolio) };
+    return { ...failed, configured: true, symbols, performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades) };
   }
 
   let portfolio = snapshot.portfolio;
   const signals = [];
+  const candidateQueue = [];
   const processed = { ...snapshot.lastBarBySymbol };
   let processedBarsThisScan = 0;
   let incompleteSessionBars = 0;
+  let retryableAiFailureCount = 0;
   const openSymbols = () => new Set(portfolio.positions.filter(p => p.status === "OPEN_PAPER").map(p => p.symbol));
 
   for (const symbol of symbols) {
@@ -186,6 +223,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     // are touched in the same candle. A gap below the stop uses the worse open.
     // The close is never treated as a fill.
     const exitedThisBar = new Set();
+    let retryableAiFailure = false;
     for (const position of portfolio.positions.filter(p => p.status === "OPEN_PAPER" && p.symbol === symbol)) {
       const openedMs = Date.parse(position.openedAt || "");
       const markedMs = Date.parse(position.lastMarkedAt || position.openedAt || "");
@@ -195,7 +233,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (stopHit || targetHit) {
         const exitPrice = stopHit ? Math.min(position.stopPrice, latest.open) : position.targetPrice;
         const closed = closePaperPosition(portfolio, position.id, exitPrice, {
-          closedAt: latest.timestamp, now: nowMs
+          closedAt: latest.timestamp, now: nowMs, exitType: "AUTOMATED_PAPER_DAILY_BAR_EXIT"
         });
         if (closed.accepted) {
           portfolio = closed.portfolio;
@@ -219,44 +257,80 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (candidate.status === "PAPER_CANDIDATE") {
         const ai = await evaluateAsxAiDecision({
           candidate, bars: completedBars, apiKey: env.OPENAI_API_KEY,
-          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl
+          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl, now: nowMs
         });
         const aiSummary = {
           status: ai.status, decision: ai.decision || null, confidence: ai.confidence ?? null,
+          predictedWinProbability: ai.predictedWinProbability ?? null, model: ai.model || null,
+          reviewedAt: ai.reviewedAt || null, reviewId: ai.reviewId || null,
+          inputProvenance: ai.inputProvenance || null,
           thesis: ai.thesis || null, counterThesis: ai.counterThesis || null,
           riskFlags: ai.riskFlags || [], reason: ai.reason
         };
         if (!ai.approved) {
+          // A provider/configuration failure must not consume the daily-bar cursor.
+          // The same candidate can be reviewed again after the next throttled scan.
+          retryableAiFailure = !["AI_BLOCKED_PAPER_CANDIDATE", "AI_BLOCKED_INVALID_INPUT"].includes(ai.status);
+          if (retryableAiFailure) retryableAiFailureCount++;
           signals.push({
             symbol, status: ai.status, observedAt: candidate.observedAt,
             deterministicStatus: candidate.status, ai: aiSummary,
+            retryable: retryableAiFailure,
             reason: ai.reason
           });
         } else {
-          const opened = openPaperPosition(portfolio, candidate, {
-            id: `asx-auto-${symbol}-${latest.timestamp.slice(0, 10)}`,
-            openedAt: scannedAt, now: nowMs
-          });
-          if (opened.accepted) {
-            portfolio = opened.portfolio;
-            signals.push({
-              symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt,
-              reason: candidate.reason, entryReference: candidate.entryReference,
-              shares: candidate.shares, openedAt: scannedAt, ai: aiSummary
-            });
-          } else signals.push({ symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt, reason: opened.reason, ai: aiSummary });
+          candidateQueue.push({ symbol, candidate, ai, aiSummary, observedAt: latest.timestamp });
         }
       } else {
         signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
       }
     }
-    processed[symbol] = latest.timestamp;
-    processedBarsThisScan++;
+    if (!retryableAiFailure) {
+      processed[symbol] = latest.timestamp;
+      processedBarsThisScan++;
+    }
+  }
+
+  // AI probability is intentionally not a ranking input until a sufficiently large
+  // chronological outcome sample exists. Deterministic net reward/risk controls rank candidates.
+  for (const item of rankAsxCandidates(candidateQueue)) {
+    const { symbol, candidate, ai, aiSummary } = item;
+    const aiReviewedCandidate = {
+      ...candidate,
+      aiReview: {
+        status: ai.status, decision: ai.decision, confidence: ai.confidence,
+        predictedWinProbability: ai.predictedWinProbability, riskFlags: ai.riskFlags,
+        model: ai.model, reviewedAt: ai.reviewedAt, reviewId: ai.reviewId,
+        inputProvenance: ai.inputProvenance
+      }
+    };
+    const opened = openPaperPosition(portfolio, aiReviewedCandidate, {
+      id: "asx-auto-" + symbol + "-" + item.observedAt.slice(0, 10),
+      openedAt: ai.reviewedAt || scannedAt, now: nowMs
+    });
+    if (opened.accepted) {
+      portfolio = opened.portfolio;
+      signals.push({
+        symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt,
+        reason: candidate.reason, entryReference: candidate.entryReference,
+        shares: candidate.shares, openedAt: ai.reviewedAt || scannedAt,
+        candidateRank: item.rank, ranking: item.ranking, ai: aiSummary
+      });
+    } else {
+      signals.push({
+        symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt,
+        reason: opened.reason, candidateRank: item.rank, ranking: item.ranking, ai: aiSummary
+      });
+    }
   }
 
   const next = {
     ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
-    status: data.rows === 0 ? "NO_DATA" : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR", portfolio, lastScanAt: scannedAt,
+    status: data.rows === 0 ? "NO_DATA" : retryableAiFailureCount > 0
+      ? processedBarsThisScan > 0 ? "SCAN_COMPLETED_WITH_AI_RETRIES" : "AI_REVIEW_RETRY_PENDING"
+      : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR",
+    aiRetryPendingCount: retryableAiFailureCount,
+    portfolio, lastScanAt: scannedAt,
     lastAttemptAt: scannedAt, lastError: null,
     lastBarBySymbol: processed,
     signals: [...snapshot.signals, ...signals].slice(-MAX_SIGNAL_HISTORY),
@@ -265,7 +339,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     symbols, rowsBySymbol: data.rowsBySymbol, aiReviewConfigured: Boolean(env.OPENAI_API_KEY)
   };
   await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(next));
-  return { ...next, performance: calculateAsxPaperPerformance(portfolio) };
+  return { ...next, performance: calculateAsxPaperPerformance(portfolio), aiCalibration: calculateAsxAiCalibration(portfolio.closedTrades) };
 }
 
 export const __test = { STORAGE_KEY, initialSnapshot, validateSnapshot, configuredSymbols };

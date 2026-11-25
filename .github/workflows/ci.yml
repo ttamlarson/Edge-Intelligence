@@ -23,6 +23,8 @@ jobs:
         run: npm test
       - name: Check JavaScript syntax
         run: npm run check
+      - name: Check ASX research modules
+        run: node --check asx-ai-calibration.js && node --check asx-walk-forward.js
       - name: Build static Pages output
         run: npm run build:pages
       - name: Verify ASX paper engine is included

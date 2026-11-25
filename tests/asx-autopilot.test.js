@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, isAsxDailyBarComplete, __test } from "../asx-autopilot.js";
+import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, isAsxDailyBarComplete, rankAsxCandidates, __test } from "../asx-autopilot.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition } from "../autonomous-engine.js";
 
 function kv(seed = null) {
@@ -22,6 +22,27 @@ function provider(now, calls) {
     return new Response(JSON.stringify({ data: { "asx:BHP": bars(now) } }), { headers: { "Content-Type": "application/json" } });
   };
 }
+
+test("ASX candidate ranking is deterministic and risk-aware without using uncalibrated AI probability", () => {
+  const ranked = rankAsxCandidates([
+    { symbol: "BHP", ai: { predictedWinProbability: 0.99 }, candidate: {
+      rewardRiskAfterCosts: 2.5, estimatedNetTargetProfitAud: 10,
+      estimatedNetStopLossAud: 4, riskBudgetAud: 5
+    } },
+    { symbol: "CBA", ai: { predictedWinProbability: 0.01 }, candidate: {
+      rewardRiskAfterCosts: 2.2, estimatedNetTargetProfitAud: 12,
+      estimatedNetStopLossAud: 2, riskBudgetAud: 5
+    } },
+    { symbol: "RIO", ai: { predictedWinProbability: 0.05 }, candidate: {
+      rewardRiskAfterCosts: 2.5, estimatedNetTargetProfitAud: 10,
+      estimatedNetStopLossAud: 2, riskBudgetAud: 5
+    } }
+  ]);
+  assert.deepEqual(ranked.map(item => item.symbol), ["RIO", "BHP", "CBA"]);
+  assert.equal(ranked[0].rank, 1);
+  assert.equal(ranked[0].ranking.riskBudgetUtilizationPct, 40);
+  assert.equal(ranked[0].ranking.method, "NET_REWARD_RISK_THEN_NET_TARGET_PROFIT_THEN_RISK_BUDGET_UTILIZATION");
+});
 
 test("ASX autopilot stays disabled unless the operator explicitly enables it", async () => {
   let called = false;
@@ -134,6 +155,7 @@ test("ASX autopilot exits at a gap-worse open, resolves stop before target and d
   assert.equal(result.portfolio.positions[0].status, "CLOSED_PAPER");
   assert.equal(result.portfolio.closedTrades.length, 1);
   assert.equal(result.portfolio.closedTrades[0].exitPrice, latest.open);
+  assert.equal(result.portfolio.closedTrades[0].exitType, "AUTOMATED_PAPER_DAILY_BAR_EXIT");
   assert.ok(result.signals.some(signal => signal.status === "POSITION_CLOSED_PAPER" && /stop-first.*gap-aware/i.test(signal.reason)));
   assert.equal(result.signals.some(signal => signal.status === "OPEN_REJECTED" || signal.status === "OPENED_PAPER"), false);
 });
@@ -249,7 +271,9 @@ test("ASX autopilot fails closed when deterministic candidates have no configure
   }, { now: new Date(now), fetchImpl: provider(now, []) });
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.portfolio.positions.length, 0);
-  assert.ok(result.signals.some(signal => signal.status === "AI_BLOCKED_NOT_CONFIGURED"));
+  assert.ok(result.signals.some(signal => signal.status === "AI_BLOCKED_NOT_CONFIGURED" && signal.retryable === true));
+  assert.equal(result.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(result.lastBarBySymbol.BHP, undefined);
 });
 
 test("ASX autopilot opens only after deterministic screening and a valid AI approval", async () => {
@@ -257,7 +281,7 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
   const store = kv(JSON.stringify(seeded));
   const decision = {
-    decision: "APPROVE", confidence: 82,
+    decision: "APPROVE", confidence: 82, predicted_win_probability: 0.62,
     thesis: "The supplied trend and breakout context are internally consistent.",
     counter_thesis: "A breakout can fail after the observation date.",
     risk_flags: []
@@ -278,4 +302,39 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const opened = result.signals.find(signal => signal.status === "OPENED_PAPER");
   assert.equal(opened.ai.status, "AI_APPROVED_PAPER_CANDIDATE");
   assert.equal(opened.ai.confidence, 82);
+  assert.equal(opened.ai.predictedWinProbability, 0.62);
+  const openPosition = result.portfolio.positions.find(position => position.status === "OPEN_PAPER");
+  assert.equal(openPosition.aiReview.reviewId, opened.ai.reviewId);
+  assert.match(openPosition.aiReview.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+
+test("ASX autopilot retries the same completed bar after a recoverable AI provider failure", async () => {
+  const now = Date.parse("2026-11-23T07:00:00Z");
+  const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
+  const store = kv(JSON.stringify(seeded));
+  let aiAttempts = 0;
+  const fetchImpl = async (url, options) => {
+    if (new URL(url).hostname === "api.datacedar.com") return provider(now, [])(url, options);
+    if (new URL(url).hostname === "api.openai.com") {
+      aiAttempts++;
+      return new Response("temporarily unavailable", { status: 503 });
+    }
+    throw new Error("Unexpected provider host.");
+  };
+  const config = {
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", OPENAI_API_KEY: "test-only", EDGE_KV: store.binding
+  };
+  const first = await runAsxAutopilot(config, { now: new Date(now), fetchImpl });
+  assert.equal(first.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(first.lastBarBySymbol.BHP, undefined);
+  assert.equal(first.aiRetryPendingCount, 1);
+  const second = await runAsxAutopilot(config, {
+    now: new Date(now + 6 * 60 * 60_000 + 60_000), fetchImpl
+  });
+  assert.equal(aiAttempts, 2);
+  assert.equal(second.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(second.lastBarBySymbol.BHP, undefined);
+  assert.equal(second.scanCount, 2);
 });

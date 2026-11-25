@@ -296,3 +296,20 @@ test("ASX autopilot API reports missing KV or DataCedar configuration without up
   assert.equal(noKey.status, 200);
   assert.equal((await noKey.json()).status, "BLOCKED_DATACEDAR_KEY_MISSING");
 });
+
+
+test("crypto research review route is authenticated, rate-limited and fails closed without an AI key", async () => {
+  const request = () => new Request("https://api.example.au/api/crypto/research/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: ORIGIN },
+    body: JSON.stringify({ market: "BTCUSDT", quoteCurrency: "USDT", source: "test", candles: [] })
+  });
+  const missingKey = await worker.fetch(request(), baseEnv(), access("user-1"));
+  assert.equal(missingKey.status, 200);
+  const result = await missingKey.json();
+  assert.equal(result.status, "AI_BLOCKED_NOT_CONFIGURED");
+  assert.equal(result.advanceAllowed, false);
+  assert.equal(result.liveTradingEnabled, false);
+  const limited = await worker.fetch(request(), baseEnv({ AI_LIMITER: limiter(false) }), access("user-1"));
+  assert.equal(limited.status, 429);
+});

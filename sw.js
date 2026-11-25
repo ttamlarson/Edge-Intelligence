@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "edge-shell-v";
-const CACHE_NAME = `${CACHE_PREFIX}21`;
+const CACHE_NAME = `${CACHE_PREFIX}22`;
 const SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const SHELL = [
   "./app.js",
   "./domain.js",
   "./autonomous-engine.js",
+  "./asx-walk-forward.js",
   "./coinspot-strategy.js",
   "./adaptive-regime-strategy.js",
   "./regime-adaptive-breakout.js",
