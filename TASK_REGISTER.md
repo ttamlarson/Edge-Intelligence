@@ -236,3 +236,5 @@ Updated after local implementation and automated verification on `edge-productio
 - Isolated scheduled workloads: UTC :00 runs Binance/ASX/prediction scans; UTC :15, :30 and :45 run CoinSpot MTF alone. This preserves the other research engines while giving CoinSpot three daily-backfill slots per hour (one UTC day per 20-minute average slot; ~40 hours for 120 days, ~32.3 hours for the current 97-day backlog).
 - Added deterministic dispatch tests for all quarter-hour slots and missing CoinSpot credentials.
 - Remaining data blocker: numeric epoch sub-day filters returned zero rows despite valid full-day BTC/AUD history. Next diagnostic pass must test string-epoch and millisecond-epoch representations before accepting any historical candles.
+
+- Added diagnostic comparisons for numeric epoch seconds, stringified epoch seconds and epoch milliseconds across both 12-hour windows. These alternate representations are not used for candle generation until a probe confirms in-range trades.
