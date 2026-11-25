@@ -271,7 +271,9 @@ test("ASX autopilot fails closed when deterministic candidates have no configure
   }, { now: new Date(now), fetchImpl: provider(now, []) });
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.portfolio.positions.length, 0);
-  assert.ok(result.signals.some(signal => signal.status === "AI_BLOCKED_NOT_CONFIGURED"));
+  assert.ok(result.signals.some(signal => signal.status === "AI_BLOCKED_NOT_CONFIGURED" && signal.retryable === true));
+  assert.equal(result.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(result.lastBarBySymbol.BHP, undefined);
 });
 
 test("ASX autopilot opens only after deterministic screening and a valid AI approval", async () => {
@@ -304,4 +306,35 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const openPosition = result.portfolio.positions.find(position => position.status === "OPEN_PAPER");
   assert.equal(openPosition.aiReview.reviewId, opened.ai.reviewId);
   assert.match(openPosition.aiReview.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+
+test("ASX autopilot retries the same completed bar after a recoverable AI provider failure", async () => {
+  const now = Date.parse("2026-11-23T07:00:00Z");
+  const seeded = { ...__test.initialSnapshot(), portfolio: createPaperPortfolio({ capitalAud: 5000 }) };
+  const store = kv(JSON.stringify(seeded));
+  let aiAttempts = 0;
+  const fetchImpl = async (url, options) => {
+    if (new URL(url).hostname === "api.datacedar.com") return provider(now, [])(url, options);
+    if (new URL(url).hostname === "api.openai.com") {
+      aiAttempts++;
+      return new Response("temporarily unavailable", { status: 503 });
+    }
+    throw new Error("Unexpected provider host.");
+  };
+  const config = {
+    ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP",
+    DATACEDAR_API_KEY: "server-secret", OPENAI_API_KEY: "test-only", EDGE_KV: store.binding
+  };
+  const first = await runAsxAutopilot(config, { now: new Date(now), fetchImpl });
+  assert.equal(first.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(first.lastBarBySymbol.BHP, undefined);
+  assert.equal(first.aiRetryPendingCount, 1);
+  const second = await runAsxAutopilot(config, {
+    now: new Date(now + 6 * 60 * 60_000 + 60_000), fetchImpl
+  });
+  assert.equal(aiAttempts, 2);
+  assert.equal(second.status, "AI_REVIEW_RETRY_PENDING");
+  assert.equal(second.lastBarBySymbol.BHP, undefined);
+  assert.equal(second.scanCount, 2);
 });
