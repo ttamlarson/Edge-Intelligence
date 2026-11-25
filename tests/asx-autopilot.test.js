@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, isAsxDailyBarComplete, __test } from "../asx-autopilot.js";
+import { runAsxAutopilot, readAsxAutopilot, calculateAsxPaperPerformance, isAsxDailyBarComplete, rankAsxCandidates, __test } from "../asx-autopilot.js";
 import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition } from "../autonomous-engine.js";
 
 function kv(seed = null) {
@@ -22,6 +22,27 @@ function provider(now, calls) {
     return new Response(JSON.stringify({ data: { "asx:BHP": bars(now) } }), { headers: { "Content-Type": "application/json" } });
   };
 }
+
+test("ASX candidate ranking is deterministic and risk-aware without using uncalibrated AI probability", () => {
+  const ranked = rankAsxCandidates([
+    { symbol: "BHP", ai: { predictedWinProbability: 0.99 }, candidate: {
+      rewardRiskAfterCosts: 2.5, estimatedNetTargetProfitAud: 10,
+      estimatedNetStopLossAud: 4, riskBudgetAud: 5
+    } },
+    { symbol: "CBA", ai: { predictedWinProbability: 0.01 }, candidate: {
+      rewardRiskAfterCosts: 2.2, estimatedNetTargetProfitAud: 12,
+      estimatedNetStopLossAud: 2, riskBudgetAud: 5
+    } },
+    { symbol: "RIO", ai: { predictedWinProbability: 0.05 }, candidate: {
+      rewardRiskAfterCosts: 2.5, estimatedNetTargetProfitAud: 10,
+      estimatedNetStopLossAud: 2, riskBudgetAud: 5
+    } }
+  ]);
+  assert.deepEqual(ranked.map(item => item.symbol), ["RIO", "BHP", "CBA"]);
+  assert.equal(ranked[0].rank, 1);
+  assert.equal(ranked[0].ranking.riskBudgetUtilizationPct, 40);
+  assert.equal(ranked[0].ranking.method, "NET_REWARD_RISK_THEN_NET_TARGET_PROFIT_THEN_RISK_BUDGET_UTILIZATION");
+});
 
 test("ASX autopilot stays disabled unless the operator explicitly enables it", async () => {
   let called = false;

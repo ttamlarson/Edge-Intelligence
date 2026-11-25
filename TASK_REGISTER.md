@@ -168,3 +168,6 @@ Updated after local implementation and automated verification on `edge-productio
 - Added fixed-rule expanding-history ASX walk-forward validation using next-session open entries, fee-aware sizing, unchanged portfolio risk limits, conservative stop/gap handling, fold resets and a buy-and-hold reference.
 - Added browser research panel and CI syntax checks for the new research modules. All flows remain simulated and source labels remain unverified.
 - Operational blocker: the production Worker has DataCedar and OpenAI secret bindings, but the ASX autopilot enable flag and ticker-universe variables are not configured. Confirm DataCedar data-use rights and the intended ticker universe before enabling scheduled scans. API key bindings alone do not prove successful provider retrieval or model invocation.
+
+
+- Added deterministic cross-ticker candidate ranking by net reward/risk, net target profit and risk-budget utilisation. Uncalibrated AI win probability is deliberately not used as a ranking signal.

@@ -125,6 +125,40 @@ function configuredSymbols(env) {
   catch { return []; }
 }
 
+export function rankAsxCandidates(items) {
+  if (!Array.isArray(items)) return [];
+  const ranked = items.map(item => {
+    const candidate = item?.candidate || {};
+    const rewardRisk = Number.isFinite(candidate.rewardRiskAfterCosts) ? candidate.rewardRiskAfterCosts : Number.NEGATIVE_INFINITY;
+    const targetProfit = Number.isFinite(candidate.estimatedNetTargetProfitAud) ? candidate.estimatedNetTargetProfitAud : Number.NEGATIVE_INFINITY;
+    const stopLoss = Number.isFinite(candidate.estimatedNetStopLossAud) ? candidate.estimatedNetStopLossAud : Number.POSITIVE_INFINITY;
+    const riskBudget = Number.isFinite(candidate.riskBudgetAud) && candidate.riskBudgetAud > 0 ? candidate.riskBudgetAud : null;
+    const utilization = riskBudget ? stopLoss / riskBudget : Number.POSITIVE_INFINITY;
+    return { ...item, _rankMetrics: { rewardRisk, targetProfit, stopLoss, utilization, riskBudget } };
+  });
+  ranked.sort((a, b) =>
+    b._rankMetrics.rewardRisk - a._rankMetrics.rewardRisk ||
+    b._rankMetrics.targetProfit - a._rankMetrics.targetProfit ||
+    a._rankMetrics.utilization - b._rankMetrics.utilization ||
+    String(a.symbol || a.candidate?.symbol || "").localeCompare(String(b.symbol || b.candidate?.symbol || ""))
+  );
+  return ranked.map((item, index) => {
+    const metrics = item._rankMetrics;
+    const { _rankMetrics, ...clean } = item;
+    return {
+      ...clean,
+      rank: index + 1,
+      ranking: {
+        method: "NET_REWARD_RISK_THEN_NET_TARGET_PROFIT_THEN_RISK_BUDGET_UTILIZATION",
+        rewardRiskAfterCosts: Number.isFinite(metrics.rewardRisk) ? metrics.rewardRisk : null,
+        expectedNetTargetProfitAud: Number.isFinite(metrics.targetProfit) ? metrics.targetProfit : null,
+        expectedNetStopLossAud: Number.isFinite(metrics.stopLoss) ? metrics.stopLoss : null,
+        riskBudgetUtilizationPct: Number.isFinite(metrics.utilization) ? Math.round(metrics.utilization * 10000) / 100 : null
+      }
+    };
+  });
+}
+
 export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch } = {}) {
   const scannedAt = iso(now);
   const nowMs = Date.parse(scannedAt);
@@ -159,6 +193,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   let portfolio = snapshot.portfolio;
   const signals = [];
+  const candidateQueue = [];
   const processed = { ...snapshot.lastBarBySymbol };
   let processedBarsThisScan = 0;
   let incompleteSessionBars = 0;
@@ -237,27 +272,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
             reason: ai.reason
           });
         } else {
-          const aiReviewedCandidate = {
-            ...candidate,
-            aiReview: {
-              status: ai.status, decision: ai.decision, confidence: ai.confidence,
-              predictedWinProbability: ai.predictedWinProbability, riskFlags: ai.riskFlags,
-              model: ai.model, reviewedAt: ai.reviewedAt, reviewId: ai.reviewId,
-              inputProvenance: ai.inputProvenance
-            }
-          };
-          const opened = openPaperPosition(portfolio, aiReviewedCandidate, {
-            id: `asx-auto-${symbol}-${latest.timestamp.slice(0, 10)}`,
-            openedAt: ai.reviewedAt || scannedAt, now: nowMs
-          });
-          if (opened.accepted) {
-            portfolio = opened.portfolio;
-            signals.push({
-              symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt,
-              reason: candidate.reason, entryReference: candidate.entryReference,
-              shares: candidate.shares, openedAt: scannedAt, ai: aiSummary
-            });
-          } else signals.push({ symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt, reason: opened.reason, ai: aiSummary });
+          candidateQueue.push({ symbol, candidate, ai, aiSummary, observedAt: latest.timestamp });
         }
       } else {
         signals.push({ symbol, status: candidate.status, observedAt: candidate.observedAt, reason: candidate.reason });
@@ -265,6 +280,39 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
     }
     processed[symbol] = latest.timestamp;
     processedBarsThisScan++;
+  }
+
+  // AI probability is intentionally not a ranking input until a sufficiently large
+  // chronological outcome sample exists. Deterministic net reward/risk controls rank candidates.
+  for (const item of rankAsxCandidates(candidateQueue)) {
+    const { symbol, candidate, ai, aiSummary } = item;
+    const aiReviewedCandidate = {
+      ...candidate,
+      aiReview: {
+        status: ai.status, decision: ai.decision, confidence: ai.confidence,
+        predictedWinProbability: ai.predictedWinProbability, riskFlags: ai.riskFlags,
+        model: ai.model, reviewedAt: ai.reviewedAt, reviewId: ai.reviewId,
+        inputProvenance: ai.inputProvenance
+      }
+    };
+    const opened = openPaperPosition(portfolio, aiReviewedCandidate, {
+      id: "asx-auto-" + symbol + "-" + item.observedAt.slice(0, 10),
+      openedAt: ai.reviewedAt || scannedAt, now: nowMs
+    });
+    if (opened.accepted) {
+      portfolio = opened.portfolio;
+      signals.push({
+        symbol, status: "OPENED_PAPER", observedAt: candidate.observedAt,
+        reason: candidate.reason, entryReference: candidate.entryReference,
+        shares: candidate.shares, openedAt: ai.reviewedAt || scannedAt,
+        candidateRank: item.rank, ranking: item.ranking, ai: aiSummary
+      });
+    } else {
+      signals.push({
+        symbol, status: "OPEN_REJECTED", observedAt: candidate.observedAt,
+        reason: opened.reason, candidateRank: item.rank, ranking: item.ranking, ai: aiSummary
+      });
+    }
   }
 
   const next = {
