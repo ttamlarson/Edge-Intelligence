@@ -494,7 +494,7 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
   const wholeUtcDay = duration === 86400000 && startMs % 86400000 === 0;
   const primaryFormat = wholeUtcDay ? "date" : "epoch";
   const request = async format => {
-    if (budget.calls >= 16) throw new HttpError(503, "CoinSpot history batch reached its 16-request per-market safety budget; retrying this date on the next sync.");
+    if (budget.calls >= 15) throw new HttpError(503, "CoinSpot history batch reached its 15-request per-market safety budget; retrying this date on the next sync.");
     budget.calls++;
     const range = coinSpotHistoryRangeParams(startMs, endMs, format);
     const payload = await coinSpotReadOnly(env, "/orders/market/completed", {
