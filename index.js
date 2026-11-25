@@ -517,6 +517,40 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   return {status:state.status,processedDate:targetDate,nextDate:state.nextDate,markets:outcomes,liveTradingEnabled:false};
 }
 
+async function reviewCoinSpotMtfCandidate(env, market) {
+  if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; deterministic risk rules remain in control.", riskFlags: [] };
+  if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") return null;
+  const packet = {
+    pair: market.pair, quote: market.quote, signal: market.signal,
+    strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; breakout above at least two of prior 20/55/100-bar Donchian highs.",
+    constraints: { spotOnly: true, paperOnly: true, maximumAllocationPct: 25, riskBudgetPct: 0.5, initialStopAtr: 2.5, trailingStopAtr: 3, maxHoldingDays: 30 }
+  };
+  const schema = { type:"object", additionalProperties:false, properties:{
+    assessment:{type:"string",enum:["LOW_CONCERN","CAUTION","HIGH_CONCERN"]},
+    summary:{type:"string",maxLength:700},
+    riskFlags:{type:"array",maxItems:6,items:{type:"string",maxLength:180}}
+  }, required:["assessment","summary","riskFlags"] };
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({model:env.OPENAI_MODEL||"gpt-6.2-astra",max_output_tokens:500,
+        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote, spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
+          {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
+        text:{format:{type:"json_schema",name:"edge_coinspot_signal_review",strict:true,schema}}
+      }), redirect:"error", signal:AbortSignal.timeout(12000)
+    });
+    if (!response.ok) return {status:"AI_REVIEW_PROVIDER_ERROR",summary:"AI review provider returned HTTP "+response.status+".",riskFlags:[]};
+    const payload=await response.json();
+    let output=payload.output_text||"";
+    if(!output) for(const item of payload.output||[]) for(const part of item.content||[]) if(part.text) output=part.text;
+    const parsed=JSON.parse(output);
+    if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||typeof parsed.summary!=="string"||!Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6) throw new Error("AI response schema mismatch");
+    return {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
+  } catch {
+    return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; deterministic safeguards remain authoritative.",riskFlags:[]};
+  }
+}
+
 async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
@@ -547,6 +581,9 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   let strategy;
   try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock)); }
   catch (error) { strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false }; syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220); }
+  const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
+    coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market)
+  })));
   account = processMtfPaperAccount(account, { markets: strategy.markets || [], now: nowIso });
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
@@ -557,7 +594,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
       spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0, tradesFetched: m.history?.tradesFetched || 0,
-      checks: m.signal?.checks || null, signalError: m.signalError || null
+      checks: m.signal?.checks || null, signalError: m.signalError || null,
+      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
     })),
     paperOnly: true, liveTradingEnabled: false
   };
