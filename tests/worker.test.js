@@ -234,3 +234,65 @@ test("DataCedar bars route rejects more than three symbols without calling provi
   assert.equal(response.status, 400);
   assert.equal(called, false);
 });
+
+
+test("Cloudflare asset proxy serves the Crypto CSV module required by Strategy Lab", async t => {
+  const originalFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async url => {
+    requested = String(url);
+    return new Response("export function parseBinanceKlineCsv() {}", {
+      status: 200, headers: { "Content-Type": "text/javascript" }
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const response = await worker.fetch(new Request("https://edge.example.au/crypto-csv.js"), baseEnv());
+  assert.equal(response.status, 200);
+  assert.match(requested, /edge-intelligence-486\.pages\.dev\/crypto-csv\.js$/);
+  assert.match(await response.text(), /parseBinanceKlineCsv/);
+});
+
+
+test("Cloudflare asset proxy serves the breakout strategy module required by Strategy Lab", async t => {
+  const originalFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async url => {
+    requested = String(url);
+    return new Response("export function backtestRegimeAdaptiveBreakout() {}", {
+      status: 200, headers: { "Content-Type": "text/javascript" }
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const response = await worker.fetch(new Request("https://edge.example.au/regime-adaptive-breakout.js"), baseEnv());
+  assert.equal(response.status, 200);
+  assert.ok(requested.endsWith("edge-intelligence-486.pages.dev/regime-adaptive-breakout.js"));
+  assert.match(await response.text(), /backtestRegimeAdaptiveBreakout/);
+});
+
+test("Cloudflare asset proxy allowlist includes trend-following strategy module", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../index.js", import.meta.url), "utf8");
+  assert.ok(source.includes('"/trend-following-indicators.js"'));
+});
+
+
+test("ASX autopilot status and on-demand scan remain opt-in and paper-only", async () => {
+  const store = kv();
+  const env = baseEnv({ EDGE_KV: store.binding });
+  const status = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot"), env, access("user-1"));
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).status, "WAITING_FOR_FIRST_SCAN");
+  const disabled = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), env, access("user-1"));
+  assert.equal(disabled.status, 200);
+  const result = await disabled.json();
+  assert.equal(result.status, "DISABLED");
+  assert.equal(result.liveTradingEnabled, false);
+});
+
+test("ASX autopilot API reports missing KV or DataCedar configuration without upstream calls", async () => {
+  const noStorage = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), baseEnv({ ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP" }), access("user-1"));
+  assert.equal(noStorage.status, 200);
+  assert.equal((await noStorage.json()).status, "BLOCKED_STORAGE_NOT_CONFIGURED");
+  const noKey = await worker.fetch(new Request("https://api.example.au/api/asx/autopilot/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), baseEnv({ ASX_AUTOPILOT_ENABLED: "true", ASX_AUTOPILOT_SYMBOLS: "BHP", EDGE_KV: kv().binding }), access("user-1"));
+  assert.equal(noKey.status, 200);
+  assert.equal((await noKey.json()).status, "BLOCKED_DATACEDAR_KEY_MISSING");
+});

@@ -23,6 +23,12 @@ test("PWA manifest, HTML and service-worker shell use existing icon and module p
   assert.match(html, /type="module" src="\.\/app\.js"/);
   assert.match(sw, /"\.\/domain\.js"/);
   assert.match(sw, /"\.\/autonomous-engine\.js"/);
+  assert.match(sw, /"\.\/coinspot-strategy\.js"/);
+  assert.match(sw, /"\.\/adaptive-regime-strategy\.js"/);
+  assert.match(sw, /"\.\/regime-adaptive-breakout\.js"/);
+  assert.match(sw, /"\.\/adaptive-regime-strategy\.js"/);
+  assert.match(sw, /"\.\/crypto-csv\.js"/);
+  assert.equal(await exists("crypto-csv.js"), true);
   assert.equal(await exists("autonomous-engine.js"), true);
   assert.equal(manifest.id, "./");
   assert.equal(manifest.start_url, "./");
@@ -44,7 +50,7 @@ test("service-worker installation precaches every required shell resource", asyn
   let installPromise;
   handlers.get("install")({ waitUntil: promise => { installPromise = promise; } });
   await installPromise;
-  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./autonomous-engine.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
+  assert.deepEqual(Array.from(cachedPaths), ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./autonomous-engine.js", "./coinspot-strategy.js", "./adaptive-regime-strategy.js", "./regime-adaptive-breakout.js", "./trend-following-indicators.js", "./crypto-csv.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"]);
   for (const path of cachedPaths) assert.equal(await exists(path.replace(/^\.\//, "") || "index.html"), true, path);
 });
 

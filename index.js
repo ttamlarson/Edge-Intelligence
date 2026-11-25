@@ -1,6 +1,11 @@
 import { calculateBacktest, finiteNumber, normalizeMarket, validateAlertRules } from "./domain.js";
 import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObservations, fetchRbaCashRate, fetchRbaReleases, sourceMetadata } from "./au-sources.js";
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
+import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
+import { normalizeCoinSpotMarket } from "./coinspot.js";
+import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
+import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
 const MAX_JSON_BYTES = 64 * 1024;
@@ -15,6 +20,7 @@ const SECURITY_HEADERS = {
 let accessKeysCache = null;
 let accessKeysCacheAt = 0;
 let accessKeysPending = null;
+let lastCoinSpotNonce = 0;
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -154,6 +160,52 @@ async function readLimitedText(response, maxBytes, makeTooLarge) {
   return new TextDecoder().decode(bytes);
 }
 
+function coinSpotDiagnostic(status, message) {
+  const detail = String(message || "").toLowerCase();
+  if (/nonce/.test(detail)) return "CoinSpot rejected the request nonce. EDGE generated a fresh nonce; retry once. If this persists, another client may be sharing this API key.";
+  if (/sign|hmac|signature/.test(detail)) return "CoinSpot rejected the request signature. Check that the API key and secret are the matching pair and contain no extra characters.";
+  if (/key|auth|unauthori[sz]ed|credential/.test(detail) || status === 401) return "CoinSpot rejected the API key. Confirm it is active, email-confirmed, Read Only, and paired with its matching secret.";
+  if (/permission|access|forbidden/.test(detail) || status === 403) return "CoinSpot denied access to this Read Only endpoint. Check the API key permissions in CoinSpot.";
+  return `CoinSpot rejected the authenticated request (HTTP ${status || "unknown"}). Check that the API key is active and email-confirmed, and that the key and secret match.`;
+}
+
+let coinSpotRequestQueue = Promise.resolve();
+
+function coinSpotReadOnly(env, path, extra = {}) {
+  // CoinSpot requires strictly increasing nonces. Serialize requests using the
+  // same API key so parallel balance/order calls cannot arrive out of order.
+  const run = coinSpotRequestQueue.then(() => coinSpotReadOnlyNow(env, path, extra));
+  coinSpotRequestQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function coinSpotReadOnlyNow(env, path, extra = {}) {
+  const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
+  if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
+  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
+  // Add a random sub-millisecond component to reduce nonce collisions across isolates.
+  const random = new Uint32Array(1); crypto.getRandomValues(random);
+  const nonce=Math.max(Date.now()*1000+(random[0]%1000),lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
+  const body=JSON.stringify({...extra,nonce});
+  const cryptoKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-512"},false,["sign"]);
+  const signature=await crypto.subtle.sign("HMAC",cryptoKey,new TextEncoder().encode(body));
+  const sign=[...new Uint8Array(signature)].map(b=>b.toString(16).padStart(2,"0")).join("");
+  let response;
+  try {
+    response=await fetch("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body,signal:AbortSignal.timeout(10_000)});
+  } catch {
+    throw new HttpError(502,"Could not reach CoinSpot. Retry the read-only account request.");
+  }
+  if(response.url && new URL(response.url).hostname!=="www.coinspot.com.au") throw new HttpError(502,"CoinSpot redirected to an unexpected host.");
+  const length=Number(response.headers.get("Content-Length"));
+  if(Number.isFinite(length)&&length>512*1024) throw new HttpError(502,"CoinSpot response exceeded the size limit.");
+  const raw=await readLimitedText(response,512*1024,()=>new HttpError(502,"CoinSpot response exceeded the size limit."));
+  let payload;
+  try { payload=JSON.parse(raw); } catch { throw new HttpError(502,"CoinSpot returned an invalid response."); }
+  if(!response.ok || payload?.status!=="ok") throw new HttpError(502,coinSpotDiagnostic(response.status,payload?.message));
+  return payload;
+}
+
 async function prediction(env, path) {
   if (!env.PREDICTION_HUNT_API_KEY) throw new HttpError(503, "Prediction.com API key is not configured.");
   const data = await providerJson(`${PRED_BASE}${path}`, { headers: { "X-API-Key": env.PREDICTION_HUNT_API_KEY, Accept: "application/json" } });
@@ -273,7 +325,7 @@ async function research(env, input) {
   }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST", headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
+    body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-6.2-astra", tools: [{ type: "web_search", search_context_size: "high" }], tool_choice: "auto", input: [{ role: "user", content }], text: { format: { type: "json_object" } } }), signal: AbortSignal.timeout(45_000)
   });
   if (response.url && new URL(response.url).hostname !== "api.openai.com") throw new HttpError(502, "AI provider redirected to an unexpected host.");
   const text = await readLimitedText(response, 1_000_000, () => new HttpError(502, "OpenAI response exceeded the size limit.")); let data;
@@ -289,7 +341,7 @@ async function research(env, input) {
   if (report.probability != null && (report.probability < 0 || report.probability > 100) || report.market_price != null && (report.market_price < 0 || report.market_price > 100)) throw new HttpError(502, "Research response probability was outside the 0–100 range.");
   report.market_price = validated.marketPrice;
   report.edge_points = validated.marketPrice === null || report.probability === null || report.probability === undefined ? null : report.probability - validated.marketPrice;
-  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6-astra", classification: "model_generated_research_probability" };
+  return { report, citations: citations(data), created_at: isoNow(), model: env.OPENAI_MODEL || "gpt-6.2-astra", classification: "model_generated_research_probability" };
 }
 
 async function backtest(env, input) {
@@ -339,13 +391,80 @@ async function marketSearch(request, env) {
   return { markets: data.markets.map(market => normalizePredictionMarket(market, data.as_of, retrievedAt)), next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : null, total_count: finiteNumber(data.total_count), as_of: typeof data.as_of === "string" ? data.as_of : null, retrieved_at: retrievedAt, source: "Prediction.com API", jurisdiction: "unverified" };
 }
 
+async function runAutomatedCryptoPaper(env) {
+  if (!env.EDGE_KV) return { status: "storage_unavailable" };
+  const key = "crypto-auto-paper-global-v1", now = isoNow();
+  const stored = await env.EDGE_KV.get(key);
+  let account;
+  if (stored === null || stored === undefined || stored === "") {
+    account = createAutoPaperAccount(now);
+  } else {
+    let parsed;
+    try { parsed = JSON.parse(stored); }
+    catch { return { status: "LEDGER_INVALID_JSON", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger is invalid JSON; no existing data was overwritten." }; }
+    try { account = normalizeAutoPaperAccount(parsed, now); }
+    catch { return { status: "LEDGER_VALIDATION_FAILED", mode: "AUTOMATED_PAPER_ONLY", liveTradingEnabled: false, message: "Stored paper ledger failed validation; no existing data was overwritten." }; }
+  }
+  // Binance documents data-api.binance.vision for unauthenticated public market data.
+  // Use one klines request per host: the last closed candle supplies both the
+  // indicator inputs and current mark, avoiding a second endpoint that could
+  // fail independently and incorrectly mark an otherwise healthy market offline.
+  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/", "https://api4.binance.com/api/v3/"];
+  const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
+    let lastError = "NO_PROVIDER_RESPONSE";
+    for (const base of hosts) {
+      try {
+        const response = await fetch(base + "klines?symbol=" + symbol + "&interval=1h&limit=260", {
+          headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000)
+        });
+        if (!response.ok) { lastError = "HTTP_" + response.status; continue; }
+        const body = await response.text();
+        let raw;
+        try { raw = JSON.parse(body); }
+        catch { lastError = "INVALID_JSON_RESPONSE"; continue; }
+        const normalized = normalizeBinanceHourlyKlines(raw, { now: Date.now() });
+        if (!normalized.valid) { lastError = normalized.reason; continue; }
+        const bars = normalized.bars;
+        const latest = bars.at(-1);
+        return { symbol, price: latest.close, signal: evaluateAutoSignal(bars), status: "LIVE_PUBLIC_DATA", provider: new URL(base).hostname, latestClosedCandle: latest.timestamp };
+      } catch (error) {
+        lastError = error?.name === "TimeoutError" ? "UPSTREAM_TIMEOUT" : "UPSTREAM_FETCH_ERROR";
+      }
+    }
+    return { symbol, status: "UNAVAILABLE", errorCode: lastError, message: "All configured public market-data endpoints failed." };
+  }));
+  const prices = Object.fromEntries(results.filter(x => x.price > 0).map(x => [x.symbol,x.price]));
+  const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
+  account = processAutoPaperSignals(account, { signals, prices, now });
+  const liveMarkets = results.filter(x => x.status === "LIVE_PUBLIC_DATA").length;
+  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:now, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  await env.EDGE_KV.put(key, JSON.stringify(snapshot));
+  return snapshot;
+}
+
 async function handle(request, env, ctx) {
   const requestUrl = new URL(request.url); const origin = request.headers.get("Origin");
-  if (origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
+  if (origin && origin !== requestUrl.origin && !configuredOrigins(env).includes(origin)) return json({ error: "Origin is not allowed." }, 403);
   if (request.method === "OPTIONS") {
     const requestedHeaders = (request.headers.get("Access-Control-Request-Headers") || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
     if (requestedHeaders.some(header => header !== "content-type")) return json({ error: "Requested headers are not allowed." }, 403, origin, env);
     return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin, env) } });
+  }
+  // Proxy the static frontend from the Cloudflare Pages production site through
+  // this Worker. Browser requests stay on the Worker origin, keeping Cloudflare
+  // Access authentication first-party (including Safari/iOS).
+  if (!requestUrl.pathname.startsWith("/api/")) {
+    if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/crypto-auto-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js", "/regime-adaptive-breakout.js", "/trend-following-indicators.js"]);
+    if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
+    const assetPath = requestUrl.pathname === "/" ? "/" : requestUrl.pathname;
+    const upstream = await fetch("https://edge-intelligence-486.pages.dev" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
+    const headers = new Headers(upstream.headers);
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("X-Frame-Options", "DENY");
+    headers.set("Referrer-Policy", "no-referrer");
+    headers.set("Cache-Control", requestUrl.pathname === "/" || requestUrl.pathname === "/index.html" ? "no-cache" : "public, max-age=300");
+    return new Response(request.method === "HEAD" ? null : upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
   }
   if (!requestUrl.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404, origin, env);
   const principal = await authenticate(request, env, ctx);
@@ -353,7 +472,7 @@ async function handle(request, env, ctx) {
 
   if (requestUrl.pathname === "/api/health" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "health");
-    return reply({ status: "worker_responding", providers: { datacedar: env.DATACEDAR_API_KEY ? "key configured; retrieval not verified" : "requires DATACEDAR_API_KEY Worker secret", marketData: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: env.DATACEDAR_API_KEY ? "DataCedar key configured; historical bars require a successful retrieval" : "DataCedar ASX historical adapter requires DATACEDAR_API_KEY Worker secret", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; execution requires provider secret and KV", realMoneyTrading: false, retrieved_at: isoNow() });
+    return reply({ status: "worker_responding", providers: { coinSpotReadOnly: Boolean(env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET), datacedar: env.DATACEDAR_API_KEY ? "key configured; retrieval not verified" : "requires DATACEDAR_API_KEY Worker secret", marketData: true, marketDataSource: "Binance public market-data API; no API key required; scanner retrieval is reported by the automated paper account", predictionMarkets: Boolean(env.PREDICTION_HUNT_API_KEY), ai: Boolean(env.OPENAI_API_KEY), storage: Boolean(env.EDGE_KV), alerts: Boolean(env.ALERT_WEBHOOK_URL), cloudflareAccess: true }, asxAutopilot: { enabled: env.ASX_AUTOPILOT_ENABLED === "true", dataCedarKeyConfigured: Boolean(env.DATACEDAR_API_KEY), aiKeyConfigured: Boolean(env.OPENAI_API_KEY), symbolsConfigured: Boolean(env.ASX_AUTOPILOT_SYMBOLS), configured: env.ASX_AUTOPILOT_ENABLED === "true" && Boolean(env.DATACEDAR_API_KEY && env.OPENAI_API_KEY && env.ASX_AUTOPILOT_SYMBOLS && env.EDGE_KV) }, australianSources: { RBA: "official public pages; retrieval not verified by health check", ABS: env.ABS_INDICATOR_API_KEY ? "key configured; API response not verified by health check" : "requires ABS_INDICATOR_API_KEY secret", AEC: env.AEC_INGESTION_URL && env.AEC_INGESTION_TOKEN ? "HTTPS bridge configured; feed retrieval and provenance not verified by health check" : "requires registered AEC feed and authenticated HTTPS bridge", BOM: env.BOM_DATA_LICENSED === "true" ? "rights asserted by operator; retrieval not verified by health check" : "requires confirmation of user-facing data rights" , ASX: env.DATACEDAR_API_KEY ? "DataCedar key configured; historical bars require a successful retrieval" : "DataCedar ASX historical adapter requires DATACEDAR_API_KEY Worker secret", FEX: "not integrated; no verified event API/access" }, scanner: "15-minute cron configured; crypto paper scanning uses public Binance data and KV; ASX paper autopilot is separately opt-in", realMoneyTrading: false, retrieved_at: isoNow() });
   }
   if (requestUrl.pathname === "/api/asx/datacedar/status" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "datacedar-status");
@@ -375,6 +494,108 @@ async function handle(request, env, ctx) {
       throw new HttpError(502, "DataCedar request could not be validated. Retry later or check provider access.");
     }
     return reply(data);
+  }
+  if (requestUrl.pathname === "/api/asx/autopilot" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "asx-autopilot-status");
+    return reply(await readAsxAutopilot(env));
+  }
+  if (requestUrl.pathname === "/api/asx/autopilot/scan" && request.method === "POST") {
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "asx-autopilot-scan");
+    return reply(await runAsxAutopilot(env));
+  }
+  if (requestUrl.pathname === "/api/crypto/auto-paper/account" && (request.method === "GET" || request.method === "POST")) {
+    await routeLimit(request.method === "POST" ? env.WRITE_LIMITER : env.DATA_LIMITER, principal.sub, "crypto-auto-paper-account");
+    if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
+    if (request.method === "POST") return reply(await runAutomatedCryptoPaper(env));
+    const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
+    if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
+    let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid JSON; stored data was preserved."); }
+    try { validateAutoPaperAccount(snapshot); } catch { throw new HttpError(409, "Automated paper ledger failed validation; stored data was preserved."); }
+    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(409, "Automated paper ledger failed its safety validation; stored data was preserved.");
+    return reply(snapshot);
+  }
+
+  if (requestUrl.pathname.startsWith("/api/crypto/coinspot/paper")) {
+    if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
+    const storageKey = await userKey("crypto-paper", principal.sub);
+    const loadAccount = async () => normalizePaperAccount(JSON.parse(await env.EDGE_KV.get(storageKey) || "null") || createCoinSpotPaperAccount(), isoNow());
+    const saveAccount = async account => { await env.EDGE_KV.put(storageKey, JSON.stringify(account)); return account; };
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/account" && request.method === "GET") {
+      await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-paper-account");
+      let account = await loadAccount();
+      let marked;
+      if(account.openPosition){
+        const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+        if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+        const bid=Number(q.prices?.bid),position=account.openPosition;
+        const exitReason=bid<=position.stopPrice?"PAPER_STOP_LOSS":bid>=position.targetPrice?"PAPER_TAKE_PROFIT":null;
+        if(exitReason){account=closeCoinSpotPaperPosition(account,{bid,reason:exitReason});await saveAccount(account);}
+        marked=markCoinSpotPaperAccount(account,{bid});
+      } else marked=markCoinSpotPaperAccount(account,{bid:1});
+      return reply(marked);
+    }
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/open" && request.method === "POST") {
+      await routeLimit(env.WRITE_LIMITER, principal.sub, "crypto-paper-open");
+      const body=await readJson(request),coin=String(body.coin||"").toUpperCase();
+      if(!["BTC","ETH"].includes(coin))throw new HttpError(400,"Only BTC and ETH AUD paper markets are enabled.");
+      const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+      if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+      let account;try{account=openCoinSpotPaperPosition(await loadAccount(),{coin,ask:Number(q.prices?.ask)});}catch(error){throw new HttpError(409,error.message);}
+      return reply(await saveAccount(account),201);
+    }
+    if (requestUrl.pathname === "/api/crypto/coinspot/paper/close" && request.method === "POST") {
+      await routeLimit(env.WRITE_LIMITER, principal.sub, "crypto-paper-close");
+      const account=await loadAccount();if(!account.openPosition)throw new HttpError(409,"There is no open paper position.");
+      const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
+      if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
+      let next;try{next=closeCoinSpotPaperPosition(account,{bid:Number(q.prices?.bid)});}catch(error){throw new HttpError(409,error.message);}
+      return reply(await saveAccount(next));
+    }
+    throw new HttpError(404,"Paper trading route not found.");
+  }
+  if (requestUrl.pathname.startsWith("/api/crypto/coinspot/execution/")) {
+    if (!env.COINSPOT_EXECUTION_COORDINATOR || !env.EDGE_COORDINATOR_TOKEN) throw new HttpError(503, "CoinSpot execution coordinator is not configured.");
+    const routes = new Map([
+      ["/api/crypto/coinspot/execution/nonce", "/nonce"],
+      ["/api/crypto/coinspot/execution/idempotency/reserve", "/idempotency/reserve"],
+      ["/api/crypto/coinspot/execution/idempotency/complete", "/idempotency/complete"]
+    ]);
+    const internalPath = routes.get(requestUrl.pathname);
+    if (!internalPath || request.method !== "POST") throw new HttpError(404, "Execution coordination route not found.");
+    await routeLimit(env.WRITE_LIMITER, principal.sub, "coinspot-execution-coordination");
+    const id = env.COINSPOT_EXECUTION_COORDINATOR.idFromName(await userKey("coinspot-execution", principal.sub));
+    const stub = env.COINSPOT_EXECUTION_COORDINATOR.get(id);
+    const body = await readJson(request, 16 * 1024);
+    const result = await stub.fetch("https://coordinator.internal" + internalPath, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-edge-coordinator-token": env.EDGE_COORDINATOR_TOKEN },
+      body: JSON.stringify(body)
+    });
+    const payload = await result.json().catch(() => ({ error: "Coordinator returned invalid JSON." }));
+    if (!result.ok) throw new HttpError(result.status, payload.error || "Coordinator request failed.");
+    return reply(payload, result.status);
+  }
+  if (requestUrl.pathname === "/api/coinspot/account" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-readonly-account");
+    const [balances,orders]=await Promise.all([coinSpotReadOnly(env,"/my/balances"),coinSpotReadOnly(env,"/my/orders/market/open",{markettype:"AUD"})]);
+    if(!Array.isArray(balances.balances))throw new HttpError(502,"CoinSpot balance response was malformed.");
+    const clean=balances.balances.map(item=>{const symbol=Object.keys(item||{})[0];const v=item?.[symbol];return /^[A-Z0-9]{2,12}$/.test(symbol||"")&&v&&Number.isFinite(Number(v.balance))?{coin:symbol,balance:Number(v.balance),audValue:Number.isFinite(Number(v.audbalance))?Number(v.audbalance):null,rate:Number.isFinite(Number(v.rate))?Number(v.rate):null}:null;}).filter(Boolean);
+    return reply({provider:"CoinSpot",access:"READ_ONLY",balances:clean,openBuyOrders:Array.isArray(orders.buyorders)?orders.buyorders:[],openSellOrders:Array.isArray(orders.sellorders)?orders.sellorders:[],retrievedAt:isoNow(),liveTradingEnabled:false});
+  }
+  if (requestUrl.pathname === "/api/crypto/coinspot/market" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "crypto-coinspot-market");
+    const requested = (requestUrl.searchParams.get("coins") || "BTC,ETH").toUpperCase().split(",");
+    if (!requested.length || requested.length > 2 || requested.some(coin => !new Set(["BTC","ETH"]).has(coin)) || new Set(requested).size !== requested.length) throw new HttpError(400, "Only BTC and ETH AUD markets are enabled.");
+    const markets = await Promise.all(requested.map(async coin => {
+      const [latest, trades] = await Promise.all([
+        providerJson("https://www.coinspot.com.au/pubapi/v2/latest/" + coin.toLowerCase(), {headers:{Accept:"application/json"}}, 128*1024),
+        providerJson("https://www.coinspot.com.au/pubapi/v2/orders/summary/completed/" + coin.toLowerCase(), {headers:{Accept:"application/json"}}, 512*1024)
+      ]);
+      if (latest.status !== "ok" || trades.status !== "ok" || !latest.prices || !Array.isArray(trades.orders)) throw new HttpError(502, "CoinSpot returned an invalid public market response.");
+      try { return normalizeCoinSpotMarket({coin,latest,trades,retrievedAt:isoNow()}); }
+      catch { throw new HttpError(502, "CoinSpot returned invalid public market data."); }
+    }));
+    return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
@@ -483,12 +704,14 @@ export default {
     }
   },
   async scheduled(_event, env, ctx) {
-    if (!env.PREDICTION_HUNT_API_KEY) return;
-    ctx.waitUntil((async () => {
+    if (env.EDGE_KV) ctx.waitUntil(runAutomatedCryptoPaper(env).catch(() => null));
+    if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
+    if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
       const result = await scan(env, rules); await alertNew(env, result);
     })());
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper };
+export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

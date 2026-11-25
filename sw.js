@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "edge-shell-v";
-const CACHE_NAME = `${CACHE_PREFIX}9`;
+const CACHE_NAME = `${CACHE_PREFIX}21`;
 const SHELL = [
   "./",
   "./index.html",
@@ -7,11 +7,17 @@ const SHELL = [
   "./app.js",
   "./domain.js",
   "./autonomous-engine.js",
+  "./coinspot-strategy.js",
+  "./adaptive-regime-strategy.js",
+  "./regime-adaptive-breakout.js",
+  "./trend-following-indicators.js",
+  "./crypto-csv.js",
   "./manifest.webmanifest",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png"
 ];
+const SHELL_PATHS = new Set(SHELL.map(path => new URL(path, self.location.origin).pathname));
 
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
@@ -42,17 +48,29 @@ self.addEventListener("fetch", event => {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.includes("/api/")) return;
   event.respondWith((async () => {
-    const cached = await caches.match(request);
+    const cache = await caches.open(CACHE_NAME);
+    // Always revalidate the app shell so installed PWAs cannot remain pinned to
+    // an old app.js bundle after a deployment. Keep the last good copy offline.
+    if (SHELL_PATHS.has(url.pathname)) {
+      try {
+        const response = await fetch(request, { cache: "no-cache" });
+        if (response.ok && response.type === "basic") await cache.put(request, response.clone());
+        return response;
+      } catch (error) {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        if (request.mode === "navigate") return (await cache.match("./index.html")) || Response.error();
+        throw error;
+      }
+    }
+    const cached = await cache.match(request);
     if (cached) return cached;
     try {
       const response = await fetch(request);
-      if (response.ok && response.type === "basic") {
-        const cache = await caches.open(CACHE_NAME);
-        await cache.put(request, response.clone());
-      }
+      if (response.ok && response.type === "basic") await cache.put(request, response.clone());
       return response;
     } catch (error) {
-      if (request.mode === "navigate") return (await caches.match("./index.html")) || Response.error();
+      if (request.mode === "navigate") return (await cache.match("./index.html")) || Response.error();
       throw error;
     }
   })());

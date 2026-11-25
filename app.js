@@ -1,5 +1,10 @@
 import { normalizeMarket, formatMoney, formatDateTime, brierScore, paperSettlement, VALID_TIME_ZONES, normalizeForecasts, toggleWatchlist, validateAlertRules } from "./domain.js";
-import { createPaperPortfolio, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, parseAsxDailyCsv } from "./autonomous-engine.js";
+import { createPaperPortfolio, calculatePaperPortfolioEquity, evaluateAsxSwingSetup, openPaperPosition, closePaperPosition, markPaperPosition, recordPaperMark, updatePaperMarksFromBars, parseAsxDailyCsv } from "./autonomous-engine.js";
+import { backtestCoinSpotTrend } from "./coinspot-strategy.js";
+import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
+import { backtestRegimeAdaptiveBreakout } from "./regime-adaptive-breakout.js";
+import { backtestTrendFollowingIndicators } from "./trend-following-indicators.js";
+import { parseBinanceKlineCsv, parseBinanceUsdtSymbols } from "./crypto-csv.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -28,16 +33,16 @@ let markets = demoMarkets.slice();
 let nextMarketCursor = null;
 let selectedImage = null;
 function storageValue(key,fallback){try{const value=JSON.parse(localStorage.getItem(key)||"null");return value==null?fallback:value}catch{return fallback}}
-function loadState(){const stored=storageValue(STORE,{});const base=Object.assign({backend:"",watchlist:[],positions:[],balance:10000,realized:0},stored&&typeof stored==="object"&&!Array.isArray(stored)?stored:{});base.watchlist=Array.isArray(base.watchlist)?base.watchlist.filter(item=>item&&typeof item==="object"):[];base.positions=Array.isArray(base.positions)?base.positions.filter(item=>item&&typeof item==="object"):[];base.balance=Number.isFinite(Number(base.balance))&&Number(base.balance)>=0?Number(base.balance):10000;base.realized=Number.isFinite(Number(base.realized))?Number(base.realized):0;return base}
+function loadState(){const stored=storageValue(STORE,{});const base=Object.assign({backend:"https://edge-intelligence-api.ttamlarson.workers.dev",watchlist:[],positions:[],balance:10000,realized:0},stored&&typeof stored==="object"&&!Array.isArray(stored)?stored:{});base.watchlist=Array.isArray(base.watchlist)?base.watchlist.filter(item=>item&&typeof item==="object"):[];base.positions=Array.isArray(base.positions)?base.positions.filter(item=>item&&typeof item==="object"):[];base.balance=Number.isFinite(Number(base.balance))&&Number(base.balance)>=0?Number(base.balance):10000;base.realized=Number.isFinite(Number(base.realized))?Number(base.realized):0;return base}
 function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{toast("Browser storage is unavailable. Changes may not persist.")}}
 function money(n,currency=null){return formatMoney(n,currency)}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2400)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.page===page));$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules()}
+function nav(page){document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+page));document.querySelectorAll(".nav-item, .mobile-nav-item").forEach(b=>{const active=b.dataset.page===page;b.classList.toggle("active",active);if(b.classList.contains("mobile-nav-item")){if(active)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}});$("pageCrumb").textContent=page.replace(/^\w/,c=>c.toUpperCase()).replace("-"," ");window.scrollTo(0,0);if(page==="alerts")loadAlertRules();if(page==="crypto"){loadCoinSpotMarkets();loadCoinSpotAccount()}if(page==="asx-autopilot")loadAsxAutopilotStatus();}
 document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.page)));
 document.querySelectorAll("[data-goto]").forEach(b=>b.addEventListener("click",()=>nav(b.dataset.goto)));
 $("dismissNotice").onclick=()=>{$("dismissNotice").closest(".notice").remove()};
-function normalizeBackendUrl(value){const url=new URL(String(value||""));const local=["localhost","127.0.0.1"].includes(url.hostname);if(url.username||url.password||url.search||url.hash||!(url.protocol==="https:"||(local&&url.protocol==="http:")))throw new Error("Backend URL must use HTTPS and cannot contain credentials, query parameters or fragments.");return url.origin+url.pathname.replace(/\/+$/g,"")}
+function normalizeBackendUrl(value){let input=String(value||"").trim();if(input&&!/^[a-z][a-z0-9+.-]*:\/\//i.test(input))input="https://"+input;const url=new URL(input);const local=["localhost","127.0.0.1"].includes(url.hostname);if(url.username||url.password||url.search||url.hash||!(url.protocol==="https:"||(local&&url.protocol==="http:")))throw new Error("Backend URL must use HTTPS and cannot contain credentials, query parameters or fragments.");return url.origin+url.pathname.replace(/\/+$/g,"")}
 function venueLabel(v){return String(v||"unknown").replace(/[_-]/g," ").replace(/^\w/,c=>c.toUpperCase())}
 function normalize(m){const n=normalizeMarket(m,{source:m.source||"provider response"});return {...m,id:n.id,title:n.title,platform:n.venue,yes:n.probability.yes,volume:n.volume,currency:n.currency,quoteType:n.quoteType,observedAt:n.observedAt,freshness:n.freshness,raw:m}}
 function marketCard(m){const w=state.watchlist.some(x=>x.id===m.id);return `<div class="market-row"><div><div class="market-title">${esc(m.title)}</div><div class="market-meta">${esc(venueLabel(m.platform))} | ${m.volume?.amount!=null?esc(money(m.volume.amount,m.volume.currency))+" volume":"Volume unavailable"} | ${esc(m.quoteType||"quote type unverified")}</div></div><div class="prob">${m.yes==null?"?":m.yes.toFixed(1)+"%"}<small>OBSERVED YES QUOTE</small></div><button class="small-btn" data-watch="${esc(m.id)}">${w?"? Saved":"? Save"}</button></div>`}
@@ -52,15 +57,173 @@ document.querySelectorAll("[data-analyze-demo]").forEach(b=>b.onclick=()=>{const
 renderPaper();
 }
 function renderPaper(){const open=state.positions.filter(p=>!p.closed);$("paperBalance").textContent=money(state.balance,"AUD");$("paperPositions").textContent=open.length;$("paperRealized").textContent=money(state.realized,"AUD");$("paperReturn").textContent=((state.realized/10000)*100).toFixed(2)+"%";$("positionList").innerHTML=state.positions.length?state.positions.map((p,i)=>`<div class="position-card"><div><b>${esc(p.question)}</b><div class="market-meta">${esc(p.side)} | Entry ${Number(p.price).toFixed(1)}% YES | Stake ${esc(money(p.stake,"AUD"))} virtual AUD ${p.closed?"| CLOSED":"| SIMULATED"}${p.resolution?" | Resolved "+(p.resolution===1?"YES":"NO"):""}</div></div>${p.closed?"":`<div>${p.resolution?"":`<button class="small-btn" data-paper-outcome="1" data-paper-id="${i}">Resolve YES (simulated)</button> <button class="small-btn" data-paper-outcome="0" data-paper-id="${i}">Resolve NO (simulated)</button>`} <button class="small-btn" data-close="${i}">Close at entry</button></div>`}</div>`).join(""):`<div class="empty">No simulated positions yet.</div>`;document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.close)];if(!p||p.closed)return;p.closed=true;state.balance+=Number(p.stake)||0;save();render();toast("Closed at entry in the paper simulation; no profit or loss.")});document.querySelectorAll("[data-paper-outcome]").forEach(b=>b.onclick=()=>{const p=state.positions[Number(b.dataset.paperId)];if(!p||p.closed)return;const result=paperSettlement({stake:Number(p.stake),side:p.side,entryProbability:Number(p.price),outcome:Number(b.dataset.paperOutcome)});if(!result){toast("Position data is invalid; it was not settled.");return}p.closed=true;p.resolution=Number(b.dataset.paperOutcome);p.profitLoss=result.profitLoss;p.payout=result.payout;state.balance+=result.payout;state.realized+=result.profitLoss;save();render();toast("Paper position resolved in a simulation only.")})}
-async function api(path,opts={}){if(!state.backend)throw new Error("No backend configured. Add your Worker URL in Settings.");const base=normalizeBackendUrl(state.backend);const r=await fetch(base+path,{credentials:"include",...opts,headers:{"Content-Type":"application/json",...(opts.headers||{})}});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Backend request failed ("+r.status+")");return data}
+async function api(path,opts={}){if(!state.backend)throw new Error("No backend configured. Add your Worker URL in Settings.");const base=normalizeBackendUrl(state.backend);let r;try{r=await fetch(base+path,{credentials:"include",...opts,headers:{...((opts.method||"GET").toUpperCase()==="GET"?{}:{"Content-Type":"application/json"}),...(opts.headers||{})}})}catch(error){const detail=error?.message||"Network request blocked";throw new Error("Could not reach the Cloudflare Worker. This is a browser/network failure, not a CoinSpot credential rejection. Check the saved Worker URL, Cloudflare Access login/cookie, CORS origin and deployment. ("+detail+")")}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Backend request failed ("+r.status+")");return data}
+async function fetchBinanceHourlyHistory(symbol, days=365) {
+ const end=Date.now(), start=end-days*86400000;
+ const hosts=["https://api.binance.com","https://data-api.binance.vision"];
+ const failures=[];
+ let rows=null, sourceHost=null;
+ for(const host of hosts){
+  try{
+   let cursor=start, collected=[];
+   while(cursor<end){
+    const url=host+"/api/v3/klines?"+new URLSearchParams({symbol,interval:"1h",startTime:String(cursor),endTime:String(end),limit:"1000"});
+    const response=await fetch(url,{headers:{Accept:"application/json"},cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const batch=await response.json();
+    if(!Array.isArray(batch))throw new Error("invalid candle response");
+    if(!batch.length)break;
+    collected.push(...batch);
+    const last=Number(batch[batch.length-1][0]);
+    if(!Number.isFinite(last)||last<cursor)throw new Error("unordered candle response");
+    cursor=last+3600000;
+    if(batch.length<1000)break;
+    if(collected.length>50000)throw new Error("history exceeded 50,000 candles (about 5.7 years)");
+   }
+   if(collected.length<300)throw new Error("only "+collected.length+" candles returned");
+   rows=collected;sourceHost=host;break;
+  }catch(error){failures.push(host+": "+(error?.message||"request failed"))}
+ }
+ if(!rows)throw new Error("Both Binance market-data endpoints failed for "+symbol+". "+failures.join("; ")+". If you are using the installed iPhone app, reopen it once to receive the latest update; otherwise try the CSV importer.");
+ const candles=rows.filter(x=>Number(x[6])<end).map(x=>({timestamp:new Date(Number(x[0])).toISOString(),open:Number(x[1]),high:Number(x[2]),low:Number(x[3]),close:Number(x[4]),volume:Number(x[5])}));
+ if(candles.length<300)throw new Error("Fewer than 300 completed hourly candles for "+symbol+".");
+ for(let i=1;i<candles.length;i++)if(Date.parse(candles[i].timestamp)-Date.parse(candles[i-1].timestamp)<=0)throw new Error("Binance history contains duplicate or unordered candles for "+symbol+".");
+ return {metadata:{source:"Binance public Spot API ("+new URL(sourceHost).hostname+")",exchange:"Binance",symbol,quoteAsset:symbol.endsWith("USDT")?"USDT":"UNKNOWN",timeframe:"1h",candleCount:candles.length,firstCandleAt:candles[0].timestamp,lastCandleAt:candles.at(-1).timestamp},quality:{missingIntervals:candles.slice(1).filter((x,i)=>Date.parse(x.timestamp)-Date.parse(candles[i].timestamp)!==3600000).length},candles};
+}
+async function runCryptoCandlesBacktest(parsed,symbol,quoteAsset) {
+ const result=backtestCoinSpotTrend({candles:parsed.candles,quoteCurrency:quoteAsset});
+ const adaptive=backtestAdaptiveRegime({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
+ const breakout=backtestRegimeAdaptiveBreakout({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
+ const trendFollowing=backtestTrendFollowingIndicators({candles:parsed.candles,market:symbol,quoteCurrency:quoteAsset});
+ return {...parsed,result,adaptive,breakout,trendFollowing};
+}
+async function runCryptoDatasetBacktest(file, symbol, quoteAsset) {
+ const parsed = parseBinanceKlineCsv(await file.text(), { symbol, quoteAsset, exchange: "Binance via CryptoFetch" });
+ const result = backtestCoinSpotTrend({ candles: parsed.candles, quoteCurrency: quoteAsset });
+ const adaptive = backtestAdaptiveRegime({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
+ const breakout = backtestRegimeAdaptiveBreakout({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
+ const trendFollowing = backtestTrendFollowingIndicators({ candles: parsed.candles, market: symbol, quoteCurrency: quoteAsset });
+ return { ...parsed, result, adaptive, breakout, trendFollowing };
+}
+function renderCryptoBacktest(label, imported) {
+ const r=imported.result, q=imported.metadata.quoteAsset, m=imported.metadata;
+ const moneyQ=value=>new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0)+" "+q;
+ const cards=[
+  ["OUT-OF-SAMPLE NET P&L",moneyQ(r.outOfSample.netPnlQuote),r.outOfSample.trades+" closed trades"],
+  ["OUT-OF-SAMPLE WIN RATE",r.outOfSample.winRatePct+"%",r.outOfSample.wins+" winners"],
+  ["PROFIT FACTOR",r.outOfSample.profitFactor??"Unavailable","After modelled costs"],
+  ["MAX DRAWDOWN",r.outOfSample.maxDrawdownPct+"%","Out-of-sample"],
+  ["IN-SAMPLE NET P&L",moneyQ(r.inSample.netPnlQuote),r.inSample.trades+" closed trades"],
+  ["ASSESSMENT",r.assessment,"Research only · no live orders"]
+ ];
+ const sample=r.sample, o=r.outOfSample, ins=r.inSample;
+ const ar=imported.adaptive, ao=ar.outOfSample, ai=ar.inSample;
+ const adaptiveCards=[["OOS NET P&L",moneyQ(ao.netPnlQuote),ao.trades+" closed trades"],["OOS WIN RATE",ao.winRatePct+"%",ao.wins+" winners"],["PROFIT FACTOR",ao.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",ao.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(ai.netPnlQuote),ai.trades+" trades"],["ASSESSMENT",ar.assessment,"Research only · no live orders"]];
+ const active=ar.activeVariant, av=active.outOfSample, activeCards=[["OOS NET P&L",moneyQ(av.netPnlQuote),av.trades+" closed trades"],["OOS WIN RATE",av.winRatePct+"%",av.wins+" winners"],["PROFIT FACTOR",av.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",av.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(active.inSample.netPnlQuote),active.inSample.trades+" trades"],["ASSESSMENT",active.assessment,"Research only · no live orders"]];
+ const br=imported.breakout, bo=br.outOfSample, bi=br.inSample;
+ const breakoutCards=[["OOS NET P&L",moneyQ(bo.netPnlQuote),bo.trades+" closed trades"],["OOS WIN RATE",bo.winRatePct+"%",bo.wins+" winners"],["PROFIT FACTOR",bo.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",bo.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(bi.netPnlQuote),bi.trades+" trades"],["ASSESSMENT",br.assessment,"Research only · no live orders"]];
+ const tf=imported.trendFollowing;
+ const tfRender=(period,model)=>{const variants=model.variants.map(v=>{const x=v.outOfSample;const cells=[["OOS NET P&L",moneyQ(x.netPnlQuote),x.trades+" closed trades"],["WIN RATE",x.winRatePct+"%",x.wins+" winners"],["PROFIT FACTOR",x.profitFactor??"Unavailable","After modelled costs"],["MAX DRAWDOWN",x.maxDrawdownPct+"%","Out-of-sample"],["IN-SAMPLE P&L",moneyQ(v.inSample.netPnlQuote),v.inSample.trades+" trades"],["ASSESSMENT",v.assessment,"Research only · no live orders"]];return '<div class="result-section"><h5>'+esc(v.label)+' · '+esc(v.assessment)+'</h5><div class="metric-grid">'+cells.map(c=>'<article class="metric-card"><span>'+esc(c[0])+'</span><strong>'+esc(c[1])+'</strong><small>'+esc(c[2])+'</small></article>').join("")+'</div><p>'+x.trades+' closed OOS trades from '+x.evaluatedBars+' bars · '+esc(x.dateRange.from||"—")+' → '+esc(x.dateRange.to||"—")+' · '+x.eligibleSignals+' qualifying signals. Minimum: '+tf.sample.minimumOutOfSampleTrades+' trades.</p></div>';}).join("");return '<div class="result-section"><h4>TREND-FOLLOWING INDICATORS v2 · '+period+'</h4><p>'+esc(tf.methodology)+' Costs: '+(tf.costs.feeRate*100).toFixed(2)+'% fee per side, '+tf.costs.slippageBps+' bps slippage and '+tf.costs.spreadBps+' bps spread. Risk: '+tf.risk.perTradePct+'% per trade; '+tf.risk.maxAllocationPct+'% maximum allocation.</p>'+variants+'</div>';};
+ const trendFollowingHtml=tfRender("1H",tf.oneHour)+tfRender("4H",tf.fourHour);
+ const skipLabels={positionOpen:"Position already open",dailyLossLimit:"Daily loss limit",trendFilter:"Trend filter",rsiFilter:"RSI filter",volatilityFilter:"ATR / volatility filter",insufficientCapitalOrRisk:"Capital or risk sizing"};
+ const skipRows=Object.entries(o.skipped||{}).map(([key,value])=>`<tr><td>${esc(skipLabels[key]||key)}</td><td>${value}</td></tr>`).join("");
+ return `<div class="result-section"><h3>${esc(label)} · ${esc(m.symbol)}</h3><p>${esc(m.exchange)} · 1h · ${m.candleCount} completed candles · ${esc(m.firstCandleAt)} → ${esc(m.lastCandleAt)} · quote currency ${esc(q)}</p><div class="metric-grid">${cards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><div class="result-section"><h4>OUT-OF-SAMPLE DIAGNOSTICS</h4><p>${o.trades} completed trades from ${o.evaluatedBars} evaluated candles; ${o.eligibleSignals} entry signals passed the indicator filters.</p><p>Out-of-sample window: ${esc(o.dateRange?.from||"—")} → ${esc(o.dateRange?.to||"—")} (${sample.outOfSampleCandles} candles). In-sample: ${ins.trades} trades across ${sample.inSampleCandles} candles, ${esc(ins.dateRange?.from||"—")} → ${esc(ins.dateRange?.to||"—")}.</p><p>Assessment requirement: ${sample.minimumOutOfSampleTrades} completed out-of-sample trades. Current count: ${o.trades}.</p><table class="data-table"><thead><tr><th>Why no entry was taken</th><th>Bars</th></tr></thead><tbody>${skipRows}</tbody></table></div><div class="result-section"><h4>NEW STRATEGY · EDGE ADAPTIVE REGIME v1</h4><p>${esc(ar.methodology)} Entry risk: ${ar.risk.perTradePct}% of equity; max allocation ${ar.risk.maxAllocationPct}%; max hold ${ar.risk.maxHoldHours} hours.</p><div class="metric-grid">${adaptiveCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${ao.trades} closed trades from ${ao.evaluatedBars} bars · ${esc(ao.dateRange.from||"—")} → ${esc(ao.dateRange.to||"—")}. In-sample: ${ai.trades} trades. Minimum sample: ${ar.sample.minimumOutOfSampleTrades} OOS trades. The new model is assessed separately from the legacy EMA strategy.</p></div><div class="result-section"><h4>ALTERNATIVE · EDGE ACTIVE MOMENTUM v1</h4><p>${esc(active.methodology)}</p><div class="metric-grid">${activeCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${av.trades} closed trades from ${av.evaluatedBars} bars · ${esc(av.dateRange.from||"—")} → ${esc(av.dateRange.to||"—")}. This is a separate research candidate, not a validated replacement.</p></div><div class="result-section"><h4>NEW CANDIDATE · REGIME-ADAPTIVE BREAKOUT v1 · 4H</h4><p>${esc(br.methodology)} Risk ${br.risk.perTradePct}% of equity per trade; maximum allocation ${br.risk.maxAllocationPct}%; initial stop ${br.risk.initialStopAtr} ATR; trailing stop ${br.risk.trailingStopAtr} ATR. Uses complete 4-hour candles aggregated from hourly history; incomplete buckets are discarded.</p><div class="metric-grid">${breakoutCards.map(x=>`<article class="metric-card"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong><small>${esc(x[2])}</small></article>`).join("")}</div><p>Out-of-sample: ${bo.trades} closed trades from ${bo.evaluatedBars} bars · ${esc(bo.dateRange.from||"—")} → ${esc(bo.dateRange.to||"—")}; ${bo.eligibleSignals} qualifying entry signals. ${br.sample.fourHourCandles} complete 4h candles; ${br.sample.outOfSampleCandles} OOS candles. Research candidate only; not approved for live trading.</p></div>'+trendFollowingHtml+'<p class="muted tiny">Data provenance: ${esc(m.source||"User-supplied historical CSV")}, ${esc(m.exchange||"Binance")} ${esc(m.symbol)}. Strategy capital and P&L are denominated in ${esc(q)}, not AUD. Costs: 0.1% fee each side + 15 bps slippage + 10 bps spread model. Missing hourly intervals: ${imported.quality.missingIntervals}. CSV source is user-supplied and not independently verified.</p></div>`;
+}
+$("fetchCryptoHistoryBtn")?.addEventListener("click",async()=>{
+ const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults"),button=$("fetchCryptoHistoryBtn");
+ let symbols; try { symbols=parseBinanceUsdtSymbols($("cryptoHistorySymbols")?.value||""); } catch(error) { status.textContent=error.message; return; }
+ const days=Math.max(90,Math.min(1825,Number($("cryptoHistoryDays")?.value)||1095));
+ 
+ button.disabled=true;button.textContent="Fetching history…";status.textContent="Downloading "+days+" days of hourly Binance data for "+symbols.join(", ")+". This may take a minute.";out.innerHTML="";
+ try{
+  const results=await Promise.all(symbols.map(async symbol=>{const parsed=await fetchBinanceHourlyHistory(symbol,days);return {symbol,imported:await runCryptoCandlesBacktest(parsed,symbol,"USDT")};}));
+  out.innerHTML=results.map(x=>renderCryptoBacktest(x.symbol,x.imported)).join("");
+  status.textContent="Fetched and tested "+results.map(x=>x.symbol).join(", ")+". "+days+" requested days; each market has an independent chronological 70/30 split. Verify candle counts and gaps in each result."; 
+ }catch(error){status.textContent="Binance history fetch/test failed: "+error.message+" You can still import CSV files below."; }
+ finally{button.disabled=false;button.textContent="Fetch up to 5 years from Binance";}
+});
+$("coinSpotBacktestBtn")?.addEventListener("click",async()=>{
+ const selected=[...($("cryptoHistoryFiles")?.files||[])];
+ const status=$("coinSpotBacktestStatus"),out=$("coinSpotBacktestResults");
+ if(!selected.length){status.textContent="Choose one or more 1-hour OHLCV CSV files first.";return}
+ if(selected.length>10){status.textContent="Select no more than 10 markets per batch.";return}
+ let files; try { files=selected.map(file=>{
+  const stem=file.name.replace(/\\.csv$/i,"").toUpperCase();
+  const quote=["USDT","USDC","AUD","BTC","ETH"].find(q=>stem.endsWith(q));
+  if(!quote)throw new Error("Could not infer quote asset from "+file.name+". Name the file with its full symbol, e.g. SOLUSDT.csv.");
+  const symbol=stem.match(/[A-Z0-9]{5,20}$/)?.[0];
+  if(!symbol||!symbol.endsWith(quote))throw new Error("Could not infer market symbol from "+file.name+".");
+  return {symbol,quote,file};
+ }); } catch(error) { status.textContent=error.message; return; }
+ if(new Set(files.map(x=>x.symbol)).size!==files.length){status.textContent="Remove duplicate market CSVs.";return}
+ for(const item of files)if(item.file.size>5*1024*1024){status.textContent=item.symbol+" CSV must be smaller than 5 MB.";return}
+ const b=$("coinSpotBacktestBtn");b.disabled=true;b.textContent="Testing markets…";
+ try{
+  const results=await Promise.all(files.map(async item=>({symbol:item.symbol,imported:await runCryptoDatasetBacktest(item.file,item.symbol,item.quote)})));
+  out.innerHTML=results.map(x=>renderCryptoBacktest(x.symbol,x.imported)).join("");
+  status.textContent="Completed "+results.map(x=>x.symbol).join(", ")+". Each market uses its own 70% chronological in-sample / 30% out-of-sample split. The unfinished candle is excluded. No cross-market portfolio simulation is implied.";
+ }catch(e){out.innerHTML="";status.textContent="Backtest rejected: "+e.message;}
+ finally{b.disabled=false;b.textContent="Run multi-market strategy tests";}
+});
+
+async function loadCoinSpotMarkets(){
+ const button=$("cryptoRefreshBtn"),status=$("cryptoStatus"),container=$("cryptoMarketRows");
+ if(!container||!status)return;
+ if(button){button.disabled=true;button.textContent="Refreshing…"}
+ status.textContent="Fetching live public CoinSpot quotes…";
+ container.innerHTML='<div class="empty">Loading BTC/AUD and ETH/AUD…</div>';
+ try{
+  const data=await api("/api/crypto/coinspot/market?coins=BTC,ETH");
+  const markets=Array.isArray(data.markets)?data.markets:[];
+  if(!markets.length)throw new Error("CoinSpot returned no supported markets.");
+  container.innerHTML=markets.map(m=>`<article class="integration"><b>${esc(m.pair)}</b><small>Bid ${esc(money(m.bid,"AUD"))} · Ask ${esc(money(m.ask,"AUD"))}</small><small>Last ${esc(money(m.last,"AUD"))} · Spread ${esc(m.spreadPct)}%</small><small>${Number(m.completedTradesCount)||0} recent completed trades in response</small><em>LIVE PUBLIC DATA · NOT A TRADE SIGNAL</em><button class="small-btn" data-paper-open="${esc(m.coin)}">Open paper position</button></article>`).join("");
+  status.textContent="Updated "+formatDateTime(data.retrievedAt,$("auTimezone")?.value)+" · "+markets.length+" AUD markets";
+  document.querySelectorAll("[data-paper-open]").forEach(b=>b.onclick=()=>openCoinSpotPaper(b.dataset.paperOpen));
+  await loadCoinSpotPaper();
+ }catch(error){
+  container.innerHTML=`<div class="empty">${esc(error.message)} Check authentication, Worker deployment and route rate limits.</div>`;
+  status.textContent="Market data unavailable";
+ }finally{if(button){button.disabled=false;button.textContent="Refresh market data"}}
+}
+async function loadAutomatedCryptoPaper(runNow=false){
+ const panel=$("cryptoAutoPaperPanel");if(!panel)return;
+ const button=$("cryptoAutoPaperRefresh");if(button){button.disabled=true;button.textContent=runNow?"Scanning markets…":"Loading…"}
+ try{
+  const a=await api("/api/crypto/auto-paper/account",runNow?{method:"POST"}:{});
+  const fmt=v=>(Number(v)||0).toFixed(2)+" USDT";
+  $("autoPaperEquity").textContent=fmt(a.equity);$("autoPaperCash").textContent=fmt(a.cash);$("autoPaperRealized").textContent=fmt(a.realizedPnl);$("autoPaperDrawdown").textContent=(Number(a.maxDrawdownPct)||0).toFixed(2)+"%";
+  $("autoPaperStatus").textContent=a.lastScanAt?"AUTOMATED PAPER ENGINE ACTIVE":(a.status||"WAITING FOR FIRST SCHEDULED SCAN").replaceAll("_"," ");
+  $("autoPaperLastScan").textContent=a.lastScanAt?"Last server scan: "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth")+" · "+(a.markets||[]).filter(x=>x.status==="LIVE_PUBLIC_DATA").length+" of 10 markets returned valid data · "+(a.scanIntervalMinutes||15)+" minute schedule.":"No scheduled scan has completed yet. Check back after the next Worker cron.";
+  $("autoPaperPosition").innerHTML=a.openPosition?'<div class="position-card"><div><b>'+esc(a.openPosition.symbol)+' · OPEN PAPER POSITION</b><div class="market-meta">Entry '+fmt(a.openPosition.entryPrice)+' · quantity '+Number(a.openPosition.quantity).toFixed(6)+' · stop '+fmt(a.openPosition.trailingStop)+' · target '+fmt(a.openPosition.targetPrice)+'</div><div class="market-meta">Unrealized '+fmt(a.unrealizedPnl||0)+' · signal candle '+esc(a.openPosition.signalAt)+'</div></div></div>':'<div class="empty">No open automated paper position. The engine scans for qualifying signals.</div>';
+  $("autoPaperMarkets").innerHTML=(a.markets||[]).length?a.markets.map(m=>{const checks=m.checks||{};const labels={trend:"EMA trend",rsi:"RSI",macd:"MACD",adx:"Trend strength (ADX)",atr:"Volatility (ATR)"};const rows=Object.entries(labels).filter(([k])=>checks[k]).map(([k,label])=>{const c=checks[k];const value=typeof c.value==="object"?Object.entries(c.value).map(([n,v])=>n+" "+(v??"—")).join(" · "):String(c.value??"—");return `<div class="market-meta">${c.passed?"✓":"✕"} ${label}: ${esc(value)} · requires ${esc(c.required)}</div>`}).join("");return `<article class="integration"><b>${esc(m.symbol)}</b><small>${esc((m.status||"UNKNOWN").replaceAll("_"," "))}</small><small>${esc(m.reason||"No signal")}</small><small>${m.rsi==null?"RSI —":"RSI "+Number(m.rsi).toFixed(1)} · ${m.adx==null?"ADX —":"ADX "+Number(m.adx).toFixed(1)}</small><em>${m.signal?"QUALIFYING SIGNAL":"NO ENTRY"}</em>${rows?`<details class="signal-diagnostics"><summary>Why no entry? · ${Object.values(checks).filter(c=>!c.passed).length} failed gates</summary>${rows}</details>`:""}</article>`}).join(""):'<div class="empty">Waiting for first market scan.</div>';
+  $("autoPaperHistory").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.symbol)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+fmt(t.pnl)+'</b></div>').join(""):'<div class="empty">No completed automated trades yet.</div>';
+ }catch(e){$("autoPaperStatus").textContent="AUTOMATED PAPER STATUS UNAVAILABLE";$("autoPaperLastScan").textContent=e.message;}
+ finally{if(button){button.disabled=false;button.textContent="Run scan now"}}
+}
+function coinSpotBalanceDisplay(value){const n=Number(value);if(!Number.isFinite(n))return "Unavailable";const clean=Math.abs(n)<1e-8?0:Math.max(0,n);return clean.toFixed(8).replace(/\.?0+$/,"")||"0";}
+function renderCoinSpotPortfolio(balances){
+ const rows=balances.map(x=>({...x,audValue:Number(x.audValue)})).filter(x=>Number.isFinite(x.audValue)&&x.audValue>0).sort((a,b)=>b.audValue-a.audValue);
+ const total=rows.reduce((sum,x)=>sum+x.audValue,0), summary=$("coinSpotPortfolioSummary");
+ if(!summary)return;
+ if(!rows.length){summary.innerHTML='<div class="portfolio-summary"><div><small>COINSPOT ACCOUNT VALUE</small><strong>Unavailable</strong><p>CoinSpot did not provide usable AUD valuations for these balances.</p></div></div>';return;}
+ summary.innerHTML=`<div class="portfolio-summary"><div class="portfolio-total"><small>COINSPOT ACCOUNT VALUE · AUD</small><strong>${esc(money(total,"AUD"))}</strong><p>${rows.length} assets with reported AUD valuations · read-only snapshot</p></div><div class="portfolio-allocation"><div class="portfolio-subheading">ASSET ALLOCATION</div>${rows.map(x=>{const pct=x.audValue/total*100;return `<div class="allocation-row"><div class="allocation-label"><b>${esc(x.coin)}</b><span>${esc(money(x.audValue,"AUD"))} · ${pct.toFixed(1)}%</span></div><div class="allocation-track"><span style="width:${pct.toFixed(2)}%"></span></div></div>`}).join("")}</div><p class="portfolio-disclaimer">This is the value of balances returned by CoinSpot, not a complete net-worth figure. It excludes other exchanges, wallets, liabilities and assets.</p></div>`;
+}
+async function loadCoinSpotAccount(){const status=$("coinSpotAccountStatus"),container=$("coinSpotBalances"),orders=$("coinSpotOrders");if(!status||!container)return;status.textContent="Checking CoinSpot read-only API…";try{const a=await api("/api/coinspot/account");const balances=(Array.isArray(a.balances)?a.balances:[]).map(x=>({...x,balance:Number(x.balance)})).filter(x=>Number.isFinite(x.balance)&&x.balance>1e-8);renderCoinSpotPortfolio(balances);container.innerHTML=balances.length?balances.map(x=>`<article class="integration"><b>${esc(x.coin)}</b><small>Balance: ${esc(coinSpotBalanceDisplay(x.balance))}</small><small>AUD value: ${x.audValue==null?"Unavailable":esc(money(Math.max(0,Number(x.audValue)||0),"AUD"))}</small></article>`).join(""):'<div class="empty">No material balances returned. Tiny residual amounts are hidden as account dust.</div>';const buys=Array.isArray(a.openBuyOrders)?a.openBuyOrders.length:0,sells=Array.isArray(a.openSellOrders)?a.openSellOrders.length:0;orders.innerHTML=`<div class="market-row"><div><b>Open AUD orders</b><div class="market-meta">${buys} buy orders · ${sells} sell orders</div></div><b>READ ONLY</b></div>`;status.textContent="✓ CoinSpot read-only account connected · "+formatDateTime(a.retrievedAt,$("auTimezone")?.value);status.classList.add("connected");}catch(e){status.textContent="Not connected: "+e.message;status.classList.remove("connected");container.innerHTML='<div class="empty">Account data unavailable. Check the connection and retry; API credentials are managed securely in Cloudflare.</div>';const summary=$("coinSpotPortfolioSummary");if(summary)summary.innerHTML="";orders.innerHTML="";}}
+async function loadCoinSpotPaper(){try{const a=await api("/api/crypto/coinspot/paper/account");$("cryptoPaperCash").textContent=money(a.cashAud,"AUD");$("cryptoPaperRealized").textContent=money(a.realizedPnlAud,"AUD");$("cryptoPaperUnrealized").textContent=money(a.unrealizedPnlAud||0,"AUD");$("cryptoPaperDailyLoss").textContent=money(a.dailyLossAud,"AUD");$("cryptoPaperPositionTitle").textContent=a.openPosition?"Open "+a.openPosition.pair+" paper position":"No open paper position";$("cryptoPaperPositionDetail").textContent=a.openPosition?"Entry "+money(a.openPosition.referenceAsk,"AUD")+" · Stop "+money(a.openPosition.stopPrice,"AUD")+" · Target "+money(a.openPosition.targetPrice,"AUD"):"No active simulated position. One position maximum; AUD 50 remains unallocated."; $("cryptoPaperCloseBtn").disabled=!a.openPosition;$("cryptoPaperHistory").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,8).map(t=>`<div class="market-row"><div><b>${esc(t.pair)}</b><div class="market-meta">${esc(t.reason)} · ${esc(t.closedAt)}</div></div><b>${esc(money(t.pnlAud,"AUD"))}</b></div>`).join(""):'<div class="empty">No completed paper trades yet.</div>';$("cryptoPaperCloseBtn").onclick=closeCoinSpotPaper;}catch(e){$("cryptoPaperPositionDetail").textContent="Paper account unavailable: "+e.message;}}
+async function openCoinSpotPaper(coin){const buttons=[...document.querySelectorAll("[data-paper-open]")];buttons.forEach(b=>b.disabled=true);try{await api("/api/crypto/coinspot/paper/open",{method:"POST",body:JSON.stringify({coin})});toast("Paper position opened at current CoinSpot ask.");await loadCoinSpotPaper();}catch(e){toast("Paper entry not opened: "+e.message);}finally{buttons.forEach(b=>b.disabled=false);}}
+async function closeCoinSpotPaper(){const b=$("cryptoPaperCloseBtn");b.disabled=true;try{await api("/api/crypto/coinspot/paper/close",{method:"POST",body:JSON.stringify({})});toast("Paper position closed at current CoinSpot bid.");await loadCoinSpotPaper();}catch(e){toast("Paper close failed: "+e.message);b.disabled=false;}}
 async function searchMarkets(cursor=null){const q=$("marketSearch").value.trim(),platform=$("venueFilter").value;const body={q,platform:platform==="all"?undefined:platform,limit:40,...(cursor?{cursor}:{})};$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">Loading market data...</td></tr>`;try{const data=await api("/api/markets?"+new URLSearchParams(Object.entries(body).filter(([,v])=>v!==undefined)));const rows=(data.markets||[]).map(normalize);markets=rows;nextMarketCursor=data.next_cursor||null;$("marketRows").innerHTML=rows.length?rows.map(m=>`<tr><td><div class="table-market">${esc(m.title)}</div><div class="table-sub">${esc(m.id)} | ${esc(m.quoteType||"quote type unverified")} | ${m.observedAt?esc(formatDateTime(m.observedAt,$("auTimezone")?.value)):"time unknown"} | ${esc(m.freshness||"freshness unknown")}</div></td><td>${esc(venueLabel(m.platform))}<div class="table-sub">jurisdiction: ${esc(m.raw?.jurisdiction||"unverified")}</div></td><td>${m.yes==null?"unavailable":m.yes.toFixed(1)+"%"}</td><td>${m.volume?.amount!=null?esc(money(m.volume.amount,m.volume.currency)):"Currency unavailable"}</td><td><button class="small-btn" data-watch="${esc(m.id)}">Save</button></td></tr>`).join(""):`<tr><td colspan="5" class="empty">No markets returned for these filters.</td></tr>`;const next=$("marketNext");if(next){next.hidden=!nextMarketCursor;next.disabled=false}bindWatch();$("connectionText").textContent="Provider response received"}catch(e){nextMarketCursor=null;$("marketRows").innerHTML=`<tr><td colspan="5" class="empty">${esc(e.message)} Configure the backend and confirm credentials and venue access.</td></tr>`;if($("marketNext"))$("marketNext").hidden=true}}
+if($("cryptoRefreshBtn"))$("cryptoRefreshBtn").onclick=loadCoinSpotMarkets;
+$("cryptoAutoPaperRefresh")?.addEventListener("click",()=>loadAutomatedCryptoPaper(true));
+loadAutomatedCryptoPaper();
+$("coinSpotAccountRefresh")?.addEventListener("click",loadCoinSpotAccount);
 $("searchBtn").onclick=()=>searchMarkets();if($("marketNext"))$("marketNext").onclick=()=>searchMarkets(nextMarketCursor);$("refreshBtn").onclick=()=>{if($("page-discover").classList.contains("active"))searchMarkets();else toast("Refresh markets from Discover.")};
 $("screenshotInput").onchange=e=>{const f=e.target.files[0];selectedImage=f||null;$("fileName").textContent=f?f.name+" · "+Math.round(f.size/1024)+" KB":""};
 async function analyze(){const question=$("marketQuestion").value.trim(),url=$("marketUrl").value.trim(),price=$("yesPrice").value; if(!question&&!url&&!selectedImage){toast("Enter a market question, URL or screenshot.");return}
 const btn=$("analyzeBtn");btn.disabled=true;btn.textContent="Analyzing…";let result;
 try{let imageData=null;if(selectedImage){if(selectedImage.size>5*1024*1024)throw new Error("Please use an image smaller than 5 MB.");imageData=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(selectedImage)})}
 result=await api("/api/analyze",{method:"POST",body:JSON.stringify({question,url,marketPrice:price===""?null:Number(price),platform:$("analysisPlatform").value,image:imageData})});showResult(result.analysis||result,result.citations||[])
-}catch(e){if(!state.backend){showResult({title:question||url||"Screenshot market",verdict:"DEMO ONLY",marketProbability:null,modelProbability:null,edge:null,confidence:"Not assessed",risk:"Not assessed",summary:"This is a sample report layout. No live market data, news research or AI inference has been performed. Configure a secure backend with market-data and AI credentials to enable real analysis.",evidence:["Demo mode is active.","No external sources were queried."],risks:["Do not use this sample to make a trading decision."],invalidation:["Run the analysis again after configuring integrations."]})}else toast(e.message)}
+}catch(e){if(!state.backend){showResult({title:question||url||"Screenshot market",verdict:"DEMO ONLY",marketProbability:null,modelProbability:null,edge:null,confidence:"Not assessed",risk:"Not assessed",summary:"This is a sample report layout. No live market data, news research or AI inference has been performed. Configure a secure backend with market-data and AI credentials to enable real analysis.",evidence:["Demo mode is active.","No external sources were queried."],risks:["Do not use this sample to make a trading decision."],invalidation:["Run the analysis again after configuring integrations."]})}else{const panel=$("analysisResult");panel.classList.remove("hidden");panel.innerHTML=`<div class="analysis-error" role="alert"><h3>Analysis could not complete</h3><p>${esc(e.message||"Unknown analysis error.")}</p><p class="muted">Your question has not been submitted successfully. Check the connection and retry.</p><button class="secondary-btn" type="button" id="retryAnalysis">Try again</button></div>`;panel.scrollIntoView({behavior:"smooth",block:"start"});$("retryAnalysis")?.addEventListener("click",analyze)}}
 finally{btn.disabled=false;btn.textContent="✳ Run AI analysis"}}
 function showResult(r,citations=[]) {
  const n=value=>value==null?"Unavailable":(typeof value==="number"?value.toFixed(1):value)+(typeof value==="number"?"%":"");const items=value=>Array.isArray(value)?value:[];
@@ -71,8 +234,10 @@ $("analyzeBtn").onclick=analyze;
 $("paperAdd").onclick=()=>{const q=$("paperQuestion").value.trim(),price=Number($("paperPrice").value),stake=Number($("paperStake").value),side=$("paperSide").value;if(!q||price<1||price>99||stake<=0||!Number.isFinite(stake)){toast("Enter a question, valid price and stake.");return}if(stake>state.balance){toast("Stake exceeds virtual balance.");return}state.balance-=stake;state.positions.unshift({question:q,price,stake,side,closed:false,created:Date.now()});save();render();$("paperQuestion").value="";$("paperPrice").value="";$("paperStake").value="";toast("Simulated position added.")};
 $("resetPaper").onclick=()=>{if(!confirm("Reset all paper positions and restore the $10,000 virtual balance?"))return;state.positions=[];state.balance=10000;state.realized=0;save();render();toast("Paper trading reset.")};
 $("saveSettings").onclick=()=>{try{state.backend=$("backendUrl").value.trim()?normalizeBackendUrl($("backendUrl").value.trim()):"";save();$("connectionText").textContent=state.backend?"Backend URL saved":"Demo data mode";toast("Backend URL saved.")}catch(error){$("settingsStatus").textContent=error.message}};
-$("testConnection").onclick=async()=>{try{const d=await api("/api/health");$("settingsStatus").textContent="Connected | Market data: "+(d.providers?.marketData?"configured":"not configured")+" | AI: "+(d.providers?.ai?"configured":"not configured")+" | storage: "+(d.providers?.storage?"configured":"not configured");$("connectionText").textContent="Backend connected"}catch(e){$("settingsStatus").textContent=e.message}};
-$("refreshHealth")?.addEventListener("click",async()=>{const panel=$("apiHealthResult");panel.textContent="Checking authenticated Worker and provider configuration...";try{const data=await api("/api/health");panel.innerHTML=`<div class="position-card"><b>Worker</b><span>${esc(data.status||"unknown")}</span></div><div class="position-card"><b>Market provider key</b><span>${data.providers?.marketData?"configured":"not configured"}</span></div><div class="position-card"><b>AI provider key</b><span>${data.providers?.ai?"configured":"not configured"}</span></div><div class="position-card"><b>KV storage</b><span>${data.providers?.storage?"configured":"not configured"}</span></div><div class="position-card"><b>Real-money trading</b><span>disabled</span></div><h3>Australian sources</h3>${Object.entries(data.australianSources||{}).map(([name,status])=>`<div class="position-card"><b>${esc(name)}</b><span>${esc(status)}</span></div>`).join("")}<p class="muted tiny">Configuration is not a live integration test. Run each source page after deployment and inspect retrieval status and data timestamps.</p>`}catch(error){panel.textContent=error.message}});
+$("testConnection").onclick=async()=>{try{const d=await api("/api/health");$("settingsStatus").textContent="Connected | Crypto market data: public Binance API | AI: "+(d.providers?.ai?"key configured":"key missing")+" | storage: "+(d.providers?.storage?"configured":"not configured");$("connectionText").textContent="Backend connected"}catch(e){$("settingsStatus").textContent=e.message}};
+async function runApiHealthCheck(panel){if(!panel)return;panel.textContent="Checking authenticated Worker and provider configuration...";try{const data=await api("/api/health");panel.innerHTML=`<div class="position-card"><b>Worker</b><span>${esc(data.status||"unknown")}</span></div><div class="position-card"><b>CoinSpot read-only secrets</b><span>${data.providers?.coinSpotReadOnly?"both configured":"missing one or both"}</span></div><div class="position-card"><b>Crypto market data</b><span>Public Binance API (no key required)</span></div><div class="position-card"><b>Prediction-market provider key</b><span>${data.providers?.predictionMarkets?"configured":"missing"}</span></div><div class="position-card"><b>AI provider key</b><span>${data.providers?.ai?"configured":"missing"}</span></div><div class="position-card"><b>ASX paper autopilot</b><span>${data.asxAutopilot?.configured?"configured":"incomplete"}${data.asxAutopilot?.enabled?" · enabled":" · disabled"}</span></div><div class="position-card"><b>KV storage</b><span>${data.providers?.storage?"configured":"not configured"}</span></div><div class="position-card"><b>Real-money trading</b><span>disabled</span></div><h3>Australian sources</h3>${Object.entries(data.australianSources||{}).map(([name,status])=>`<div class="position-card"><b>${esc(name)}</b><span>${esc(status)}</span></div>`).join("")}<p class="muted tiny">Configuration is not a live integration test. Run each source page after deployment and inspect retrieval status and data timestamps.</p>`}catch(error){panel.textContent=error.message}}
+$("refreshHealth")?.addEventListener("click",()=>runApiHealthCheck($("apiHealthResult")));
+$("refreshHealthSettings")?.addEventListener("click",()=>runApiHealthCheck($("apiHealthSettingsResult")));
 $("backendUrl").value=state.backend;
 if("serviceWorker" in navigator){
  window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").then(reg=>{
@@ -160,8 +325,8 @@ function renderAsxDesk(){
  const open=asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER");
  const realized=asxPortfolio.closedTrades.reduce((s,p)=>s+(Number(p.profitLossAud)||0),0);
  const unrealized=open.reduce((s,p)=>s+(markPaperPosition(p,p.lastMarkPrice||p.entryPrice)?.unrealizedProfitLossAud||0),0);
- const equity=asxPortfolio.cashAud+open.reduce((s,p)=>s+(Number(p.lastMarkPrice||p.entryPrice)*p.shares||0),0);
- $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=aud(equity);
+ const equity=calculatePaperPortfolioEquity(asxPortfolio);
+ $("asxCash").textContent=aud(asxPortfolio.cashAud);$("asxEquity").textContent=equity===null?"Unavailable":aud(equity);
  $("asxRealized").textContent=aud(realized);$("asxUnrealized").textContent=aud(unrealized);
  $("asxPositions").textContent=open.length;
  $("asxCandidates").innerHTML=asxCandidates.length?asxCandidates.map((c,i)=>`<div class="position-card"><div><b>${esc(c.symbol)} · ${esc(c.status)}</b><div class="market-meta">${esc(c.reason)} · ${esc(c.source||"")}</div>${c.status==="PAPER_CANDIDATE"?`<div class="market-meta">Ref ${aud(c.entryReference)} · ${c.shares} shares · stop ${aud(c.stopPrice)} · target ${aud(c.targetPrice)} · est. target net ${aud(c.estimatedNetTargetProfitAud)} · RR ${c.rewardRiskAfterCosts}:1</div>`:""}</div>${c.status==="PAPER_CANDIDATE"?`<button class="small-btn" data-asx-open="${i}">Open paper position</button>`:""}</div>`).join(""):'<div class="empty">Connect DataCedar historical daily bars or import an authorised ASX daily OHLC CSV to scan. No real-time ASX feed is connected.</div>';
@@ -173,17 +338,28 @@ function renderAsxDesk(){
 }
 $("asxImportBtn")?.addEventListener("click",()=>{
  const file=$("asxCsvFile").files[0],source=$("asxSource").value.trim();
- if(!file||!source){toast("Choose a CSV and identify its data source.");return}
- if(file.size>5*1024*1024){toast("CSV must be smaller than 5 MB.");return}
- const reader=new FileReader();reader.onload=()=>{
-  const parsed=parseAsxDailyCsv(String(reader.result||""));
-  if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;return}
+ if(!file||!source||$("asxConfirmData")?.checked!==true){toast("Choose a CSV, name its source, and confirm AUD denomination and data-use rights.");return}
+ asxUniverse={};
+ asxCandidates=[];
+ renderAsxDesk();
+ if(file.size>5*1024*1024){$("asxImportStatus").textContent="CSV must be smaller than 5 MB.";return}
+ $("asxImportStatus").textContent="Reading CSV. Previous import candidates have been cleared.";
+ const reader=new FileReader();
+ reader.onload=()=>{
+  const parsed=parseAsxDailyCsv(String(reader.result||""),{currency:"AUD"});
+  if(!parsed.valid){$("asxImportStatus").textContent=parsed.reason;renderAsxDesk();return}
   asxUniverse=parsed.barsBySymbol;
-  const observedAt=parsed.latestBar;
-  asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
+  asxCandidates=parsed.symbols.map(symbol=>evaluateAsxSwingSetup({symbol,bars:asxUniverse[symbol],source,currency:"AUD",observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:calculatePaperPortfolioEquity(asxPortfolio)??0,cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length}));
   $("asxImportStatus").textContent=`Imported ${parsed.rows} daily bars for ${parsed.symbols.length} ASX tickers. Latest bar: ${formatDateTime(parsed.latestBar,"Australia/Perth")}. Source label is user-declared and has not been independently verified.`;
   renderAsxDesk();
- };reader.onerror=()=>{$("asxImportStatus").textContent="Could not read CSV file."};reader.readAsText(file);
+ };
+ reader.onerror=()=>{
+  asxUniverse={};
+  asxCandidates=[];
+  $("asxImportStatus").textContent="Could not read CSV file.";
+  renderAsxDesk();
+ };
+ reader.readAsText(file);
 });
 $("asxDataCedarBtn")?.addEventListener("click",async()=>{
  const button=$("asxDataCedarBtn"),symbols=$("asxDataCedarSymbols").value.trim();
@@ -193,16 +369,41 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
   const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
   if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
   asxUniverse=data.barsBySymbol||{};
+  const markUpdate=updatePaperMarksFromBars(asxPortfolio,asxUniverse);
+  if(markUpdate.markedSymbols.length){asxPortfolio=markUpdate.portfolio;saveAsx()}
   asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
    symbol,bars:asxUniverse[symbol],source:"DataCedar ASX historical daily bars",currency:"AUD",
-   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:asxPortfolio.startingCapitalAud,
+   observedAt:asxUniverse[symbol].at(-1).timestamp,equityAud:calculatePaperPortfolioEquity(asxPortfolio)??0,
    cashAud:asxPortfolio.cashAud,openPositions:asxPortfolio.positions.filter(p=>p.status==="OPEN_PAPER").length
   }));
   const counts=Object.entries(data.rowsBySymbol||{}).map(([symbol,count])=>symbol+": "+count+" bars").join("; ");
-  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
+  $("asxImportStatus").textContent="DataCedar response validated. "+counts+". Latest daily bar: "+(data.latestBar?formatDateTime(data.latestBar,"Australia/Perth"):"not supplied")+". "+(markUpdate.markedSymbols.length?"Updated paper marks for "+markUpdate.markedSymbols.join(", ")+"; cash and realised P&L unchanged. ":"No open positions received a newer eligible mark. ")+"Historical daily data only; not a real-time quote. "+(data.disclaimer||"");
   renderAsxDesk();
  }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
  finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
 });
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
+async function loadAsxAutopilotStatus(){
+ const status=$("asxAutoStatus");if(!status)return;
+ try{
+  const a=await api("/api/asx/autopilot");
+  const configured=a.configured===true&&Array.isArray(a.symbols)&&a.symbols.length>0;
+  status.textContent=configured
+   ? "AUTOMATED PAPER SCANNER "+(a.status||"CONFIGURED")+" · "+a.symbols.join(", ")+" · scans "+(a.scanCount||0)+" · last scan "+(a.lastScanAt?formatDateTime(a.lastScanAt,"Australia/Perth"):"not yet run")+" · open positions "+(a.portfolio?.positions||[]).filter(p=>p.status==="OPEN_PAPER").length+" · AI reviewer "+(a.aiReviewConfigured?"KEY CONFIGURED · NOT VERIFIED":"BLOCKED · OPENAI_API_KEY missing")
+   : "AUTOMATION NOT ENABLED · Configure ASX_AUTOPILOT_ENABLED, ASX_AUTOPILOT_SYMBOLS, DataCedar key and Worker KV before running.";
+  if(a.lastError)status.textContent+=" · Last provider error: "+a.lastError;
+  const p=a.performance||{};
+  const metric=(label,value,detail)=>'<article class="metric-card"><span>'+label+'</span><strong>'+value+'</strong><small>'+detail+'</small></article>';
+  $("asxAutoPerformance").innerHTML=metric("CLOSED TRADES",String(p.tradeCount??0),"Realized sample only")+metric("WIN RATE",p.winRatePct==null?"—":p.winRatePct.toFixed(1)+"%","Wins / all closed trades")+metric("PROFIT FACTOR",p.profitFactor==null?"—":p.profitFactor.toFixed(2),"Gross profit / gross loss")+metric("NET REALIZED P&amp;L",p.totalRealizedProfitLossAud==null?"—":aud(p.totalRealizedProfitLossAud),"After simulated fees")+metric("MAX DRAWDOWN",p.maxRealizedDrawdownAud==null?"—":aud(p.maxRealizedDrawdownAud)+" · "+(p.maxRealizedDrawdownPct??0).toFixed(2)+"%","Realized equity curve only");
+  $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
+  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% confidence)':'')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+ }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
+}
+$("asxAutoScanBtn")?.addEventListener("click",async()=>{
+ const button=$("asxAutoScanBtn"),status=$("asxAutoStatus");button.disabled=true;button.textContent="Running paper scan…";
+ try{const result=await api("/api/asx/autopilot/scan",{method:"POST",body:JSON.stringify({})});status.textContent=result.message||("Automated paper scan "+(result.status||"completed")+" · "+(result.symbols||[]).join(", "));await loadAsxAutopilotStatus();}
+ catch(error){status.textContent="Automated paper scan failed: "+error.message}
+ finally{button.disabled=false;button.textContent="Run automated paper scan now"}
+});
 renderAsxDesk();
+loadAsxAutopilotStatus();

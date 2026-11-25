@@ -9,10 +9,12 @@
 - [ ] Download and inspect the CI static-site artifact after it is produced.
 
 ## ASX autonomous paper desk
-- [ ] Import a broker-authorised ASX daily OHLC CSV and confirm source name, timestamps, OHLC integrity and ticker grouping.
-- [x] Automated tests reject malformed OHLC, duplicate sessions, impossible ISO/Australian dates, timezone-less and unsupported timestamps, missing provenance, non-AUD and stale daily bars.
-- [x] Automated tests cover UTF-8 BOM headers, Australian DD/MM/YYYY parsing and ISO timestamps with explicit timezone offsets.
-- [x] Automated tests cover CSV-to-screen-to-open-to-mark-to-close lifecycle, fee accounting, cash reconciliation, closed-trade history, stale-candidate rejection and re-entry after closed positions.
+- [ ] Import a broker-authorised ASX daily OHLC CSV, confirm the source, explicitly attest AUD denomination and data-use rights, then verify timestamps, all four OHLC values and ticker grouping.
+- [x] Automated tests reject missing/incorrect AUD confirmation, malformed quoting, adjusted-close-only files, malformed OHLC including Open, duplicate sessions, impossible ISO/Australian dates, timezone-less and unsupported timestamps, missing provenance, non-AUD, stale/future individual daily bars with fresh observation metadata, and invalid freshness-clock configuration.
+- [x] Automated tests cover UTF-8 BOM headers, properly quoted fields, Australian DD/MM/YYYY parsing and ISO timestamps with explicit timezone offsets.
+- [x] Automated tests cover CSV import (AUD attestation, BOM, quoting, Australian/ISO dates, duplicate rows, ambiguous semantic aliases, mixed-timezone duplicate sessions and missing Close), signal screening (breakout and 20/50-day trend gates), fee-inclusive 1% risk sizing, current net liquidation equity, position opening chronology, duplicate-symbol rejection, four-decimal price precision, marking without cash movement, latest-mark fee assumptions reused at close, component-to-total fee reconciliation, fee-aware closing, negative net proceeds, cash reconciliation, closed-trade history and re-entry after close.
+- [x] Failed CSV replacement imports clear prior in-memory candidates before parsing and on read/parse failure; existing browser portfolio storage is not reset.
+- [ ] Operator decision required before expecting default-cost candidates: the 2×ATR stop / 4×ATR target cannot satisfy the 2:1 net reward/risk gate after positive fees, and AUD 500 × 1% is below the minimum round-trip commission and GST.
 - [ ] Complete a browser-level import/open/mark/close walkthrough with authorised market data.
 - [x] Automated tests confirm there is no broker order execution path in the ASX paper engine.
 
@@ -21,7 +23,7 @@
 - [x] Service-worker shell now includes `autonomous-engine.js` for offline ASX paper-desk module loading.
 - [x] Service-worker cache version incremented to invalidate the previous shell.
 - [x] Manifest identity, start URL and scope are relative to support a project Pages path such as `/Edge-Intelligence/`.
-- [ ] Verify Pages serves the site over HTTPS and applies the intended security headers.
+- [ ] After the Cloudflare Pages workflow is merged and succeeds, verify https://edge-intelligence-486.pages.dev serves the site over HTTPS and applies the intended security headers.
 - [ ] Complete standalone install on supported desktop/mobile browsers.
 - [ ] Verify service-worker update activation and offline reload on a clean HTTPS browser profile.
 - [ ] Confirm existing `edge-intelligence-v1`, `edge-forecasts-v1` and `edge-alert-rules-v1` browser storage remains unchanged after deployment.
@@ -40,7 +42,7 @@
 
 ## Release boundary
 - This branch is research and paper simulation only. It does not connect to a broker, submit orders, or enable real-money trading.
-- GitHub Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
+- Cloudflare Pages publication, PR merge and production cutover remain separate actions; do not infer deployment from a successful build.
 
 
 ## DataCedar ASX connector smoke checks
@@ -52,3 +54,36 @@
 - [ ] Confirm more than three tickers, invalid dates and date windows over 366 days are rejected.
 - [ ] Confirm fetching data alone does not change cash, positions, marks, closed trades or the `edge-asx-paper-v1` storage key.
 - [ ] Open a candidate only by using its separate paper-trading action; confirm no broker route is called.
+
+
+## CoinSpot live execution preparation (still locked)
+
+- [x] Durable Object class allocates monotonically increasing nonces transactionally.
+- [x] Durable idempotency reservations reject key reuse with a changed order intent.
+- [x] Authenticated Worker routes scope coordinator state to the Cloudflare Access user.
+- [x] Coordinator request bodies are bounded and malformed requests fail closed.
+- [ ] Configure the Worker secret EDGE_COORDINATOR_TOKEN; never place its value in source control.
+- [ ] Deploy the Worker and verify Durable Object migration and authenticated coordinator routes.
+- [ ] Implement a separate least-privilege CoinSpot trading-key adapter; existing read-only keys must remain read-only.
+- [ ] Implement exchange order-status/fill reconciliation, balance reservations, timeout/unknown-order recovery and emergency kill switch.
+- [ ] Obtain trustworthy hourly BTC/AUD and ETH/AUD OHLCV history with source provenance; current public quote endpoint is not an hourly candle feed.
+- [ ] Run chronological out-of-sample validation and independently review costs, drawdown and trade count.
+- [ ] Complete at least 60 days of forward paper trading with immutable server-side trade/equity records.
+- [ ] Require explicit operator activation after all release gates; live order submission stays disabled until then.
+
+
+## Automated ASX paper autopilot (feature branch)
+
+- [ ] Confirm data-use rights and that the DataCedar plan covers the chosen ASX symbols.
+- [ ] Configure `ASX_AUTOPILOT_ENABLED=true`, `ASX_AUTOPILOT_SYMBOLS` (1–3 tickers), `DATACEDAR_API_KEY` as a Worker secret, and the existing `EDGE_KV` binding.
+- [ ] Call authenticated `GET /api/asx/autopilot`; confirm configuration is reported separately from verified retrieval.
+- [ ] Call authenticated `POST /api/asx/autopilot/scan`; verify actual DataCedar source, AUD denomination, daily timeframe, timestamps and returned symbol coverage.
+- [ ] Confirm repeated cron invocations within six hours are throttled and do not reprocess a daily candle.
+- [ ] Confirm open paper positions are marked only from newer daily bars and same-candle stop/target hits resolve stop-first.
+- [ ] Confirm the automated KV ledger is separate from the device-local `edge-asx-paper-v1` account and that both remain paper-only.
+- [ ] Confirm default fees/risk gates are not bypassed when candidates are rejected; no forced entries or real-money order routes exist.
+- [ ] Verify Worker scheduled logs and the deployed UI only after approved merge/deployment.
+
+- [ ] Simulate a DataCedar timeout, 401 or 429; confirm `DATA_PROVIDER_ERROR`, bounded error text and incremented failure count are persisted without advancing the successful scan cursor.
+
+- [ ] During ASX trading hours, confirm the current Sydney-date daily bar is excluded until 17:00 Sydney time (including daylight-saving changes); verify the scanner uses only the latest completed bar.

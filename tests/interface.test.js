@@ -10,10 +10,10 @@ test("all feature navigation links resolve to an implemented page and required c
   const pages = [...html.matchAll(/id="page-([a-z-]+)"/g)].map(m => m[1]);
   const nav = [...html.matchAll(/data-page="([a-z-]+)"/g)].map(m => m[1]);
   for (const page of nav) assert.ok(pages.includes(page), `missing page ${page}`);
-  for (const id of ["loadAustralia", "marketSearch", "marketNext", "analyzeBtn", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "refreshHealth", "testConnection"]) {
+  for (const id of ["loadAustralia", "marketSearch", "marketNext", "analyzeBtn", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "refreshHealth", "testConnection", "asxConfirmData"]) {
     assert.match(html, new RegExp(`id="${id}"`), `missing control ${id}`);
   }
-  for (const id of ["loadAustralia", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd"]) assert.ok(app.includes(`$("${id}")`), `control ${id} has no frontend handler`);
+  for (const id of ["loadAustralia", "researchBtn", "backtestBtn", "saveForecast", "saveAlertRules", "runScan", "paperAdd", "asxConfirmData"]) assert.ok(app.includes(`$("${id}")`), `control ${id} has no frontend handler`);
 });
 
 test("static deployment headers include security controls", async () => {
@@ -28,4 +28,17 @@ test("service-worker update prompt waits for acknowledgement and offers retry on
   assert.match(app, /Update ready \| Retry/);
   assert.match(app, /Restarting EDGE/);
   assert.match(app, /worker\.state==="installed"&&reg\.active/);
+});
+
+test("a failed ASX CSV replacement cannot leave previous candidates actionable", async () => {
+  const app = await readFile(resolve(root, "app.js"), "utf8");
+  const start = app.indexOf('$("asxImportBtn")?.addEventListener("click",()=>{');
+  const end = app.indexOf('$("asxDataCedarBtn")?.addEventListener("click",async()=>{', start);
+  assert.ok(start >= 0 && end > start, "ASX CSV import handler must exist");
+  const handler = app.slice(start, end);
+  const clear = handler.indexOf("asxUniverse={};");
+  const parse = handler.indexOf("parseAsxDailyCsv");
+  assert.ok(clear >= 0 && parse > clear, "previous imported candidates must be cleared before parsing a replacement file");
+  assert.match(handler, /if\(!parsed\.valid\)\{[\s\S]*?renderAsxDesk\(\);return\}/);
+  assert.match(handler, /reader\.onerror=\(\)=>\{[\s\S]*?asxCandidates=\[\];[\s\S]*?renderAsxDesk\(\);/);
 });

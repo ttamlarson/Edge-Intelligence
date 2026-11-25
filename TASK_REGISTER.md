@@ -7,14 +7,15 @@ Updated for the autonomous ASX trading foundation. “Complete” describes code
 | Task | Status | Evidence / remaining boundary |
 |---|---|---|
 | Deterministic daily swing strategy foundation | Complete | 20/50-day trend filter, 20-session breakout, ATR-based stop/target; candidate only. Not validated as profitable. |
-| $500 portfolio risk configuration | Complete | 1% equity risk budget, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions, whole-share sizing. |
-| ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. |
-| Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp within 36 hours, 51 valid daily OHLC bars. |
-| Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; candidate shape, provenance and freshness validated; only currently open positions count toward concurrency limits; fees and realized P&L covered by lifecycle tests. |
+| $500 portfolio risk configuration | Complete | 1% of current net liquidation equity after estimated exit costs; fee-inclusive stop risk, AUD 200 maximum position, AUD 100 minimum reserve, two concurrent positions and whole-share sizing. |
+| ASX transaction-cost model | Complete | IBKR tier-one AUD 5 minimum commission, GST assumption and configurable slippage per side. Verify account tariff and pass-through charges. Fee assumptions are retained with each paper position for consistent marking and closing. |
+| Data provenance and freshness gate | Complete | Requires named source, AUD currency, observed timestamp and latest individual daily bar within 36 hours, latest bar no more than five minutes after the source observation, and 51 valid daily OHLC bars. |
+| Simulation-only position opening and closing | Complete | Paper portfolio fixed to AUD and liveTradingEnabled=false; candidate shape, provenance and freshness validated; opening timestamps must follow the source observation within five minutes and cannot be future-dated; entry fees count toward the AUD 200 allocation cap; negative net exit proceeds are recorded when minimum fees exceed exit value; only currently open positions count toward concurrency limits. |
+| Default-cost candidate feasibility | Blocked pending operator decision | A 2×ATR stop and 4×ATR target are exactly 2:1 gross; positive round-trip fees make net reward/risk lower than the required 2:1. AUD 500 × 1% = AUD 5 risk budget versus AUD 5.50 minimum commission plus GST per side. Capital, risk, target and threshold assumptions remain unchanged. |
 | Licensed ASX daily data integration | Not implemented | No ASX feed or licence configured. No live scan can run. |
-| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV; supports UTF-8 BOM headers, ISO dates, Australian DD/MM/YYYY (slash dates are always day-first) and timezone-explicit ISO timestamps; rejects impossible and timezone-less/unsupported dates. Scheduled live scanning still not implemented. |
+| CSV-universe ASX scanning | Complete | Imports multi-ticker daily OHLC CSV only after an explicit AUD/data-rights user attestation; supports quoted fields, UTF-8 BOM headers, ISO dates and Australian DD/MM/YYYY; rejects malformed quoting, adjusted-close-only files, inconsistent OHLC, duplicate sessions (including mixed timezone encodings) and ambiguous required-column aliases. Failed replacement imports clear stale candidates. Scheduled live scanning still not implemented. |
 | Broker read-only account/portfolio adapter | Not implemented | IBKR account and API permissions not configured or verified. |
-| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; no broker reconciliation or immutable server audit. |
+| Manual mark-to-market, paper exits and closed-trade ledger | Complete | User-entered mark/exit price and local browser ledger; net liquidation equity deducts estimated exit fees using the latest mark assumptions; closes reuse those assumptions unless explicitly overridden; itemised fee components reconcile to the total charged; four-decimal prices reconcile marks, closes and cash. No broker reconciliation or immutable server audit. |
 | Out-of-sample backtest and walk-forward validation | Not implemented | Existing replay is descriptive only; no profitability claim. |
 | Live order execution | Disabled by design | No order routes, credentials or broker integration. Do not enable in this phase. |
 
@@ -79,7 +80,7 @@ Updated after local implementation and automated verification on `edge-productio
 | Correct PWA icon/manifest paths | Complete | Existing SVG retained; stable manifest ID and 192/512 PNG install icons added and dimensions validated. |
 | Service-worker install cache/offline shell | Complete | Restored `sw.js`; cache includes actual HTML/CSS/module/icons/manifest; offline navigation fallback and API network exclusion; deterministic install/activation tests pass. A clean-profile HTTPS browser test remains a release check. |
 | Service-worker updates | Incomplete | Update prompt is shown and message handling now waits for activation, covered by a deterministic message test. Local Chromium installed a waiting worker but did not complete activation after selecting Update; verify the full lifecycle on a clean HTTPS profile before release. |
-| Automated unit/Worker/source/interface tests | Complete | Dependency-free Node tests cover auth/JWT, CORS, source validation, market/currency normalization, dates, forecasting, paper settlement, backtest, watchlists, alerts, local storage, PWA install/update handling and the ASX CSV-to-paper-position lifecycle. Adapter tests are deterministic/mocked; they are not live API tests. |
+| Automated unit/Worker/source/interface tests | Complete | Dependency-free Node tests cover auth/JWT, CORS, source validation, market/currency normalization, dates, forecasting, paper settlement, backtest, watchlists, alerts, local storage, PWA install/update handling and ASX CSV, signal, fee-inclusive opening, marking, negative-proceeds closing, cash reconciliation and trade-history edge cases. Adapter tests are deterministic/mocked; they are not live API tests. |
 | Frontend browser smoke | Incomplete | Local desktop (1440px) and mobile (390px) exercised all 13 navigation screens with no horizontal overflow. Offline reload, 192/512 PNG icon fetches and `beforeinstallprompt` were observed locally. Actual standalone install and successful update activation remain unverified. |
 | Cloudflare Worker production configuration | Requires external access or approval | Wrangler bindings and setup docs added. KV ID, unique rate-limit namespaces, Access team/audience, exact frontend origin and provider secrets must be configured in the Cloudflare account. Wrangler is not installed/authenticated here; no deploy was run. |
 | Cloudflare Pages build | Complete | Dependency-free build copies only public app assets and `_headers` into `dist/`; deploy command documented. |
@@ -112,3 +113,48 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Add deterministic adapter tests and document secret setup and smoke checks.
 - [ ] Operator action required: create a free DataCedar API key and configure Cloudflare Worker secret `DATACEDAR_API_KEY`.
 - [ ] After the secret is configured, exercise a real ASX symbol request and verify current provider coverage before describing the integration as live.
+
+## Cloudflare Pages frontend deployment (2026-11-19)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Preserve the existing Cloudflare Pages Git integration | Complete | Cloudflare's GitHub App successfully deployed PR #12 to a branch preview at `https://edge-production-remediation-dwko.edge-intelligence-486.pages.dev`, confirming the repository is connected to the `edge-intelligence` Pages project. The Pages domain suffix is `edge-intelligence-486.pages.dev`. |
+| Ensure the repository validates the static frontend before merge | Complete | Existing `ci.yml` runs tests, syntax checks and `npm run build:pages`; CI passed on the initial PR commit. |
+| Keep the existing Worker backend and configure Pages CORS origin | Implemented on feature branch; production verification pending | Worker workflow retains `edge-intelligence-api` and sets its allowed frontend origin to `https://edge-intelligence-486.pages.dev`. Worker redeploy occurs separately after merge. |
+| Remove conflicting GitHub Pages / Direct Upload publishing workflow | Implemented on feature branch | Pages is already Git-integrated. Do not switch it to Wrangler Direct Upload; Cloudflare's GitHub App performs preview and production deployments. |
+| Verify production Pages URL, headers, CORS and Worker API | Requires external access or approval | Complete the Cloudflare Pages and Worker smoke checks after merge and successful production deployment. |
+| Cloudflare API token Pages permission | Not required for current deployment path | Pages deployment is authorized by the Cloudflare GitHub App. Existing `CLOUDFLARE_API_TOKEN` remains dedicated to the Worker deployment workflow. |
+
+
+## ASX paper workflow integrity hardening (2026-11-23)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Reject ambiguous or inconsistent CSV import shape | Implemented on feature branch | CSV import now rejects empty/duplicate headers and rows whose field count differs from the header, preventing ignored extra values or silently missing declared fields. Regression tests cover missing optional values, unlabelled extra cells and ambiguous headers. |
+| Preserve positive cent-denominated paper capital | Implemented on feature branch | Portfolio creation now rejects positive inputs that round to AUD 0.00, rather than creating a zero-cash account. Regression tests cover sub-cent and one-cent inputs. |
+| Repository verification and release | Pending | Branch CI must pass tests, syntax checks and Pages build before merge. No live trading or external data access is introduced. |
+
+
+## Three-day ASX automation sprint (2026-11-23)
+
+| Task | Status | Evidence / remaining boundary |
+|---|---|---|
+| Scheduled server-side ASX daily scanner | Implemented on `edge-production-remediation-3day` | Opt-in Worker cron path uses the existing DataCedar adapter; symbols limited to 1–3; six-hour provider-call throttle; each new daily bar is processed once. |
+| Automated server-side paper account | Implemented on feature branch | Separate operator-wide AUD 500 paper ledger in KV; daily OHLC mark updates and conservative stop-first stop/target exits; no merge with device-local `edge-asx-paper-v1`. |
+| On-demand scan and status API | Implemented on feature branch | Authenticated `GET /api/asx/autopilot` and `POST /api/asx/autopilot/scan`, with rate limits. |
+| ASX Autopilot UI | Implemented on feature branch | Status, last scan, open paper position count, recent signal outcomes and manual scan trigger. |
+| Safety and deterministic regression tests | Implemented on feature branch; CI pending | Disabled-by-default, missing key/storage, secret stays server-side, persistence, idempotent daily bars, corrupt-ledger non-overwrite and default-cost rejection. |
+| Live DataCedar verification | Blocked on operator configuration | Must configure Worker secret, symbols, KV and data-use rights; then verify an actual API response. |
+| Economically viable paper position sizing | Blocked pending operator decision | Existing AUD 500 capital, 1% risk and minimum AUD 5.50 commission plus GST per side remain unchanged. No strategy/risk gates were weakened. |
+| Production deployment | Pending explicit approval | Feature branch only; no merge or deployment performed. |
+
+
+| Realized paper performance dashboard | Implemented on feature branch | Reports net realized P&L, win rate, profit factor, expectancy, average win/loss, realized drawdown and evidence-sample status; does not imply profitability. |
+| Net reward/risk target correction | Implemented on feature branch | Targets are solved to meet the 2:1 net reward/risk gate after modeled entry/exit fees; strategy version is now `ASX_DAILY_TREND_BREAKOUT_NET_RR_V2`. |
+| Conservative daily-bar exits | Implemented on feature branch | Stop gaps use the worse daily open, stop wins ambiguous stop/target candles, and the same symbol cannot re-enter on that candle. |
+
+| Completed-session data guard | Implemented on feature branch | Uses exchange-local Sydney date/time, excludes the current session's daily candle until 17:00 Sydney time, and records the last completed bar only. |
+| Provider failure visibility | Implemented on feature branch | Bounded DataCedar error and failure count are persisted; failed requests do not advance the successful scan cursor. |
+
+| Next-session/intraday entry fill model | Outstanding | Current paper entry reference is the last completed daily close. It is not an executable next-session fill; implement and validate an intraday/next-session model before treating results as executable forward paper trading. |
+| Walk-forward ASX out-of-sample validation | Outstanding | Collect source-verified history and run chronological out-of-sample tests with fees, slippage, corporate-action handling and adequate trade counts; no profitability claim until evidence supports it. |
