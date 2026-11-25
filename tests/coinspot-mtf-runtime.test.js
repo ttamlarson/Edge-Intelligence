@@ -199,7 +199,7 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
   if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
   if(target.endsWith("/orders/market/completed")){
    const body=JSON.parse(options.body||"{}"),coin=body.cointype;
-   if(typeof body.startdate==="string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(body.startdate)){
+   if(typeof body.startdate==="string" && /^\d{4}-\d{2}-\d{2}$/.test(body.startdate)){
     const make=offset=>Array.from({length:500},(_,i)=>({
      market:coin+"/AUD",
      solddate:new Date(Date.parse("2026-07-28T00:00:00.000Z")+(offset+i)*1000).toISOString(),
@@ -314,7 +314,7 @@ test("CoinSpot backfill uses a validated string-epoch partition when numeric epo
     const make=offset=>Array.from({length:500},(_,i)=>makeRow(Date.parse("2026-08-19T00:00:00Z")+(offset+i)*1000));
     return new Response(JSON.stringify({status:"ok",buyorders:make(0),sellorders:make(500)}),{status:200});
    }
-   if(typeof body.startdate==="string" && /^\\d+$/.test(body.startdate)){
+   if(typeof body.startdate==="string" && /^\d+$/.test(body.startdate)){
     const start=Number(body.startdate)*1000;
     return new Response(JSON.stringify({status:"ok",buyorders:[makeRow(start+5*60*1000)],sellorders:[]}),{status:200});
    }
