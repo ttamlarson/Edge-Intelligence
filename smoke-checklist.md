@@ -87,3 +87,15 @@
 - [ ] Simulate a DataCedar timeout, 401 or 429; confirm `DATA_PROVIDER_ERROR`, bounded error text and incremented failure count are persisted without advancing the successful scan cursor.
 
 - [ ] During ASX trading hours, confirm the current Sydney-date daily bar is excluded until 17:00 Sydney time (including daylight-saving changes); verify the scanner uses only the latest completed bar.
+
+
+## ASX research validation (paper only)
+
+- Import an authorised AUD daily OHLC dataset with at least 111 completed bars for a ticker; verify the source label and date range shown in the walk-forward report.
+- Run chronological walk-forward validation. Confirm each fold reports prior-history and test windows, next-session-open entry timestamps, modeled costs, stop-first exits, a buy-and-hold reference and a separate reset virtual account.
+- Confirm datasets shorter than the minimum history, unordered timestamps, invalid OHLC and non-AUD assumptions are rejected.
+- Confirm fewer than 30 pooled out-of-sample trades is labelled insufficient and never presented as evidence of profitability.
+- For automated AI review, verify strict structured output, SHA-256 bar fingerprint, model/review ID, subjective confidence and separate uncalibrated win-probability fields.
+- Close an AI-reviewed position through the automated daily-bar stop/target path and confirm the review metadata survives in trade history. Confirm manual closes are excluded from AI calibration diagnostics.
+- Confirm the AI calibration report uses the latest chronological holdout, reports Brier/reliability diagnostics, and remains explicitly uncalibrated / not model-trained.
+- Confirm all paper controls remain authoritative: 1% risk budget, AUD 200 position cap, AUD 100 cash reserve, fees and no live order route.

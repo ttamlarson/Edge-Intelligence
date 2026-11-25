@@ -158,3 +158,13 @@ Updated after local implementation and automated verification on `edge-productio
 
 | Next-session/intraday entry fill model | Outstanding | Current paper entry reference is the last completed daily close. It is not an executable next-session fill; implement and validate an intraday/next-session model before treating results as executable forward paper trading. |
 | Walk-forward ASX out-of-sample validation | Outstanding | Collect source-verified history and run chronological out-of-sample tests with fees, slippage, corporate-action handling and adequate trade counts; no profitability claim until evidence supports it. |
+
+
+## 2026-11-25 — AI-assisted ASX research advancement
+
+- Added strict JSON Schema output for the ASX AI reviewer, separate subjective confidence from an uncalibrated win-probability estimate, and SHA-256 provenance fingerprints for the reviewed daily bars.
+- Persisted approved review metadata on paper positions and closed trades. Automated daily-bar exits now carry a distinct exit type so calibration diagnostics can exclude manual exits.
+- Added chronological holdout Brier/reliability diagnostics. This is evaluation only; no model is trained or automatically recalibrated, and small samples remain insufficient.
+- Added fixed-rule expanding-history ASX walk-forward validation using next-session open entries, fee-aware sizing, unchanged portfolio risk limits, conservative stop/gap handling, fold resets and a buy-and-hold reference.
+- Added browser research panel and CI syntax checks for the new research modules. All flows remain simulated and source labels remain unverified.
+- Operational blocker: the production Worker has DataCedar and OpenAI secret bindings, but the ASX autopilot enable flag and ticker-universe variables are not configured. Confirm DataCedar data-use rights and the intended ticker universe before enabling scheduled scans. API key bindings alone do not prove successful provider retrieval or model invocation.

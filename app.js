@@ -5,6 +5,7 @@ import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
 import { backtestRegimeAdaptiveBreakout } from "./regime-adaptive-breakout.js";
 import { backtestTrendFollowingIndicators } from "./trend-following-indicators.js";
 import { parseBinanceKlineCsv, parseBinanceUsdtSymbols } from "./crypto-csv.js";
+import { walkForwardAsxStrategy } from "./asx-walk-forward.js";
 const $ = id => document.getElementById(id);
 const STORE = "edge-intelligence-v1";
 const demoMarkets = [
@@ -369,6 +370,8 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
   const data=await api("/api/asx/datacedar/bars?"+new URLSearchParams({symbols}));
   if(data.status==="no_data"||!data.rows){$("asxImportStatus").textContent="DataCedar returned no daily bars for the requested tickers. No sample data was substituted.";asxCandidates=[];renderAsxDesk();return}
   asxUniverse=data.barsBySymbol||{};
+  $("asxSource").value="DataCedar ASX historical daily bars";
+  $("asxWalkForwardResults").innerHTML="";
   const markUpdate=updatePaperMarksFromBars(asxPortfolio,asxUniverse);
   if(markUpdate.markedSymbols.length){asxPortfolio=markUpdate.portfolio;saveAsx()}
   asxCandidates=(data.symbols||[]).filter(symbol=>(asxUniverse[symbol]||[]).length>0).map(symbol=>evaluateAsxSwingSetup({
@@ -382,6 +385,34 @@ $("asxDataCedarBtn")?.addEventListener("click",async()=>{
  }catch(error){$("asxImportStatus").textContent="DataCedar fetch failed: "+error.message}
  finally{button.disabled=false;button.textContent="Fetch DataCedar daily bars & scan"}
 });
+
+$("asxWalkForwardBtn")?.addEventListener("click",()=>{
+ const button=$("asxWalkForwardBtn"),status=$("asxWalkForwardStatus"),results=$("asxWalkForwardResults");
+ const symbols=Object.keys(asxUniverse||{});
+ if(!symbols.length){status.textContent="Import authorised ASX daily bars or fetch DataCedar history before running validation.";return}
+ button.disabled=true;button.textContent="Running chronological validation…";status.textContent="Running fixed-rule, next-session-open walk-forward simulations. No sample data is inserted.";
+ const source=$("asxSource")?.value.trim()||"DataCedar ASX historical daily bars";
+ const reports=[];
+ for(const symbol of symbols){
+  try{
+   reports.push(walkForwardAsxStrategy({
+    symbol,bars:asxUniverse[symbol],source,currency:"AUD",
+    startingCapitalAud:asxPortfolio.startingCapitalAud,
+    trainFraction:0.6,foldCount:3,minimumOutOfSampleTrades:30
+   }));
+  }catch(error){reports.push({symbol,status:"BLOCKED",reason:error.message})}
+ }
+ const pct=value=>Number.isFinite(value)?Number(value).toFixed(2)+"%":"—";
+ results.innerHTML=reports.map(report=>{
+  if(report.status==="BLOCKED")return '<div class="position-card"><div><b>'+esc(report.symbol)+' · BLOCKED</b><div class="market-meta">'+esc(report.reason)+'</div></div></div>';
+  const summary=report.summary||{};
+  const folds=(report.folds||[]).map(fold=>'<div class="market-meta">Fold '+fold.fold+': '+fold.tradeCount+' trades · return '+pct(fold.returnPct)+' · buy/hold '+pct(fold.benchmark?.returnPct)+' · drawdown '+pct(fold.maxDrawdownPct)+'</div>').join("");
+  return '<div class="position-card"><div><b>'+esc(report.symbol)+' · '+esc(summary.assessment||"UNKNOWN")+'</b><div class="market-meta">Out-of-sample trades '+(summary.totalOutOfSampleTrades??0)+' · win rate '+pct(summary.pooledWinRatePct)+' · profit factor '+(summary.pooledProfitFactor==null?"—":Number(summary.pooledProfitFactor).toFixed(2))+'</div><div class="market-meta">Mean fold return '+pct(summary.meanFoldReturnPct)+' · buy/hold reference '+pct(summary.meanBenchmarkReturnPct)+' · mean drawdown '+pct(summary.meanFoldMaxDrawdownPct)+'</div><div class="market-meta">Source: '+esc(report.source)+' · '+esc(report.data?.firstBarAt||"")+" to "+esc(report.data?.lastBarAt||"")+'</div>'+folds+'<div class="market-meta">'+esc(report.disclaimer||"")+'</div></div></div>';
+ }).join("")||'<div class="empty">No walk-forward results were produced.</div>';
+ status.textContent="Completed "+reports.length+" symbol validation(s). Each fold resets virtual capital; pooled results are not one compounded account. Source labels are not independently verified.";
+ button.disabled=false;button.textContent="Run chronological walk-forward";
+});
+
 $("asxResetBtn")?.addEventListener("click",()=>{if(!confirm("Permanently clear the local ASX paper ledger and restore AUD 500 virtual capital?"))return;asxPortfolio=createPaperPortfolio();saveAsx();renderAsxDesk();toast("ASX paper ledger reset.")});
 async function loadAsxAutopilotStatus(){
  const status=$("asxAutoStatus");if(!status)return;
@@ -396,7 +427,9 @@ async function loadAsxAutopilotStatus(){
   const metric=(label,value,detail)=>'<article class="metric-card"><span>'+label+'</span><strong>'+value+'</strong><small>'+detail+'</small></article>';
   $("asxAutoPerformance").innerHTML=metric("CLOSED TRADES",String(p.tradeCount??0),"Realized sample only")+metric("WIN RATE",p.winRatePct==null?"—":p.winRatePct.toFixed(1)+"%","Wins / all closed trades")+metric("PROFIT FACTOR",p.profitFactor==null?"—":p.profitFactor.toFixed(2),"Gross profit / gross loss")+metric("NET REALIZED P&amp;L",p.totalRealizedProfitLossAud==null?"—":aud(p.totalRealizedProfitLossAud),"After simulated fees")+metric("MAX DRAWDOWN",p.maxRealizedDrawdownAud==null?"—":aud(p.maxRealizedDrawdownAud)+" · "+(p.maxRealizedDrawdownPct??0).toFixed(2)+"%","Realized equity curve only");
   $("asxAutoEvidence").textContent="Evidence: "+(p.status||"UNKNOWN")+" · "+(p.invalidTradeCount||0)+" invalid ledger records excluded · realized closed trades only; no live fills or profitability guarantee."
-  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% confidence)':'')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
+  const calibration=a.aiCalibration||{};const oos=calibration.outOfSample||{};const sample=calibration.outOfSampleSampleCount??0;const minimum=calibration.minimumOutOfSampleSamples??30;
+  $("asxAutoCalibration").textContent="AI win-probability audit: "+(calibration.status||"UNKNOWN")+" · chronological holdout "+sample+"/"+minimum+" trades"+(oos.brierScore==null?"":" · Brier "+Number(oos.brierScore).toFixed(4))+(oos.expectedCalibrationError==null?"":" · calibration error "+Number(oos.expectedCalibrationError).toFixed(4))+" · diagnostic only; no model training or calibration claim.";
+  $("asxAutoSignals").innerHTML=(a.signals||[]).slice(-12).reverse().map(s=>'<div class="market-meta"><b>'+esc(s.symbol)+' · '+esc(s.status)+'</b>'+(s.ai?.decision?' · AI '+esc(s.ai.decision)+' ('+esc(s.ai.confidence)+'% subjective confidence)':'')+(s.ai?.predictedWinProbability==null?'':' · uncalibrated win estimate '+(Number(s.ai.predictedWinProbability)*100).toFixed(0)+'%')+' · '+esc(s.reason||"No additional detail")+(s.profitLossAud==null?"":" · "+aud(s.profitLossAud))+'</div>').join("")||'<div class="empty">No automated scan results recorded.</div>';
  }catch(error){status.textContent="Automated scanner status unavailable: "+error.message}
 }
 $("asxAutoScanBtn")?.addEventListener("click",async()=>{
