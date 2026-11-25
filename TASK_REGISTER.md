@@ -211,3 +211,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Added a fail-closed schema diagnostic: a non-empty provider response that yields zero valid normalized trades now blocks the sync instead of silently advancing the history cursor. Diagnostics expose only field-validity booleans.
 - Regression coverage verifies one-day progression, bounded call counts, non-advancement on invalid non-empty rows, and paper-only safety.
 - Remaining blocker: production history still contains sparse candles and historical responses require fresh runtime verification after this branch is tested and deployed. No strategy signal or paper entry is permitted until each market has the required fresh, contiguous history.
+
+
+## 2026-11-25 — CoinSpot scheduled workload isolation
+
+- Production Worker cron launches Binance automated paper scanning across ten USDT symbols, while CoinSpot MTF history retrieval also runs. These independent jobs share the same Worker invocation subrequest ceiling; together they can exceed the 50-subrequest limit even after CoinSpot backfill is bounded.
+- Isolated scheduled workloads: UTC :00 is reserved for Binance/ASX/prediction scans; UTC :15, :30 and :45 run CoinSpot MTF alone. Missing CoinSpot credentials preserve the previous non-CoinSpot schedule.
+- CoinSpot processes one historical UTC day per 20-minute average slot. A 120-day warm-up therefore takes approximately 40 hours; the current 97-day backlog is approximately 32.3 hours before retries or dense-day recovery.
+- Added regression coverage for all four quarter-hour dispatch slots and the missing-credential fallback. Live-trading flags and the paper ledger are unchanged.
