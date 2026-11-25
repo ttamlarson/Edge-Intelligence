@@ -786,10 +786,15 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       typeof state.nextDate !== "string" || !state.markets || typeof state.markets !== "object") {
     return { status: "HISTORY_CACHE_VALIDATION_FAILED", liveTradingEnabled: false };
   }
-  const legacyBatchHasUnacceptedRows = Array.isArray(state.lastBatch) && state.lastBatch.some(batch =>
-    Number(batch?.tradeCount || 0) === 0 &&
-    Number(batch?.rawBuyOrders || 0) + Number(batch?.rawSellOrders || 0) > 0
-  );
+  // A resumable partial batch can contain raw rows from saturated parent
+  // windows while no completed leaf trades have been accepted yet. It must not
+  // trigger the legacy full-history rewind intended for old completed batches.
+  const legacyBatchHasUnacceptedRows = !state.pendingHistorySync &&
+    Array.isArray(state.lastBatch) && state.lastBatch.some(batch =>
+      batch?.complete !== false &&
+      Number(batch?.tradeCount || 0) === 0 &&
+      Number(batch?.rawBuyOrders || 0) + Number(batch?.rawSellOrders || 0) > 0
+    );
   if (state.lastBatchDate === undefined && legacyBatchHasUnacceptedRows &&
       typeof state.lastProcessedDate === "string" &&
       state.nextDate === shiftUtcDate(state.lastProcessedDate, 1)) {
