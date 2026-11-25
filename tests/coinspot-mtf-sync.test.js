@@ -68,6 +68,9 @@ test("CoinSpot sync retries empty full-day history with epoch seconds and record
   assert.ok(requests.some(request => typeof request.body.startdate === "number"));
   assert.equal(result.providerProbe.readOnlyStatus, "AUTHENTICATED");
   assert.equal(result.providerProbe.markets[0].readOnlyHistory.validAudTrades, 1);
+  assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory.length, 2);
+  assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades, 1);
+  assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].outOfRangeTrades, 1);
   assert.equal(result.providerProbe.markets[0].publicHistory.validAudTrades, 1);
 
   const saved = JSON.parse(store.get("coinspot-mtf-history-global-v1"));

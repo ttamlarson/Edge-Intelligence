@@ -140,6 +140,11 @@
 
 - [ ] Verify scheduled runner processes exactly one historical UTC day per 15-minute invocation and stays below Cloudflare's subrequest limit.
 - [ ] Verify provider diagnostics are sampled no more than once per 24 hours.
-- [ ] Verify recursive completed-order history requests stop at the 16-request per-market/day safety budget and do not advance incomplete dates.
+- [ ] Verify recursive completed-order history requests stop at the 15-request per-market/day safety budget and do not advance incomplete dates.
 - [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
 - [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.
+
+- [ ] Verify each half-day epoch probe returns only trades inside its requested UTC interval; check `outOfRangeTrades` remains zero.
+- [ ] Confirm a saturated full-day response with empty child partitions fails as `COINSPOT_HISTORY_PARTITION_EMPTY` and preserves the date cursor.
+
+- [ ] Verify full-day and 12-hour probes count only trades within their requested UTC range; any out-of-range record must be diagnosed and rejected by the backfill.
