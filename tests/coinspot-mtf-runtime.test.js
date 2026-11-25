@@ -40,3 +40,25 @@ test("CoinSpot MTF status does not invent candles or signals before history is w
  assert.equal(status.markets[0].signal,null);
  assert.equal(status.liveTradingEnabled,false);
 });
+
+test("CoinSpot MTF paper runner advances history and creates a paper-only AUD ledger",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
+ globalThis.fetch=async(url,options)=>{
+  calls.push({url:String(url),body:JSON.parse(options.body)});
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z");
+  assert.equal(calls.length,8);
+  assert.equal(result.mode,"COINSPOT_MTF_AUTOMATED_PAPER");
+  assert.equal(result.cashAud,100);
+  assert.equal(result.liveTradingEnabled,false);
+  assert.equal(result.paperOnly,true);
+  assert.equal(result.markets.length,2);
+  assert.equal(result.markets[0].signalStatus,"WARMUP_REQUIRED");
+  const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  assert.equal(history.lastProcessedDate,"2026-07-29");
+  const account=JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));
+  assert.equal(account.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
