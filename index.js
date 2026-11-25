@@ -552,7 +552,11 @@ async function fetchCoinSpotHistoryWindow(env, coin, startMs, endMs, budget) {
     }
     const left = await fetchCoinSpotHistoryWindow(env, coin, startMs, midpoint, budget);
     const right = await fetchCoinSpotHistoryWindow(env, coin, midpoint, endMs, budget);
-    return [...left, ...right];
+    const partitioned = [...left, ...right];
+    if (count > 0 && partitioned.length === 0) {
+      throw new HttpError(502, "COINSPOT_HISTORY_PARTITION_EMPTY: " + coin + "/AUD returned " + count + " raw orders for " + utcDate(startMs) + " but its smaller epoch windows returned no valid trades.");
+    }
+    return partitioned;
   }
   const trades = normalizeCoinSpotCompletedOrders({ coin, payload });
   const rawRows = [...payload.buyorders, ...payload.sellorders];
@@ -592,13 +596,33 @@ async function probeCoinSpotHistory(env, coin, clock) {
   const trades = normalizeCoinSpotCompletedOrders({ coin, payload });
   const marketsSeen = [...new Set([...payload.buyorders, ...payload.sellorders]
     .map(row => String(row?.market || "")).filter(Boolean))].slice(0, 6);
+  const midpoint = startMs + 12 * 60 * 60 * 1000;
+  const partitionHistory = [];
+  for (const [windowStart, windowEnd] of [[startMs, midpoint], [midpoint, endMs]]) {
+    const range = coinSpotHistoryRangeParams(windowStart, windowEnd, "epoch");
+    const part = await coinSpotReadOnly(env, "/orders/market/completed", {
+      cointype: coin, markettype: "AUD", ...range, limit: 500
+    });
+    if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
+      throw new Error("CoinSpot sub-day history probe returned a malformed response.");
+    }
+    const partTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
+    partitionHistory.push({
+      startAt: new Date(windowStart).toISOString(),
+      endAt: new Date(windowEnd).toISOString(),
+      rawBuyOrders: part.buyorders.length,
+      rawSellOrders: part.sellorders.length,
+      validAudTrades: partTrades.length,
+      sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
+    });
+  }
   return {
     date, queryFormat: usedFormat,
     rawBuyOrders: payload.buyorders.length,
     rawSellOrders: payload.sellorders.length,
     validAudTrades: trades.length,
     sampleOrderAt: trades.length ? new Date(trades.at(-1).timestamp).toISOString() : null,
-    marketsSeen
+    marketsSeen, partitionHistory
   };
 }
 
@@ -658,7 +682,9 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     return { status: "HISTORY_CACHE_VALIDATION_FAILED", liveTradingEnabled: false };
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
-  if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000) {
+  const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
+    state.providerProbe.markets.some(market => !Array.isArray(market.readOnlyHistory?.partitionHistory) || market.readOnlyHistory.partitionHistory.length !== 2);
+  if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000 || needsPartitionProbe) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
     // Persist provider diagnostics before backfill work so a later history
@@ -1161,5 +1187,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
