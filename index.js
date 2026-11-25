@@ -25,6 +25,9 @@ let accessKeysCache = null;
 let accessKeysCacheAt = 0;
 let accessKeysPending = null;
 let lastCoinSpotNonce = 0;
+const COINSPOT_READONLY_PATHS = new Set(["/status", "/orders/market/completed", "/my/balances", "/my/orders/market/open"]);
+const COINSPOT_READONLY_TIMEOUT_MS = 15_000;
+const COINSPOT_READONLY_MAX_ATTEMPTS = 2;
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -184,29 +187,56 @@ function coinSpotReadOnly(env, path, extra = {}) {
 }
 
 async function coinSpotReadOnlyNow(env, path, extra = {}) {
-  const key=String(env.COINSPOT_READONLY_KEY||"").trim(),secret=String(env.COINSPOT_READONLY_SECRET||"").trim();
-  if(!key||!secret)throw new HttpError(503,"CoinSpot read-only API credentials are not configured.");
-  if(!/^\/[a-z0-9/]+$/.test(path))throw new HttpError(400,"Invalid CoinSpot read-only endpoint.");
-  // Add a random sub-millisecond component to reduce nonce collisions across isolates.
-  const random = new Uint32Array(1); crypto.getRandomValues(random);
-  const nonce=Math.max(Date.now()*1000+(random[0]%1000),lastCoinSpotNonce+1);lastCoinSpotNonce=nonce;
-  const body=JSON.stringify({...extra,nonce});
-  const cryptoKey=await crypto.subtle.importKey("raw",new TextEncoder().encode(secret),{name:"HMAC",hash:"SHA-512"},false,["sign"]);
-  const signature=await crypto.subtle.sign("HMAC",cryptoKey,new TextEncoder().encode(body));
-  const sign=[...new Uint8Array(signature)].map(b=>b.toString(16).padStart(2,"0")).join("");
-  let response;
-  try {
-    response=await fetch("https://www.coinspot.com.au/api/v2/ro"+path,{method:"POST",headers:{"Content-Type":"application/json",key,sign,Accept:"application/json"},body,signal:AbortSignal.timeout(10_000)});
-  } catch {
-    throw new HttpError(502,"Could not reach CoinSpot. Retry the read-only account request.");
+  const key = String(env.COINSPOT_READONLY_KEY || "").trim();
+  const secret = String(env.COINSPOT_READONLY_SECRET || "").trim();
+  if (!key || !secret) throw new HttpError(503, "CoinSpot read-only API credentials are not configured.");
+  if (!COINSPOT_READONLY_PATHS.has(path)) throw new HttpError(403, "CoinSpot adapter only permits read-only status, balance, open-order and completed-market-history endpoints.");
+
+  let response = null;
+  let transportError = null;
+  for (let attempt = 0; attempt < COINSPOT_READONLY_MAX_ATTEMPTS; attempt++) {
+    // A timed-out request may have reached CoinSpot. Every retry therefore
+    // receives a fresh, strictly increasing nonce and matching HMAC signature.
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const nonce = Math.max(Date.now() * 1000 + (random[0] % 1000), lastCoinSpotNonce + 1);
+    lastCoinSpotNonce = nonce;
+    const body = JSON.stringify({ ...extra, nonce });
+    const cryptoKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(body));
+    const sign = [...new Uint8Array(signature)].map(b => b.toString(16).padStart(2, "0")).join("");
+
+    try {
+      response = await fetch("https://www.coinspot.com.au/api/v2/ro" + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", key, sign, Accept: "application/json" },
+        body,
+        signal: AbortSignal.timeout(COINSPOT_READONLY_TIMEOUT_MS)
+      });
+      transportError = null;
+      break;
+    } catch (error) {
+      transportError = error;
+      if (attempt + 1 < COINSPOT_READONLY_MAX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+      }
+    }
   }
-  if(response.url && new URL(response.url).hostname!=="www.coinspot.com.au") throw new HttpError(502,"CoinSpot redirected to an unexpected host.");
-  const length=Number(response.headers.get("Content-Length"));
-  if(Number.isFinite(length)&&length>512*1024) throw new HttpError(502,"CoinSpot response exceeded the size limit.");
-  const raw=await readLimitedText(response,512*1024,()=>new HttpError(502,"CoinSpot response exceeded the size limit."));
+
+  if (!response) {
+    const errorName = String(transportError?.name || "");
+    if (errorName === "TimeoutError" || errorName === "AbortError") {
+      throw new HttpError(504, `COINSPOT_TIMEOUT: CoinSpot read-only request timed out after ${COINSPOT_READONLY_MAX_ATTEMPTS} attempts.`);
+    }
+    throw new HttpError(502, `COINSPOT_NETWORK_ERROR: CoinSpot read-only endpoint could not be reached after ${COINSPOT_READONLY_MAX_ATTEMPTS} attempts.`);
+  }
+  if (response.url && new URL(response.url).hostname !== "www.coinspot.com.au") throw new HttpError(502, "CoinSpot redirected to an unexpected host.");
+  const length = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(length) && length > 512 * 1024) throw new HttpError(502, "CoinSpot response exceeded the size limit.");
+  const raw = await readLimitedText(response, 512 * 1024, () => new HttpError(502, "CoinSpot response exceeded the size limit."));
   let payload;
-  try { payload=JSON.parse(raw); } catch { throw new HttpError(502,"CoinSpot returned an invalid response."); }
-  if(!response.ok || payload?.status!=="ok") throw new HttpError(502,coinSpotDiagnostic(response.status,payload?.message));
+  try { payload = JSON.parse(raw); } catch { throw new HttpError(502, "CoinSpot returned an invalid response."); }
+  if (!response.ok || payload?.status !== "ok") throw new HttpError(502, coinSpotDiagnostic(response.status, payload?.message));
   return payload;
 }
 
@@ -849,6 +879,13 @@ async function handle(request, env, ctx) {
     }));
     return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
+  if (requestUrl.pathname === "/api/crypto/coinspot/readonly/status" && request.method === "GET") {
+    await routeLimit(env.DATA_LIMITER, principal.sub, "coinspot-readonly-status");
+    if (!env.COINSPOT_READONLY_KEY || !env.COINSPOT_READONLY_SECRET) throw new HttpError(503, "CoinSpot read-only API credentials are not configured.");
+    const status = await coinSpotReadOnly(env, "/status");
+    if (status?.status !== "ok") throw new HttpError(502, "CoinSpot read-only status response was invalid.");
+    return reply({ provider: "CoinSpot", access: "READ_ONLY", status: "AUTHENTICATED", retrievedAt: isoNow(), paperOnly: true, liveTradingEnabled: false });
+  }
   if (requestUrl.pathname === "/api/crypto/coinspot/strategy" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-mtf-strategy");
     return reply(await getCoinSpotMtfStrategy(env));
@@ -975,5 +1012,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
