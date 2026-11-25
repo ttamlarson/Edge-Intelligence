@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles } from "../coinspot-history.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams } from "../coinspot-history.js";
 
 test("normalizes authenticated CoinSpot AUD completed orders and rejects other quote markets",()=>{
  const payload={status:"ok",buyorders:[
@@ -42,4 +42,21 @@ test("merges updates by candle timestamp and keeps the newest bounded history",(
  assert.equal(merged.length,2);
  assert.equal(merged[0].close,3);
  assert.equal(merged[1].timestamp,"2026-11-25T00:00:00Z");
+});
+
+test("builds documented UTC-date and exact Unix-epoch CoinSpot history ranges", () => {
+ const start = Date.parse("2026-08-14T00:00:00.000Z");
+ const end = Date.parse("2026-08-15T00:00:00.000Z");
+ assert.deepEqual(coinSpotHistoryRangeParams(start, end, "date"), {
+  startdate: "2026-08-14", enddate: "2026-08-14"
+ });
+ assert.deepEqual(coinSpotHistoryRangeParams(start, end, "epoch"), {
+  startdate: Math.floor(start / 1000), enddate: Math.floor((end - 1) / 1000)
+ });
+ const halfDayEnd = start + 12 * 60 * 60 * 1000;
+ assert.deepEqual(coinSpotHistoryRangeParams(start, halfDayEnd, "epoch"), {
+  startdate: Math.floor(start / 1000), enddate: Math.floor((halfDayEnd - 1) / 1000)
+ });
+ assert.throws(() => coinSpotHistoryRangeParams(end, start, "date"), /Invalid CoinSpot history date range/);
+ assert.throws(() => coinSpotHistoryRangeParams(start, end, "milliseconds"), /format must be date or epoch/);
 });
