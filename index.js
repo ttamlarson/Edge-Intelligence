@@ -606,24 +606,34 @@ async function probeCoinSpotHistory(env, coin, clock) {
   const midpoint = startMs + 12 * 60 * 60 * 1000;
   const partitionHistory = [];
   for (const [windowStart, windowEnd] of [[startMs, midpoint], [midpoint, endMs]]) {
-    const range = coinSpotHistoryRangeParams(windowStart, windowEnd, "epoch");
-    const part = await coinSpotReadOnly(env, "/orders/market/completed", {
-      cointype: coin, markettype: "AUD", ...range, limit: 500
-    });
-    if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
-      throw new Error("CoinSpot sub-day history probe returned a malformed response.");
+    const variants = [];
+    for (const format of ["epoch", "epoch-string", "epoch-ms"]) {
+      try {
+        const range = coinSpotHistoryRangeParams(windowStart, windowEnd, format);
+        const part = await coinSpotReadOnly(env, "/orders/market/completed", {
+          cointype: coin, markettype: "AUD", ...range, limit: 500
+        });
+        if (!Array.isArray(part.buyorders) || !Array.isArray(part.sellorders)) {
+          throw new Error("CoinSpot sub-day history probe returned a malformed response.");
+        }
+        const normalizedPartTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
+        const partTrades = normalizedPartTrades.filter(trade => trade.timestamp >= windowStart && trade.timestamp < windowEnd);
+        const outOfRangeTrades = normalizedPartTrades.length - partTrades.length;
+        variants.push({
+          format, rawBuyOrders: part.buyorders.length, rawSellOrders: part.sellorders.length,
+          validAudTrades: partTrades.length, outOfRangeTrades,
+          sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
+        });
+      } catch (error) {
+        variants.push({ format, status: "ERROR", message: String(error?.message || error).slice(0, 180) });
+      }
     }
-    const normalizedPartTrades = normalizeCoinSpotCompletedOrders({ coin, payload: part });
-    const partTrades = normalizedPartTrades.filter(trade => trade.timestamp >= windowStart && trade.timestamp < windowEnd);
-    const outOfRangeTrades = normalizedPartTrades.length - partTrades.length;
+    const numericEpoch = variants.find(variant => variant.format === "epoch") || {};
     partitionHistory.push({
       startAt: new Date(windowStart).toISOString(),
       endAt: new Date(windowEnd).toISOString(),
-      rawBuyOrders: part.buyorders.length,
-      rawSellOrders: part.sellorders.length,
-      validAudTrades: partTrades.length,
-      outOfRangeTrades,
-      sampleOrderAt: partTrades.length ? new Date(partTrades.at(-1).timestamp).toISOString() : null
+      ...numericEpoch,
+      variants
     });
   }
   return {
@@ -712,7 +722,11 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
   const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
-    state.providerProbe.markets.some(market => !Array.isArray(market.readOnlyHistory?.partitionHistory) || market.readOnlyHistory.partitionHistory.length !== 2);
+    state.providerProbe.markets.some(market =>
+      !Array.isArray(market.readOnlyHistory?.partitionHistory) ||
+      market.readOnlyHistory.partitionHistory.length !== 2 ||
+      market.readOnlyHistory.partitionHistory.some(window => !Array.isArray(window.variants) || window.variants.length !== 3)
+    );
   if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000 || needsPartitionProbe) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
@@ -1195,6 +1209,17 @@ async function handle(request, env, ctx) {
   return reply({ error: "Not found" }, 404);
 }
 
+function isCoinSpotMtfScheduleSlot(event, env) {
+  if (!env.EDGE_KV || !env.COINSPOT_READONLY_KEY || !env.COINSPOT_READONLY_SECRET) return false;
+  const scheduledTime = Number(event?.scheduledTime);
+  const minute = Number.isFinite(scheduledTime)
+    ? new Date(scheduledTime).getUTCMinutes()
+    : new Date().getUTCMinutes();
+  // Other scheduled engines share this Worker invocation's subrequest budget.
+  // Reserve :00 for them and run CoinSpot MTF alone at :15, :30 and :45.
+  return minute > 0 && minute % 15 === 0;
+}
+
 export default {
   async fetch(request, env, ctx) {
     try { return await handle(request, env, ctx); }
@@ -1206,8 +1231,11 @@ export default {
     }
   },
   async scheduled(_event, env, ctx) {
+    if (isCoinSpotMtfScheduleSlot(_event, env)) {
+      ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
+      return;
+    }
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));
-    if (env.EDGE_KV && env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
     if (env.ASX_AUTOPILOT_ENABLED === "true") ctx.waitUntil(runAsxAutopilot(env).catch(() => null));
     if (env.PREDICTION_HUNT_API_KEY) ctx.waitUntil((async () => {
       const rules = env.EDGE_KV ? JSON.parse(await env.EDGE_KV.get("cron-alert-rules") || '{"minRoi":3,"minSize":25}') : { minRoi: 3, minSize: 25 };
@@ -1216,5 +1244,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

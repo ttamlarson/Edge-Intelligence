@@ -150,3 +150,12 @@
 - [ ] Verify full-day and 12-hour probes count only trades within their requested UTC range; any out-of-range record must be diagnosed and rejected by the backfill.
 
 - [ ] Seed legacy state with a non-empty raw batch and zero accepted trades; verify the cursor rewinds exactly one prior UTC day once, persists the marker, and does not rewind repeatedly after a failed request.
+
+
+### CoinSpot isolated cron schedule
+
+- [ ] Verify :00 runs other research providers without CoinSpot MTF.
+- [ ] Verify :15, :30 and :45 run CoinSpot MTF alone and avoid the shared subrequest limit.
+- [ ] Verify the current 97-day backfill remains within the 24–48-hour target at three days per hour.
+
+- [ ] Compare numeric seconds, string seconds and millisecond timestamps for each 12-hour history window; adopt only a representation with validated in-range BTC/AUD or ETH/AUD trades.
