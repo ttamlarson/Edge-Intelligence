@@ -1288,7 +1288,10 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     if (isCoinSpotMtfScheduleSlot(_event, env)) {
-      ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220))));
+      ctx.waitUntil(runCoinSpotMtfPaper(env).catch(error => {
+        console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).slice(0, 220));
+        throw error;
+      }));
       return;
     }
     if (env.EDGE_KV) ctx.waitUntil(runScheduledCryptoPaper(env).catch(() => null));

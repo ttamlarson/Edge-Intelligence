@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { __test } from "../index.js";
+import worker, { __test } from "../index.js";
 import { createMtfPaperAccount, processMtfPaperAccount } from "../coinspot-mtf-paper.js";
 
 function kvStore() {
@@ -384,4 +384,17 @@ test("CoinSpot legacy integrity marker rebuilds the entire original 120-day wind
   assert.equal(saved.markets.ETH.tradesFetched,0);
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
+});
+
+test("CoinSpot MTF scheduled failures remain visible to Cloudflare Cron Events", async () => {
+ const env = {
+  EDGE_KV: { get: async () => { throw new Error("paper ledger storage unavailable"); } },
+  COINSPOT_READONLY_KEY: "test-readonly-key",
+  COINSPOT_READONLY_SECRET: "test-readonly-secret"
+ };
+ let pending;
+ const ctx = { waitUntil: promise => { pending = promise; } };
+ await worker.scheduled({ scheduledTime: Date.parse("2026-11-25T09:15:00.000Z") }, env, ctx);
+ assert.ok(pending instanceof Promise);
+ await assert.rejects(pending, /paper ledger storage unavailable/);
 });
