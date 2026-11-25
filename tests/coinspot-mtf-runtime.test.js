@@ -24,7 +24,7 @@ test("CoinSpot MTF sync backfills one UTC day per run using read-only historical
   assert.equal(first.status,"BACKFILLING");
   assert.equal(first.processedDate,"2026-07-28");
   assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
-  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,12);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
   const historyCalls=calls.filter(call=>call.url.endsWith("/orders/market/completed"));
   assert.ok(historyCalls.every(call=>call.method==="POST"&&call.body.markettype==="AUD"&&call.body.limit===500));
@@ -66,7 +66,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z");
   assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
-  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,12);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/latest/")).length,2);
   assert.equal(result.mode,"COINSPOT_MTF_AUTOMATED_PAPER");
@@ -279,6 +279,8 @@ test("CoinSpot sub-day probe detects a provider that returns out-of-window trade
   assert.equal(probe.partitionHistory[0].validAudTrades,1);
   assert.equal(probe.partitionHistory[1].validAudTrades,0);
   assert.equal(probe.partitionHistory[1].outOfRangeTrades,1);
+  assert.deepEqual(probe.partitionHistory[0].variants.map(variant=>variant.format),["epoch","epoch-string","epoch-ms"]);
+  assert.deepEqual(probe.partitionHistory[1].variants.map(variant=>variant.format),["epoch","epoch-string","epoch-ms"]);
  }finally{globalThis.fetch=originalFetch;}
 });
 
