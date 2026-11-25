@@ -171,3 +171,10 @@ Updated after local implementation and automated verification on `edge-productio
 
 
 - Added deterministic cross-ticker candidate ranking by net reward/risk, net target profit and risk-budget utilisation. Uncalibrated AI win probability is deliberately not used as a ranking signal.
+
+## 2026-11-25 — Scheduled ASX provider runtime hardening
+
+- Fixed a latent Cron-only failure mode: the ASX DataCedar adapter previously constructed `AbortSignal.timeout()` even when invoked by a scheduled event without an active inbound Request context.
+- Authenticated HTTP fetches retain the 10-second timeout; scheduled ASX fetches explicitly disable that request-context-only signal.
+- Added adapter, ASX scanner and full Worker scheduled-event regression coverage. The scanner remains opt-in and paper-only; this change does not enable ASX automation, alter data rights, change risk limits or enable real-money execution.
+- Live DataCedar retrieval and full ASX 200 coverage remain unverified.
