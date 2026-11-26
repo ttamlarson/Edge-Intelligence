@@ -1238,7 +1238,8 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     }
     if(unverifiedSignalWindowGaps.length){
       readiness.push("Four-hour signal window contains unverified gap(s): "+
-        unverifiedSignalWindowGaps.map(item=>item.startAt+" -> "+item.endAt).join(", "));
+        unverifiedSignalWindowGaps.map(item=>item.startAt+" -> "+item.endAt).join(", ")+
+        "; latest contiguous run "+fourHourContinuity.contiguousCandles+"/210");
     }
     if(confirmedSignalWindowGaps.length>1){
       readiness.push("Four-hour signal window exceeds the one-interval zero-trade allowance: confirmed zero-trade intervals "+
