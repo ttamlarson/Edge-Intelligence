@@ -196,3 +196,11 @@
 - [ ] Confirm missing or mismatched trade-count metadata remains `UNVERIFIED_GAP`.
 - [ ] Confirm both confirmed-zero-trade and unverified gaps remain unfilled, and the 210-contiguous-four-hour-candle readiness gate still blocks entries.
 - [ ] Confirm the paper ledger, fee/slippage model, position sizing, stops, daily-loss limit, `paperOnly: true` and `liveTradingEnabled: false` remain unchanged.
+
+
+## CoinSpot MTF pullback entry and stop timing
+- [ ] Confirm a paper entry is accepted only for a 2-of-3 Donchian breakout or a bullish completed four-hour EMA20 reclaim after the previous completed four-hour close was at/below its EMA20.
+- [ ] Confirm daily EMA100 regime, four-hour EMA50/EMA200 trend, positive long-term slope, positive volume, spread, volatility, freshness, AUD-pair and all risk gates remain mandatory for either entry model.
+- [ ] Confirm the ledger records `DONCHIAN_BREAKOUT` or `PULLBACK_RECLAIM` and rejects `entryTrigger: true` if neither underlying trigger is true.
+- [ ] Confirm an intrabar quote cannot advance the trailing-stop high-water mark; only a completed four-hour candle after the position opened can do so.
+- [ ] Confirm fees, slippage, 25% allocation cap, 0.5% risk budget, A$3 daily-loss circuit, ATR stops, paper-only marker and disabled live-trading flag remain unchanged.

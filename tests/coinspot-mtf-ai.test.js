@@ -16,6 +16,8 @@ function candidate(status = "BUY_CANDIDATE_PAPER_ONLY") {
         fourHourTrend: true,
         positiveLongTrendSlope: true,
         breakoutVotes: true,
+        pullbackReclaim: false,
+        entryTrigger: true,
         liquidity: true,
         volatility: true
       },

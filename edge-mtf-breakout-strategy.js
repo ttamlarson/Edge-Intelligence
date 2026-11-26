@@ -122,6 +122,8 @@ export function evaluateEdgeBreakoutSignal({
   const dailyCloses = daily.map(candle => candle.close);
   const fourHourCloses = fourHour.map(candle => candle.close);
   const dailyEma100 = ema(dailyCloses, 100);
+  const fourHourEma20 = ema(fourHourCloses, 20);
+  const priorFourHourEma20 = ema(fourHourCloses.slice(0, -1), 20);
   const ema50 = ema(fourHourCloses, 50);
   const ema200 = ema(fourHourCloses, 200);
   const priorEma200 = ema(fourHourCloses.slice(0, -10), 200);
@@ -131,26 +133,37 @@ export function evaluateEdgeBreakoutSignal({
     lookback, high: donchianHigh(fourHour, lookback)
   }));
   const votes = channel.filter(level => signalBar.close > level.high).length;
+  const previousSignalBar = fourHour.at(-2);
+  const pullbackReclaim = previousSignalBar.close <= priorFourHourEma20 &&
+    signalBar.close > fourHourEma20 && signalBar.close > signalBar.open;
+  const breakoutTrigger = votes >= 2;
+  const entryTrigger = breakoutTrigger || pullbackReclaim;
   const checks = {
     dailyTrend: dailyBar.close > dailyEma100,
     fourHourTrend: ema50 > ema200,
     positiveLongTrendSlope: ema200 > priorEma200,
-    breakoutVotes: votes >= 2,
-    liquidity: signalBar.volume >= minimumVolume && spreadBps <= 50,
+    breakoutVotes: breakoutTrigger,
+    pullbackReclaim,
+    entryTrigger,
+    liquidity: signalBar.volume > 0 && signalBar.volume >= minimumVolume && spreadBps <= 50,
     volatility: volatilityPct >= volatilityMinPct && volatilityPct <= volatilityMaxPct
   };
-  const eligible = Object.values(checks).every(Boolean);
+  // Breakout and pullback reclaim are alternative entry triggers. The higher-timeframe,
+  // liquidity and volatility gates remain mandatory for both paths.
+  const eligible = checks.dailyTrend && checks.fourHourTrend &&
+    checks.positiveLongTrendSlope && checks.entryTrigger && checks.liquidity && checks.volatility;
   const stopDistance = volatility * 2.5;
   return {
     strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1",
     status: eligible ? "BUY_CANDIDATE_PAPER_ONLY" : "NO_TRADE",
+    entryModel: !entryTrigger ? null : breakoutTrigger ? "DONCHIAN_BREAKOUT" : "PULLBACK_RECLAIM",
     signalAt: signalBar.timestamp,
     evaluatedAt: new Date(clock).toISOString(),
     marketRegime: checks.dailyTrend && checks.fourHourTrend && checks.positiveLongTrendSlope ? "BULLISH" : "NOT_BULLISH",
     checks,
     indicators: {
-      dailyEma100: round(dailyEma100), fourHourEma50: round(ema50),
-      fourHourEma200: round(ema200), atr20: round(volatility),
+      dailyEma100: round(dailyEma100), fourHourEma20: round(fourHourEma20),
+      fourHourEma50: round(ema50), fourHourEma200: round(ema200), atr20: round(volatility),
       atrPct: round(volatilityPct * 100), breakoutVotes: votes,
       breakoutLevels: channel.map(level => ({ lookback: level.lookback, priorHigh: round(level.high) })),
       spreadBps
