@@ -33,4 +33,20 @@ test("includes unrealized P&L in net P&L but not in closed-trade win statistics"
   assert.equal(p.closedTrades, 0); assert.equal(p.openPosition, true);
 });
 
+test("uses cumulative ledger realized P&L when the retained trade history reaches its 200-trade cap", () => {
+  const closedAt = "2026-11-26T07:00:00.000Z";
+  const trades = Array.from({length:200}, () => ({
+    closedAt, pnlAud:1, entryFeeAud:.1, exitFeeAud:.1
+  }));
+  trades.push({closedAt:"2026-11-27T07:00:00.000Z",pnlAud:1000,entryFeeAud:0,exitFeeAud:0});
+  const account = { ...base, equityAud:400, realizedPnlAud:300, closedTrades:trades };
+  const p = calculateMtfPaperPerformance(account, now);
+  assert.equal(p.realizedPnlAud,300);
+  assert.equal(p.netPnlAud,300);
+  assert.equal(p.closedTrades,200);
+  assert.equal(p.tradeHistoryAtLimit,true);
+  assert.equal(p.tradeStatisticsBasis,"LATEST_200_RETAINED_CLOSED_TRADES");
+  assert.equal(p.rollingWindowsComplete,false);
+  assert.equal(p.feesPaidAud,40);
+});
 test("rejects an invalid calculation clock", () => assert.throws(() => calculateMtfPaperPerformance(base, "not-a-date"), /Invalid performance/));
