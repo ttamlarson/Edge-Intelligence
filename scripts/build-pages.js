@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const output = join(root, "dist");
 const assets = [
-  "index.html", "app.js", "domain.js", "au-sources.js", "autonomous-engine.js", "asx-walk-forward.js", "coinspot-strategy.js", "adaptive-regime-strategy.js", "regime-adaptive-breakout.js", "trend-following-indicators.js", "crypto-csv.js", "styles.css",
+  "index.html", "app.js", "domain.js", "au-sources.js", "autonomous-engine.js", "asx-walk-forward.js", "coinspot-strategy.js", "crypto-strategy-comparison.js", "adaptive-regime-strategy.js", "regime-adaptive-breakout.js", "trend-following-indicators.js", "crypto-csv.js", "styles.css",
   "manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png", "_headers"
 ];
 
