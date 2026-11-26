@@ -1714,6 +1714,8 @@ export default {
             equityAud: snapshot.equityAud,
             cashAud: snapshot.cashAud,
             openPosition: snapshot.openPosition?.coin || null,
+            positionMarkStatus: snapshot.openPosition?.markStatus || null,
+            positionLastMarkAt: snapshot.openPosition?.lastMarkAt || null,
             closedTradeCount: Array.isArray(snapshot.closedTrades) ? snapshot.closedTrades.length : 0
           },
           paperOnly: snapshot.paperOnly === true,
