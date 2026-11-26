@@ -7,13 +7,17 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
   if (!Number.isFinite(clock)) throw new Error("Invalid performance calculation time.");
   const trades = Array.isArray(account?.closedTrades) ? account.closedTrades : [];
-  const validTrades = trades.filter(trade => trade && Number.isFinite(Date.parse(trade.closedAt)) && Number.isFinite(Number(trade.pnlAud)));
+  const validTrades = trades.filter(trade => trade && Number.isFinite(Date.parse(trade.closedAt)) && Date.parse(trade.closedAt) <= clock && Number.isFinite(Number(trade.pnlAud)));
   const pnl = validTrades.map(trade => Number(trade.pnlAud));
   const wins = pnl.filter(value => value > 0);
   const losses = pnl.filter(value => value < 0);
   const grossProfit = wins.reduce((sum, value) => sum + value, 0);
   const grossLoss = -losses.reduce((sum, value) => sum + value, 0);
-  const realized = pnl.reduce((sum, value) => sum + value, 0);
+  // The ledger retains only its latest 200 closed trades; use its validated
+  // cumulative realized P&L for lifetime results instead of summing that sample.
+  const realized = Number.isFinite(Number(account?.realizedPnlAud))
+    ? Number(account.realizedPnlAud) : pnl.reduce((sum, value) => sum + value, 0);
+  const tradeHistoryAtLimit = trades.length >= 200;
   const unrealized = finite(account?.unrealizedPnlAud);
   const equity = finite(account?.equityAud);
   const startingCapital = finite(account?.startingCapitalAud);
@@ -32,6 +36,9 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
     netPnlAud: round(realized + unrealized),
     returnPct: startingCapital > 0 ? round((equity / startingCapital - 1) * 100) : null,
     closedTrades: validTrades.length,
+    tradeHistoryAtLimit,
+    tradeStatisticsBasis: tradeHistoryAtLimit ? "LATEST_200_RETAINED_CLOSED_TRADES" : "ALL_RETAINED_CLOSED_TRADES",
+    rollingWindowsComplete: !tradeHistoryAtLimit,
     winningTrades: wins.length,
     losingTrades: losses.length,
     winRatePct: validTrades.length ? round(wins.length / validTrades.length * 100) : null,
@@ -45,7 +52,7 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
     rolling7dPnlAud: periodPnl(7 * 24 * 60 * 60 * 1000),
     rolling30dPnlAud: periodPnl(30 * 24 * 60 * 60 * 1000),
     openPosition: Boolean(account?.openPosition),
-    performanceBasis: "CLOSED_PAPER_TRADES_NET_OF_RECORDED_FEES_AND_SLIPPAGE",
+    performanceBasis: "CUMULATIVE_LEDGER_REALIZED_PNL_PLUS_CURRENT_UNREALIZED_PNL; TRADE_STATISTICS_AND_FEES_USE_RETAINED_CLOSED_TRADES",
     equityCurve: null
   };
 }
