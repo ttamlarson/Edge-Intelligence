@@ -1645,7 +1645,8 @@ export default {
             lastCompletedFourHourClose: market.lastCompletedFourHourClose,
             entryModel: market.entryModel,
             spreadBps: market.spreadBps,
-            aiReviewStatus: market.aiReview?.status || "NOT_RUN"
+            aiReviewStatus: market.aiReview?.status || "NOT_RUN",
+            aiGateStatus: market.aiGateStatus || "NOT_REQUIRED"
           })),
           ledger: {
             equityAud: snapshot.equityAud,
