@@ -32,7 +32,7 @@ test("rejects an entry flag when neither breakout nor pullback trigger is presen
  assert.equal(a.cashAud,100);
  assert.deepEqual(a.lastProcessed,{});
 });
-test("trailing stop closes position and records net fees",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:a.openPosition.stopPrice*.9,ask:a.openPosition.stopPrice,last:a.openPosition.stopPrice}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades.length,1);assert.equal(a.closedTrades[0].reason,"TRAILING_STOP");assert.equal(a.liveTradingEnabled,false);});
+test("trailing stop closes position and records net fees",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:a.openPosition.stopPrice*.9,ask:a.openPosition.stopPrice,last:a.openPosition.stopPrice}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades.length,1);assert.equal(a.closedTrades[0].reason,"TRAILING_STOP");assert.equal(validateMtfPaperAccount(a),true);assert.equal(a.liveTradingEnabled,false);});
 test("trailing-stop high-water mark advances only on completed post-entry four-hour closes",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  const entryHigh=a.openPosition.highestPrice;
@@ -64,7 +64,7 @@ test("position sizing caps stop-loss risk after round-trip fees and slippage",()
 test("daily loss circuit includes open mark-to-market loss and closes at the limit",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
- a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2490,quantity:0.01,entryFeeAud:0.025,exitFeeAud:0.0249,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
+ a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
  const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
@@ -144,6 +144,17 @@ test("rejects persisted positions with invalid cost, fee or timestamp accounting
  assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,entryCost:NaN}}),/position failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,entryFeeAud:-0.01}}),/position failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,openedAt:"not-a-date"}}),/position failed validation/);
+});
+
+test("reconciles closed-trade P&L to modeled prices and fees and prevents realized-loss understatement",()=>{
+ const trade={id:"BTC-test",coin:"BTC",pair:"BTC/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,
+  signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,
+  entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP"};
+ const base=createMtfPaperAccount(now);
+ const valid={...base,cashAud:97.1,equityAud:97.1,realizedPnlAud:-2.9,dailyLossAud:2.9,closedTrades:[trade]};
+ assert.equal(validateMtfPaperAccount(valid),true);
+ assert.throws(()=>validateMtfPaperAccount({...valid,closedTrades:[{...trade,pnlAud:-1}]}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...valid,dailyLossAud:0}),/ledger failed validation/);
 });
 
 test("rejects closed trades with non-finite P&L or fee accounting before daily-loss calculation",()=>{

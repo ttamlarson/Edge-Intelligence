@@ -211,3 +211,5 @@
 - [ ] Confirm persisted open-position entry cost equals notional plus entry fee within rounding tolerance, and stop/ATR/timestamps are valid before a position is managed.
 - [ ] Confirm closed trades require finite net P&L, entry/exit fees, prices, quantity and chronological timestamps before daily-loss calculations.
 - [ ] Confirm invalid KV ledger data is rejected without resetting or overwriting the existing record; paper-only and live-trading safety flags remain unchanged.
+
+- [ ] Confirm closed-trade P&L reconciles to quantity, entry/exit prices and recorded fees within rounding tolerance, and current-day realized losses cannot be understated in the daily-loss field.

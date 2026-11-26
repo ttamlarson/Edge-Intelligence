@@ -34,20 +34,33 @@ export function createMtfPaperAccount(now = new Date().toISOString()) {
     liveTradingEnabled:false, updatedAt:now };
 }
 export function validateMtfPaperAccount(a) {
-  const validClosedTrade = trade => trade && validCoin(trade.coin) &&
-    trade.pair === trade.coin + "/AUD" &&
-    validTimestamp(trade.openedAt) && validTimestamp(trade.closedAt) &&
-    validTimestamp(trade.signalAt) && Date.parse(trade.closedAt) >= Date.parse(trade.openedAt) &&
-    positiveFinite(trade.entryPrice) && positiveFinite(trade.exitPrice) &&
-    positiveFinite(trade.quantity) && nonNegativeFinite(trade.entryFeeAud) &&
-    nonNegativeFinite(trade.exitFeeAud) && Number.isFinite(trade.pnlAud) &&
-    typeof trade.reason === "string" && trade.reason.length > 0;
+  const validClosedTrade = trade => {
+    if (!trade || !validCoin(trade.coin) || trade.pair !== trade.coin + "/AUD" ||
+        !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
+        !validTimestamp(trade.signalAt) || Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
+        !positiveFinite(trade.entryPrice) || !positiveFinite(trade.exitPrice) ||
+        !positiveFinite(trade.quantity) || !nonNegativeFinite(trade.entryFeeAud) ||
+        !nonNegativeFinite(trade.exitFeeAud) || !Number.isFinite(trade.pnlAud) ||
+        typeof trade.reason !== "string" || trade.reason.length === 0) return false;
+    const expectedNetPnl = round(
+      trade.quantity * trade.exitPrice - trade.exitFeeAud -
+      (trade.quantity * trade.entryPrice + trade.entryFeeAud)
+    );
+    return Math.abs(trade.pnlAud - expectedNetPnl) <= 0.03;
+  };
+  const ledgerDay = typeof a?.day === "string" ? a.day : "";
+  const realizedLossForLedgerDay = Array.isArray(a?.closedTrades)
+    ? a.closedTrades.filter(trade => String(trade?.closedAt || "").slice(0, 10) === ledgerDay)
+      .reduce((sum, trade) => sum + Math.max(0, -Number(trade?.pnlAud)), 0)
+    : NaN;
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       a.startingCapitalAud!==100 || a.liveTradingEnabled!==false ||
       !Number.isFinite(a.cashAud) || a.cashAud<0 || !Number.isFinite(a.realizedPnlAud) ||
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
       !Number.isFinite(a.dailyLossAud) || a.dailyLossAud<0 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(ledgerDay) || !validTimestamp(a.updatedAt) ||
+      !Number.isFinite(realizedLossForLedgerDay) || a.dailyLossAud + 0.02 < realizedLossForLedgerDay ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||
       !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed))

@@ -300,3 +300,10 @@ Updated after local implementation and automated verification on `edge-productio
 - Strengthened persisted-ledger validation for open-position cost/fee reconciliation, positive stop and ATR values, high-water/trailing-stop consistency, ISO timestamps, and closed-trade net P&L/fee/price/quantity fields.
 - Invalid KV ledger records remain fail-closed and are not reset. No entry thresholds, fee/slippage assumptions, position sizing, stops, daily-loss limit or live-trading safety flags were relaxed or changed.
 - Added regression tests for spoofed spread metadata and malformed persisted position/closed-trade accounting.
+
+
+## 2026-11-26 — CoinSpot MTF realized P&L reconciliation
+
+- Closed-trade net P&L must reconcile to quantity, executable entry/exit prices and recorded fees within cent-rounding tolerance. Finite but inconsistent ledger values fail closed.
+- The persisted daily-loss value must cover all realized losses from the ledger's current UTC day, preventing a malformed KV record from understating the daily-loss circuit.
+- No strategy thresholds, simulated capital, fees, slippage, allocation, stops, loss limit or live-trading safety flags were changed.
