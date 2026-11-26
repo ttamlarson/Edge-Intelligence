@@ -994,6 +994,27 @@ async function reviewCoinSpotMtfCandidate(env, market) {
   } finally { clearTimeout(timeout); }
 }
 
+function applyCoinSpotMtfAiGate(markets = [], aiReviews = []) {
+  const reviews = new Map(aiReviews.map(item => [item.coin, item.review]));
+  const gates = {};
+  const gatedMarkets = markets.map(market => {
+    if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") {
+      gates[market?.coin] = "NOT_REQUIRED";
+      return market;
+    }
+    const review = reviews.get(market.coin);
+    const approved = review?.status === "AI_REVIEW_COMPLETE" &&
+      review?.assessment === "LOW_CONCERN" && review?.advisoryOnly === true;
+    gates[market.coin] = approved ? "AI_APPROVED" : "AI_BLOCKED";
+    if (approved) return market;
+    // Fail closed for new entries if AI is missing, unavailable, malformed,
+    // cautious or concerned. Existing positions still receive quotes and
+    // deterministic stop/trend management because their checks are retained.
+    return { ...market, signal: { ...market.signal, status: "AI_REVIEW_BLOCKED" } };
+  });
+  return { markets: gatedMarkets, gates };
+}
+
 async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
@@ -1032,7 +1053,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
     coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market)
   })));
-  account = processMtfPaperAccount(account, { markets: strategy.markets || [], now: nowIso });
+  const aiGate = applyCoinSpotMtfAiGate(strategy.markets || [], aiReviews);
+  account = processMtfPaperAccount(account, { markets: aiGate.markets, now: nowIso });
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
     ...account, status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
@@ -1065,7 +1087,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       failedChecks: m.signal?.failedChecks || [],
       tradesFetched: m.history?.tradesFetched || 0,
       checks: m.signal?.checks || null, signalError: m.signalError || null,
-      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
+      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null,
+      aiGateStatus: aiGate.gates[m.coin] || "NOT_REQUIRED"
     })),
     paperOnly: true, liveTradingEnabled: false
   };
@@ -1650,5 +1673,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, applyCoinSpotMtfAiGate };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
