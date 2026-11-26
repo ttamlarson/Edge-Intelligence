@@ -47,6 +47,26 @@ test("trailing-stop high-water mark advances only on completed post-entry four-h
  assert.equal(a.openPosition.highestPrice,104000);
  assert.equal(a.openPosition.trailingStop,101000);
 });
+test("rejects crossed exit quotes but still honours stops when a valid exit spread is wide",()=>{
+ let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const p=a.openPosition;
+ assert.ok(p);
+ const crossedBid=p.stopPrice*.9, crossedAsk=p.stopPrice*.89;
+ const crossed={...candidate(),quote:{pair:"BTC/AUD",bid:crossedBid,ask:crossedAsk,last:crossedBid,spreadBps:0}};
+ const unchanged=processMtfPaperAccount(a,{markets:[crossed],now:"2026-11-25T08:15:00.000Z"});
+ assert.ok(unchanged.openPosition);
+ assert.equal(unchanged.cashAud,a.cashAud);
+ assert.equal(unchanged.closedTrades.length,0);
+ assert.equal(unchanged.equityAud,a.equityAud);
+ const bid=p.stopPrice*.9,ask=p.stopPrice*1.02;
+ const wide={...candidate(),quote:{pair:"BTC/AUD",bid,ask,last:(bid+ask)/2,spreadBps:(ask-bid)/((ask+bid)/2)*10000}};
+ assert.ok(wide.quote.spreadBps>MTF_PAPER_CONFIG.maxSpreadBps);
+ const closed=processMtfPaperAccount(unchanged,{markets:[wide],now:"2026-11-25T08:30:00.000Z"});
+ assert.equal(closed.openPosition,null);
+ assert.equal(closed.closedTrades.at(-1).reason,"TRAILING_STOP");
+ assert.equal(closed.liveTradingEnabled,false);
+ assert.equal(closed.paperOnly,true);
+});
 test("daily trend reversal closes an open paper position",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:101000,ask:101100,last:101000},signal:{...candidate().signal,status:"NO_TRADE",checks:{dailyTrend:false,fourHourTrend:true}}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades[0].reason,"TREND_REVERSAL");});
 test("rejects corrupt or live-enabled paper ledger without resetting it",()=>{assert.throws(()=>processMtfPaperAccount({...createMtfPaperAccount(now),cashAud:-1},{markets:[],now}),/failed validation/);assert.throws(()=>processMtfPaperAccount({...createMtfPaperAccount(now),liveTradingEnabled:true},{markets:[],now}),/failed validation/);});
 
