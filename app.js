@@ -276,6 +276,9 @@ async function loadCoinSpotMtfPaper(runNow=false){
   $("mtfPaperClosedTrades").textContent=String(perf.closedTrades??0);
   $("mtfPaperFees").textContent=fmt(perf.feesPaidAud);
   $("mtfPaperWeekPnl").textContent=fmt(perf.rolling7dPnlAud);
+  $("mtfPaperPerformanceNote").textContent=perf.tradeHistoryAtLimit
+   ?"Trade statistics, fees and rolling P&L use the latest 200 retained closes; rolling windows may be incomplete. Lifetime realised P&L uses cumulative ledger accounting."
+   :"Performance uses all retained closed trades. No synthetic equity-curve points are generated.";
 
   const when=a.lastScanAt?" · Last scan "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth"):"";
   $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
