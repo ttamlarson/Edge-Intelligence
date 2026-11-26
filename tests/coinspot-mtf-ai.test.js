@@ -106,7 +106,10 @@ test("CoinSpot AI review uses the configured Responses model and strict structur
   assert.match(body.input[0].content, /Do not authorise execution/i);
   assert.match(body.input[0].content, /Do not change any strategy, position size, fee or risk rule/i);
 
-  const cacheKey = "coinspot-mtf-ai-review:BTC:2026-11-25T08:00:00.000Z";
+  const cacheKeys = [...store.values.keys()];
+  assert.equal(cacheKeys.length, 1);
+  const cacheKey = cacheKeys[0];
+  assert.match(cacheKey, /^coinspot-mtf-ai-review:BTC:2026-11-25T08:00:00\\.000Z:[a-f0-9]{24}$/);
   assert.ok(store.values.has(cacheKey));
   assert.equal(store.writes[0].key, cacheKey);
   assert.equal(store.writes[0].options.expirationTtl, 86400);
