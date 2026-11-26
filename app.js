@@ -319,7 +319,7 @@ async function loadAutomatedCryptoPaper(runNow=false){
   $("autoPaperLastScan").textContent=a.lastScanAt?"Last server scan: "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth")+" · "+(a.markets||[]).filter(x=>x.status==="LIVE_PUBLIC_DATA").length+" of 10 markets returned valid data · "+(a.scanIntervalMinutes||15)+" minute schedule.":"No scheduled scan has completed yet. Check back after the next Worker cron.";
   $("autoPaperPosition").innerHTML=a.openPosition?'<div class="position-card"><div><b>'+esc(a.openPosition.symbol)+' · OPEN PAPER POSITION</b><div class="market-meta">Entry '+fmt(a.openPosition.entryPrice)+' · quantity '+Number(a.openPosition.quantity).toFixed(6)+' · stop '+fmt(a.openPosition.trailingStop)+' · target '+fmt(a.openPosition.targetPrice)+'</div><div class="market-meta">Unrealized '+fmt(a.unrealizedPnl||0)+' · signal candle '+esc(a.openPosition.signalAt)+'</div></div></div>':'<div class="empty">No open automated paper position. The engine scans for qualifying signals.</div>';
   const performance=a.performance||{};
-  const pct=value=>Number.isFinite(Number(value))?Number(value).toFixed(2)+"%":"—";
+  const pct=value=>value===null||value===undefined||!Number.isFinite(Number(value))?"—":Number(value).toFixed(2)+"%";
   const scalar=value=>Number.isFinite(Number(value))?Number(value).toFixed(2):"—";
   $("autoPaperPerformance").innerHTML=[
    ["CLOSED TRADES",String(performance.tradeCount??0),performance.status||"Insufficient sample"],
