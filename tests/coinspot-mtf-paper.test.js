@@ -36,7 +36,7 @@ test("daily loss circuit includes open mark-to-market loss and closes at the lim
  a.closedTrades.push({closedAt:now,pnlAud:-2.9});
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
- const market={...candidate(),signalAt:p.signalAt,quote:{bid,ask:bid+10,last:bid}};
+ const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
  a=processMtfPaperAccount(a,{markets:[market],now:"2026-11-25T09:00:00.000Z"});
  assert.equal(a.openPosition,null);
  assert.equal(a.closedTrades.at(-1).reason,"DAILY_LOSS_LIMIT");
