@@ -974,6 +974,28 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     : createCoinSpotHistoryProgress(targetDate, startMs, endMs);
   validateCoinSpotHistoryProgress(pending, targetDate, startMs, endMs);
 
+  // Only persist a derived validation summary after the resumable cursor passes
+  // validation. Corrupt pending windows must leave the original KV value intact.
+  if (Array.isArray(state.providerProbe?.markets)) {
+    let validationChanged = false;
+    const markets = state.providerProbe.markets.map(market => {
+      const readOnlyHistory = market?.readOnlyHistory;
+      if (!readOnlyHistory || !Array.isArray(readOnlyHistory.partitionHistory)) return market;
+      const partitionValidation = validateCoinSpotSubdayEpochMsProbe(readOnlyHistory);
+      if (JSON.stringify(readOnlyHistory.partitionValidation) === JSON.stringify(partitionValidation)) return market;
+      validationChanged = true;
+      return { ...market, readOnlyHistory: { ...readOnlyHistory, partitionValidation } };
+    });
+    if (validationChanged) {
+      state.providerProbe = {
+        ...state.providerProbe,
+        markets,
+        partitionValidationComputedAt: new Date(clock).toISOString()
+      };
+      await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+    }
+  }
+
   const updatedMarkets={...state.markets};
   const outcomes=[];
   for(const coin of COINSPOT_MTF_COINS){
