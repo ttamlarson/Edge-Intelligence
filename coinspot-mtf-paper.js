@@ -6,6 +6,7 @@ export const MTF_PAPER_CONFIG = Object.freeze({
 });
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
+const MARK_STALE_AFTER_MS = 20 * 60 * 1000;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
 const validAudMarket = market => validCoin(market?.coin) && market?.pair === market.coin + "/AUD" && market?.quote?.pair === market.coin + "/AUD";
 const validTimestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) &&
@@ -88,6 +89,10 @@ export function validateMtfPaperAccount(a) {
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
         !validTimestamp(p.openedAt) || !validTimestamp(p.signalAt) ||
         Date.parse(p.openedAt) < Date.parse(p.signalAt) + FOUR_HOUR_MS ||
+        (p.lastMarkAt !== undefined && (!validTimestamp(p.lastMarkAt) ||
+          Date.parse(p.lastMarkAt) < Date.parse(p.openedAt) || Date.parse(p.lastMarkAt) > Date.parse(a.updatedAt))) ||
+        (p.markStatus !== undefined && !["CURRENT", "UNAVAILABLE", "STALE"].includes(p.markStatus)) ||
+        (p.markStatus === "CURRENT" && !p.lastMarkAt) ||
         (p.entryModel !== undefined && !["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(p.entryModel)))
       throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
   }
@@ -132,6 +137,8 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;
     if (validPaperExitQuote(m)) {
+      p.lastMarkAt = now;
+      p.markStatus = "CURRENT";
       // The trailing-stop high-water mark advances only on a completed four-hour
       // close that occurred after this position was opened. Intrabar quotes still
       // trigger an existing stop, but cannot tighten it using an unfinished candle.
@@ -156,6 +163,13 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         heldDays >= MTF_PAPER_CONFIG.maxHoldingDays ? "MAX_HOLD" : null;
       if (reason) closePosition(a, q.bid, now, reason);
       else a.equityAud = round(a.cashAud + gross - fee);
+    } else {
+      const lastMarkAt = p.lastMarkAt || p.openedAt;
+      const lastMarkClock = Date.parse(lastMarkAt);
+      const markAge = Date.parse(now) - lastMarkClock;
+      p.lastMarkAt = lastMarkAt;
+      p.markStatus = Number.isFinite(lastMarkClock) && markAge >= 0 && markAge <= MARK_STALE_AFTER_MS
+        ? "UNAVAILABLE" : "STALE";
     }
   }
 
@@ -217,7 +231,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         referenceAsk:ask, entryPrice:entry, quantity, notionalAud:round(notional),
         entryFeeAud:round(fee), entryCost:round(entryCost),
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
-        highestPrice:entry, status:"OPEN_PAPER_ONLY" };
+        highestPrice:entry, lastMarkAt:now, markStatus:"CURRENT", status:"OPEN_PAPER_ONLY" };
       // Mark the new position to the executable bid immediately. This includes
       // the modeled round-trip costs in equity and the daily-loss circuit from
       // the first scan rather than temporarily reporting par after entry.
