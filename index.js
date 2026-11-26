@@ -7,6 +7,7 @@ import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
+import { calculateMtfPaperPerformance } from "./coinspot-mtf-performance.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, calculateAutoPaperPerformance, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
@@ -1035,7 +1036,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   account = processMtfPaperAccount(account, { markets: strategy.markets || [], now: nowIso });
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
-    ...account, status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
+    ...account, performance: calculateMtfPaperPerformance(account, nowIso), status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
     strategyStatus: strategy.status || "UNKNOWN", historySync,
     backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
@@ -1084,10 +1085,10 @@ async function getCoinSpotMtfPaper(env) {
     try { account = JSON.parse(stored); validateMtfPaperAccount(account); }
     catch { throw new HttpError(409, "CoinSpot MTF paper ledger failed validation; existing data was preserved."); }
   }
-  if (!status) return { ...account, status: "WAITING_FOR_FIRST_PAPER_SCAN", markets: [], liveTradingEnabled: false };
+  if (!status) return { ...account, performance: calculateMtfPaperPerformance(account), status: "WAITING_FOR_FIRST_PAPER_SCAN", markets: [], liveTradingEnabled: false };
   let snapshot;
   try { snapshot = JSON.parse(status); } catch { throw new HttpError(502, "CoinSpot MTF paper status is invalid JSON."); }
-  return { ...snapshot, ...account, markets: snapshot.markets || [], lastScanAt: snapshot.lastScanAt || null, status: snapshot.status || "PAPER_ENGINE_WAITING", liveTradingEnabled: false };
+  return { ...snapshot, ...account, performance: calculateMtfPaperPerformance(account), markets: snapshot.markets || [], lastScanAt: snapshot.lastScanAt || null, status: snapshot.status || "PAPER_ENGINE_WAITING", liveTradingEnabled: false };
 }
 
 function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
