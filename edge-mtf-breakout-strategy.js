@@ -13,6 +13,53 @@ function ema(values, period) {
   return result;
 }
 
+export function latestContiguousCandleRun(candles, interval, label = "OHLCV history") {
+  if (!Array.isArray(candles) || candles.length > 50000 || !Number.isSafeInteger(interval) || interval <= 0) {
+    throw new Error(label + " has invalid candle continuity inputs.");
+  }
+  let previous = -Infinity;
+  let runStart = 0;
+  let gapCount = 0;
+  let latestGap = null;
+  const normalized = candles.map((candle, index) => {
+    const timestamp = Date.parse(candle?.timestamp);
+    const open = finite(candle?.open), high = finite(candle?.high), low = finite(candle?.low);
+    const close = finite(candle?.close), volume = finite(candle?.volume);
+    if (!Number.isFinite(timestamp) || timestamp % interval !== 0 ||
+        (previous !== -Infinity && timestamp <= previous) ||
+        ![open, high, low, close, volume].every(Number.isFinite) ||
+        Math.min(open, high, low, close) <= 0 || high < Math.max(open, close) ||
+        low > Math.min(open, close) || high < low || volume < 0) {
+      throw new Error(label + " contains invalid, unordered, unaligned or incomplete OHLCV data.");
+    }
+    if (previous !== -Infinity) {
+      const delta = timestamp - previous;
+      if (delta % interval !== 0) {
+        throw new Error(label + " contains timestamps that are not aligned to the candle interval.");
+      }
+      if (delta > interval) {
+        gapCount++;
+        latestGap = {
+          previousAt: new Date(previous).toISOString(),
+          nextAt: new Date(timestamp).toISOString(),
+          missingIntervals: delta / interval - 1
+        };
+        runStart = index;
+      }
+    }
+    previous = timestamp;
+    return { timestamp: new Date(timestamp).toISOString(), open, high, low, close, volume };
+  });
+  const latestRun = normalized.slice(runStart);
+  return {
+    candles: latestRun,
+    totalCandles: normalized.length,
+    contiguousCandles: latestRun.length,
+    gapCount,
+    latestGap
+  };
+}
+
 function validateCandles(candles, interval, label, minimum) {
   if (!Array.isArray(candles) || candles.length < minimum || candles.length > 50000) {
     throw new Error(`${label} requires between ${minimum} and 50,000 completed OHLCV candles.`);

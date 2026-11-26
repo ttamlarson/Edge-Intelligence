@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateEdgeBreakoutSignal, sizeEdgeBreakoutPosition, getEdgeBreakoutExit } from "../edge-mtf-breakout-strategy.js";
+import { evaluateEdgeBreakoutSignal, sizeEdgeBreakoutPosition, getEdgeBreakoutExit, latestContiguousCandleRun } from "../edge-mtf-breakout-strategy.js";
 
 function fixtures() {
   const dailyCandles = Array.from({ length: 120 }, (_, index) => {
@@ -90,4 +90,36 @@ test("exit helper applies trailing stop, daily reversal and maximum holding peri
     fourHourClose: 105, dailyTrendBullish: true, ageDays: 30
   });
   assert.equal(timed.reason, "MAXIMUM_HOLDING_PERIOD");
+});
+
+
+test("latest contiguous candle run reports gaps without fabricating missing bars", () => {
+  const { fourHourCandles } = fixtures();
+  const gapBars = fourHourCandles.map((candle, index) => ({
+    ...candle,
+    timestamp: new Date(Date.parse(candle.timestamp) + (index >= 100 ? 4 * 3600000 : 0)).toISOString()
+  }));
+  const result = latestContiguousCandleRun(gapBars, 4 * 3600000, "Four-hour history");
+  assert.equal(result.totalCandles, 220);
+  assert.equal(result.gapCount, 1);
+  assert.equal(result.contiguousCandles, 120);
+  assert.equal(result.latestGap.previousAt, fourHourCandles[99].timestamp);
+  assert.equal(result.latestGap.nextAt, gapBars[100].timestamp);
+  assert.equal(result.latestGap.missingIntervals, 1);
+  assert.equal(result.candles.length, 120);
+  assert.equal(result.candles[0].timestamp, gapBars[100].timestamp);
+  assert.equal(result.candles.some(candle => candle.timestamp === new Date(Date.parse(fourHourCandles[99].timestamp) + 4 * 3600000).toISOString()), false);
+});
+
+test("latest contiguous candle run rejects duplicate, unordered, unaligned and malformed bars", () => {
+  const { fourHourCandles } = fixtures();
+  const duplicate = fourHourCandles.map(candle => ({ ...candle }));
+  duplicate[100].timestamp = duplicate[99].timestamp;
+  assert.throws(() => latestContiguousCandleRun(duplicate, 4 * 3600000), /unordered/i);
+  const unaligned = fourHourCandles.map(candle => ({ ...candle }));
+  unaligned[0].timestamp = new Date(Date.parse(unaligned[0].timestamp) + 3600000).toISOString();
+  assert.throws(() => latestContiguousCandleRun(unaligned, 4 * 3600000), /unaligned/i);
+  const malformed = fourHourCandles.map(candle => ({ ...candle }));
+  malformed[10].close = 0;
+  assert.throws(() => latestContiguousCandleRun(malformed, 4 * 3600000), /invalid/i);
 });

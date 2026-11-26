@@ -96,7 +96,9 @@ test("CoinSpot MTF runner backfills four UTC dates per scan and remains paper-on
     assert.equal(result.cashAud, 100);
     assert.equal(result.openPosition, null);
     assert.equal(result.closedTrades.length, 0);
-    assert.ok(result.markets.every(market => market.signalStatus === "WARMUP_REQUIRED"));
+    assert.ok(result.markets.every(market => market.signalStatus === "INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP"));
+    assert.ok(result.markets.every(market => market.contiguousFourHourCandles === 1));
+    assert.ok(result.markets.every(market => market.fourHourGapCount === 3));
     assert.equal(calls.filter(call => call.target.endsWith("/orders/market/completed")).length, 8);
     assert.equal(calls.filter(call => call.target.includes("/pubapi/v2/latest/")).length, 2);
 

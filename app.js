@@ -273,7 +273,10 @@ async function loadCoinSpotMtfPaper(runNow=false){
   $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
   $("mtfPaperPositionTitle").textContent=a.openPosition?"OPEN · "+a.openPosition.pair:"No open paper position";
   $("mtfPaperPositionDetail").textContent=a.openPosition?"Entry "+fmt(a.openPosition.entryPrice)+" · stop "+fmt(a.openPosition.trailingStop)+" · quantity "+Number(a.openPosition.quantity).toFixed(8)+" · signal "+a.openPosition.signalAt:"One position maximum. No real exchange orders are submitted.";
-  $("mtfPaperMarkets").innerHTML=(a.markets||[]).map(m=>'<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · '+Number(m.tradesFetched||0)+' trades</small><em>'+esc(m.aiReview?.assessment||m.aiReview?.status||"AI review pending")+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small></article>').join("")||'<div class="empty">Waiting for validated CoinSpot history.</div>';
+  $("mtfPaperMarkets").innerHTML=(a.markets||[]).map(m=>{
+   const gap=m.latestFourHourGap?m.latestFourHourGap.previousAt+" → "+m.latestFourHourGap.nextAt:"No latest 4h gap";
+   return '<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · contiguous '+Number(m.contiguousDailyCandles??m.dailyCandles??0)+' daily / '+Number(m.contiguousFourHourCandles??m.fourHourCandles??0)+' 4h · '+Number(m.tradesFetched||0)+' trades</small><small>4h gaps '+Number(m.fourHourGapCount||0)+' · '+esc(gap)+'</small><em>'+esc(m.aiReview?.assessment||m.aiReview?.status||"AI review pending")+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small></article>';
+  }).join("")||'<div class="empty">Waiting for validated CoinSpot history.</div>';
   $("mtfPaperTrades").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.pair)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+esc(fmt(t.pnlAud))+'</b></div>').join(""):'<div class="empty">No automated paper trades recorded yet.</div>';
  }catch(e){$("coinSpotMtfPaperStatus").textContent="PAPER ENGINE UNAVAILABLE · "+e.message;}
  finally{if(button){button.disabled=false;button.textContent="Run paper scan now";}}
@@ -293,12 +296,15 @@ async function loadCoinSpotMtfStrategy(syncNow=false){
   const rows=Array.isArray(data.markets)?data.markets:[];
   container.innerHTML=rows.map(m=>{
    const h=m.history||{},s=m.signal;
-   const ready=Number(h.dailyCandles)>=110&&Number(h.fourHourCandles)>=210;
+   const contiguousDaily=Number(h.contiguousDailyCandles??h.dailyCandles??0);
+   const contiguousFourHour=Number(h.contiguousFourHourCandles??h.fourHourCandles??0);
+   const ready=contiguousDaily>=110&&contiguousFourHour>=210;
    const quote=m.quote;
-   const signalLabel=s?.status==="BUY_CANDIDATE_PAPER_ONLY"?"PAPER ENTRY CANDIDATE":String(m.signalStatus||"WAITING").replaceAll("_"," ");
+   const signalLabel=s?.status==="BUY_CANDIDATE_PAPER_ONLY"?"PAPER ENTRY CANDIDATE":(!ready&&m.signalStatus==="WARMUP_REQUIRED"?"CONTIGUOUS HISTORY WARMING":String(m.signalStatus||"WAITING").replaceAll("_"," "));
    const details=quote?"Bid "+money(quote.bid,"AUD")+" · Ask "+money(quote.ask,"AUD")+" · Spread "+Number(quote.spreadBps||0).toFixed(1)+" bps":"Live quote withheld until validated history is warm";
    const checks=s?Object.entries(s.checks||{}).map(([k,v])=>k+": "+(v?"PASS":"FAIL")).join(" · "):m.signalError||"Awaiting validated candles";
-   return '<article class="integration"><b>'+esc(m.pair)+'</b><small>'+esc(details)+'</small><small>Daily candles '+Number(h.dailyCandles||0)+'/110 · 4h candles '+Number(h.fourHourCandles||0)+'/210</small><small>Trades collected '+Number(h.tradesFetched||0)+' · last history day '+esc(h.lastHistoryDate||"—")+'</small><em>'+esc(signalLabel)+'</em><small>'+esc(checks)+'</small><small>Execution: no orders · live trading disabled</small></article>';
+   const latestGap=h.latestFourHourGap?" · latest 4h gap "+h.latestFourHourGap.previousAt+" → "+h.latestFourHourGap.nextAt:"";
+   return '<article class="integration"><b>'+esc(m.pair)+'</b><small>'+esc(details)+'</small><small>Completed '+Number(h.dailyCandles||0)+' daily / '+Number(h.fourHourCandles||0)+' 4h · contiguous '+contiguousDaily+'/110 daily / '+contiguousFourHour+'/210 4h</small><small>4h gaps '+Number(h.fourHourGapCount||0)+esc(latestGap)+'</small><small>Trades collected '+Number(h.tradesFetched||0)+' · last history day '+esc(h.lastHistoryDate||"—")+'</small><em>'+esc(signalLabel)+'</em><small>'+esc(checks)+'</small><small>Execution: no orders · live trading disabled</small></article>';
   }).join("")||'<div class="empty">CoinSpot history is not available yet.</div>';
   if(data.status==="BACKFILLING")status.textContent="BACKFILLING · HISTORICAL DATA";
   else if(data.status==="COLLECTING_LIVE_DAY")status.textContent="COLLECTING CURRENT DAY · CHECKING SIGNAL READINESS";

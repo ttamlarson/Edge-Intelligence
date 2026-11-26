@@ -5,7 +5,7 @@ import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket } from "./coinspot.js";
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS } from "./coinspot-history.js";
-import { evaluateEdgeBreakoutSignal } from "./edge-mtf-breakout-strategy.js";
+import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
 import { AUTO_SYMBOLS, calculateAutoPaperPerformance, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
@@ -1043,6 +1043,12 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
       spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0,
+      contiguousDailyCandles: m.history?.contiguousDailyCandles ?? m.history?.dailyCandles ?? 0,
+      contiguousFourHourCandles: m.history?.contiguousFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      dailyGapCount: m.history?.dailyGapCount ?? 0,
+      fourHourGapCount: m.history?.fourHourGapCount ?? 0,
+      latestDailyGap: m.history?.latestDailyGap ?? null,
+      latestFourHourGap: m.history?.latestFourHourGap ?? null,
       storedDailyCandles: m.history?.storedDailyCandles ?? m.history?.dailyCandles ?? 0,
       storedFourHourCandles: m.history?.storedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
@@ -1098,6 +1104,23 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       tradesFetched:history.tradesFetched||0,
       lastHistoryDate:history.lastHistoryDate||null
     };
+    let dailyContinuity, fourHourContinuity, candleValidationError = null;
+    // Missing intervals are never filled with synthetic OHLCV candles. The
+    // latest genuinely contiguous run is evaluated independently of older gaps.
+    try {
+      dailyContinuity = latestContiguousCandleRun(daily, COINSPOT_INTERVALS.daily, "Daily history");
+      fourHourContinuity = latestContiguousCandleRun(fourHour, COINSPOT_INTERVALS.fourHour, "Four-hour history");
+      Object.assign(historySummary, {
+        contiguousDailyCandles: dailyContinuity.contiguousCandles,
+        contiguousFourHourCandles: fourHourContinuity.contiguousCandles,
+        dailyGapCount: dailyContinuity.gapCount,
+        fourHourGapCount: fourHourContinuity.gapCount,
+        latestDailyGap: dailyContinuity.latestGap,
+        latestFourHourGap: fourHourContinuity.latestGap
+      });
+    } catch(error) {
+      candleValidationError = String(error?.message || "COINSPOT_CANDLE_VALIDATION_FAILED").slice(0,180);
+    }
 
     // Always retrieve the current AUD quote, even during history warm-up. An
     // existing paper position must continue to be marked and stop-managed when
@@ -1112,8 +1135,28 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
     }
 
-    if(daily.length<110||fourHour.length<210){
-      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,signalStatus:"WARMUP_REQUIRED",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+    if(candleValidationError){
+      signalError = [signalError,candleValidationError].filter(Boolean).join("; ");
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      continue;
+    }
+    const readiness = [];
+    if(dailyContinuity.contiguousCandles<110){
+      const gap=dailyContinuity.latestGap?" after gap "+dailyContinuity.latestGap.previousAt+" -> "+dailyContinuity.latestGap.nextAt:"";
+      readiness.push("Daily contiguous history "+dailyContinuity.contiguousCandles+"/110 completed candles"+gap);
+    }
+    if(fourHourContinuity.contiguousCandles<210){
+      const gap=fourHourContinuity.latestGap?" after gap "+fourHourContinuity.latestGap.previousAt+" -> "+fourHourContinuity.latestGap.nextAt:"";
+      readiness.push("Four-hour contiguous history "+fourHourContinuity.contiguousCandles+"/210 completed candles"+gap);
+    }
+    if(readiness.length){
+      const blockedByGap =
+        (dailyContinuity.gapCount>0&&dailyContinuity.contiguousCandles<110) ||
+        (fourHourContinuity.gapCount>0&&fourHourContinuity.contiguousCandles<210);
+      signalError=[signalError,...readiness].filter(Boolean).join("; ");
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,
+        signalStatus:blockedByGap?"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP":"WARMUP_REQUIRED",
+        signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     if(!quote){
@@ -1124,7 +1167,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
     if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
     else {
-      try { signal=evaluateEdgeBreakoutSignal({dailyCandles:daily.slice(-120),fourHourCandles:fourHour.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
+      try { signal=evaluateEdgeBreakoutSignal({dailyCandles:dailyContinuity.candles.slice(-120),fourHourCandles:fourHourContinuity.candles.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
       catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
     }
     markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
