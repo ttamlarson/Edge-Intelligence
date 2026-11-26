@@ -189,3 +189,10 @@
 - [ ] Verify a valid priced candidate blocked by an open position or daily-loss pause is consumed and cannot become a stale later entry.
 - [ ] Confirm crypto paper feedback uses closed trades only, includes simulated fees and realized drawdown, and remains marked NOT PROVEN at every sample size.
 - [ ] Confirm no new broker credentials, wallet, deposit, withdrawal, live order or real-money execution path exists.
+
+
+## CoinSpot MTF zero-trade gap diagnostics
+- [ ] Confirm a missing four-hour bucket is classified `CONFIRMED_NO_TRADES` only when the UTC daily trade count exactly equals the sum of validated stored four-hour trade counts for that date.
+- [ ] Confirm missing or mismatched trade-count metadata remains `UNVERIFIED_GAP`.
+- [ ] Confirm both confirmed-zero-trade and unverified gaps remain unfilled, and the 210-contiguous-four-hour-candle readiness gate still blocks entries.
+- [ ] Confirm the paper ledger, fee/slippage model, position sizing, stops, daily-loss limit, `paperOnly: true` and `liveTradingEnabled: false` remain unchanged.
