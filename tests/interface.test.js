@@ -42,3 +42,12 @@ test("a failed ASX CSV replacement cannot leave previous candidates actionable",
   assert.match(handler, /if\(!parsed\.valid\)\{[\s\S]*?renderAsxDesk\(\);return\}/);
   assert.match(handler, /reader\.onerror=\(\)=>\{[\s\S]*?asxCandidates=\[\];[\s\S]*?renderAsxDesk\(\);/);
 });
+
+
+test("CoinSpot MTF paper panel distinguishes an eligible entry from a blocked trigger", async () => {
+  const app = await readFile(resolve(root, "app.js"), "utf8");
+  assert.match(app, /m\.triggerModel/);
+  assert.match(app, /m\.failedChecks/);
+  assert.match(app, /Trigger only/);
+  assert.match(app, /Blocked by/);
+});
