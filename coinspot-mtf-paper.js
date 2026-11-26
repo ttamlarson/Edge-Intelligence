@@ -91,8 +91,7 @@ export function validateMtfPaperAccount(a) {
         Date.parse(p.openedAt) < Date.parse(p.signalAt) + FOUR_HOUR_MS ||
         (p.lastMarkAt !== undefined && (!validTimestamp(p.lastMarkAt) ||
           Date.parse(p.lastMarkAt) < Date.parse(p.openedAt) || Date.parse(p.lastMarkAt) > Date.parse(a.updatedAt))) ||
-        (p.markStatus !== undefined && !["CURRENT", "UNAVAILABLE", "STALE"].includes(p.markStatus)) ||
-        (p.markStatus === "CURRENT" && !p.lastMarkAt) ||
+        (p.markStatus !== undefined && (!["CURRENT", "UNAVAILABLE", "STALE"].includes(p.markStatus) || !p.lastMarkAt)) ||
         (p.entryModel !== undefined && !["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(p.entryModel)))
       throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
   }
