@@ -186,3 +186,17 @@ test("rejects closed trades with non-finite P&L or fee accounting before daily-l
  assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[trade]}),/ledger failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[{...trade,pnlAud:-1,exitFeeAud:Infinity}]}),/ledger failed validation/);
 });
+
+
+test("reconciles cash basis and net liquidation equity before using stored risk",()=>{
+ const base=createMtfPaperAccount(now);
+ assert.throws(()=>validateMtfPaperAccount({...base,cashAud:99,equityAud:99}),/balance\/equity reconciliation/);
+ assert.throws(()=>validateMtfPaperAccount({...base,equityAud:99}),/balance\/equity reconciliation/);
+ assert.throws(()=>validateMtfPaperAccount({...base,unrealizedPnlAud:-1,equityAud:99}),/balance\/equity reconciliation/);
+
+ const opened=processMtfPaperAccount(base,{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ assert.equal(validateMtfPaperAccount(opened),true);
+ assert.throws(()=>validateMtfPaperAccount({...opened,equityAud:opened.equityAud+1}),/balance\/equity reconciliation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,cashAud:opened.cashAud+1,equityAud:opened.equityAud+1}),/balance\/equity reconciliation/);
+});
