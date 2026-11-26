@@ -91,13 +91,11 @@ export function validateMtfPaperAccount(a) {
         (p.entryModel !== undefined && !["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(p.entryModel)))
       throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
   }
-  const positionCost = a.openPosition ? a.openPosition.entryCost : 0;
-  const expectedCashBasis = round(a.startingCapitalAud + a.realizedPnlAud);
-  const actualCashBasis = round(a.cashAud + positionCost);
-  const expectedEquity = round(a.cashAud + positionCost + a.unrealizedPnlAud);
   if ((!a.openPosition && Math.abs(a.unrealizedPnlAud) > 0.02) ||
-      Math.abs(actualCashBasis - expectedCashBasis) > 0.03 ||
-      Math.abs(a.equityAud - expectedEquity) > 0.03) {
+      Math.abs(round(a.cashAud + (a.openPosition ? a.openPosition.entryCost : 0)) -
+        round(a.startingCapitalAud + a.realizedPnlAud)) > 0.03 ||
+      Math.abs(a.equityAud -
+        round(a.cashAud + (a.openPosition ? a.openPosition.entryCost : 0) + a.unrealizedPnlAud)) > 0.03) {
     throw new Error("CoinSpot MTF paper ledger balance/equity reconciliation failed; stored data was not changed.");
   }
   return true;
