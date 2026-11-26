@@ -547,7 +547,26 @@ function validateCoinSpotHistoryProgress(progress, targetDate, startMs, endMs) {
   return true;
 }
 
-async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC) {
+function hasValidatedCoinSpotSubdayEpochMsFormat(providerProbe, coin) {
+  if (providerProbe?.readOnlyStatus !== "AUTHENTICATED" || !Array.isArray(providerProbe.markets)) return false;
+  const market = providerProbe.markets.find(item => item?.coin === coin || item?.pair === coin + "/AUD");
+  const partitions = market?.readOnlyHistory?.partitionHistory;
+  if (!Array.isArray(partitions) || partitions.length !== 2) return false;
+  const epochMsVariants = partitions.map(partition =>
+    Array.isArray(partition?.variants) ? partition.variants.find(variant => variant?.format === "epoch-ms") : null
+  );
+  if (epochMsVariants.some(variant =>
+    !variant || variant.status === "ERROR" ||
+    !Number.isSafeInteger(variant.validAudTrades) || variant.validAudTrades < 0 ||
+    !Number.isSafeInteger(variant.outOfRangeTrades) || variant.outOfRangeTrades !== 0
+  )) return false;
+  // Require at least one real in-range trade in the probe. An all-empty
+  // response cannot distinguish a genuinely quiet interval from an unsupported
+  // timestamp format, so it must not authorize dense-history partitioning.
+  return epochMsVariants.some(variant => variant.validAudTrades > 0);
+}
+
+async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC, allowEpochMsSubday = false) {
   const budget = { calls: 0 };
   const request = async (window, format) => {
     if (budget.calls >= maxRequests) return null;
@@ -578,6 +597,10 @@ async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = C
     const duration = window.endMs - window.startMs;
     const wholeUtcDay = duration === 86400000 && window.startMs % 86400000 === 0;
     const format = window.format || (wholeUtcDay ? "date" : "epoch-ms");
+    if (!wholeUtcDay && (format !== "epoch-ms" || !allowEpochMsSubday)) {
+      throw new HttpError(503, "COINSPOT_SUBDAY_EPOCH_MS_UNVERIFIED: " + coin +
+        "/AUD sub-day history is blocked until both provider-probe partitions validate epoch-millisecond filters.");
+    }
     let payload = await request(window, format);
     if (!payload) break;
     let count = payload.buyorders.length + payload.sellorders.length;
@@ -862,7 +885,8 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     const callsBefore=progress.apiCallsTotal;
     if(!progress.complete){
       try {
-        await fetchCoinSpotHistoryProgress(env, coin, progress);
+        const allowEpochMsSubday = hasValidatedCoinSpotSubdayEpochMsFormat(state.providerProbe, coin);
+        await fetchCoinSpotHistoryProgress(env, coin, progress, COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC, allowEpochMsSubday);
         if(progress.complete){
           const trades=progress.trades;
           const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);

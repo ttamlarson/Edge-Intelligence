@@ -91,7 +91,11 @@ test("CoinSpot live-day refresh replaces per-date trade counts instead of inflat
     }
   };
   const now = "2026-11-25T16:00:00.000Z";
-  const variants = [{ format: "epoch" }, { format: "epoch-string" }, { format: "epoch-ms" }];
+  const variants = [
+    { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+  ];
   const probeMarket = coin => ({ coin, readOnlyHistory: { partitionHistory: [{ variants }, { variants }] } });
   kv.values.set("coinspot-mtf-history-global-v1", JSON.stringify({
     mode: "COINSPOT_AUD_RESEARCH_ONLY", status: "COLLECTING_LIVE_DAY", startedAt: now,
@@ -144,7 +148,11 @@ test("CoinSpot live-day refresh replaces per-date trade counts instead of inflat
 test("CoinSpot dense history resumes in bounded chunks and completes without replaying fetched windows", async () => {
   const store = new Map();
   const now = "2026-11-25T12:00:00.000Z";
-  const variants = [{ format: "epoch" }, { format: "epoch-string" }, { format: "epoch-ms" }];
+  const variants = [
+    { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+  ];
   const probeMarket = coin => ({
     coin,
     readOnlyHistory: { partitionHistory: [{ variants }, { variants }] }
@@ -255,7 +263,11 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
 test("CoinSpot paper runner stops after an incomplete history chunk instead of retrying the same date four times", async () => {
   const store = new Map();
   const now = "2026-11-25T12:00:00.000Z";
-  const variants = [{ format: "epoch" }, { format: "epoch-string" }, { format: "epoch-ms" }];
+  const variants = [
+    { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+  ];
   const probeMarket = coin => ({
     coin,
     readOnlyHistory: { partitionHistory: [{ variants }, { variants }] }
