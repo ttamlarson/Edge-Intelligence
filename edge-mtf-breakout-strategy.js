@@ -249,7 +249,7 @@ export function evaluateEdgeBreakoutSignal({
       fourHourEma50: round(ema50), fourHourEma200: round(ema200),
       fourHourTrendSpreadPct: round((ema50 / ema200 - 1) * 100),
       longTrendSlopePct: round((ema200 / priorEma200 - 1) * 100),
-      atr20: round(volatility),
+      atr20: round(volatility), atrPct: round(volatilityPct * 100), breakoutVotes: votes,
       fourHourActualCandles: fourHour.length,
       fourHourElapsedIntervals: elapsedIntervals,
       fourHourConfirmedZeroTradeIntervals: confirmedZeroTradeIntervals.length,
