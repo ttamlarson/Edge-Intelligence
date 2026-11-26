@@ -228,7 +228,7 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
   assert.equal(epochMsRequests.length,4,"only provider-probe epoch-ms requests should run; unvalidated backfill partitions must not be queried");
   assert.ok(history.pendingHistorySync);
   assert.equal(history.pendingHistorySync.coins.BTC.windows.length,2);
-  assert.equal(history.markets.BTC.dailyCandles.length,0);
+  assert.equal(history.markets.BTC?.dailyCandles?.length ?? 0,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].validAudTrades,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.outOfRangeTrades,1000);
