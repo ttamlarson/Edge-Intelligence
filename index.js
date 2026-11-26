@@ -1205,11 +1205,22 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       const latestGap=fourHourContinuity.latestGap;
       let gap="";
       if(latestGap){
-        const missingStartAt=new Date(Date.parse(latestGap.previousAt)+COINSPOT_INTERVALS.fourHour).toISOString();
-        const diagnostic=historySummary.fourHourGapDiagnostics.find(item=>item.startAt===missingStartAt&&item.endAt===latestGap.nextAt);
-        gap=diagnostic?.status==="CONFIRMED_NO_TRADES"
-          ? " after confirmed zero-trade interval "+diagnostic.startAt+" -> "+diagnostic.endAt+" (daily and four-hour counts reconcile at "+diagnostic.dailyTradeCount+" trades)"
-          : " after unverified gap "+latestGap.previousAt+" -> "+latestGap.nextAt;
+        const missingStartMs=Date.parse(latestGap.previousAt)+COINSPOT_INTERVALS.fourHour;
+        const nextAtMs=Date.parse(latestGap.nextAt);
+        const missingStartAt=new Date(missingStartMs).toISOString();
+        const expectedIntervals=Number.isSafeInteger(latestGap.missingIntervals)&&latestGap.missingIntervals>0
+          ? latestGap.missingIntervals : Math.max(1,Math.round((nextAtMs-Date.parse(latestGap.previousAt))/COINSPOT_INTERVALS.fourHour)-1);
+        const diagnostics=historySummary.fourHourGapDiagnostics.filter(item=>{
+          const start=Date.parse(item.startAt),end=Date.parse(item.endAt);
+          return start>=missingStartMs&&end<=nextAtMs;
+        });
+        const confirmed=diagnostics.length===expectedIntervals&&diagnostics.every(item=>item.status==="CONFIRMED_NO_TRADES");
+        if(confirmed){
+          const dates=[...new Set(diagnostics.map(item=>item.startAt.slice(0,10)))];
+          const dateLabel=dates.length===1?"UTC date ":"UTC dates ";
+          const intervalLabel=expectedIntervals===1?"confirmed zero-trade interval":"confirmed zero-trade intervals";
+          gap=" after "+intervalLabel+" "+missingStartAt+" -> "+latestGap.nextAt+" (daily and four-hour counts reconcile for "+dateLabel+dates.join(", ")+")";
+        }else gap=" after unverified gap "+latestGap.previousAt+" -> "+latestGap.nextAt;
       }
       readiness.push("Four-hour contiguous history "+fourHourContinuity.contiguousCandles+"/210 completed candles"+gap);
     }
