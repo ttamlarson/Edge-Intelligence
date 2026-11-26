@@ -11,7 +11,7 @@ function validCandidate() {
   const bid = 100000, ask = 100100;
   return {
     coin: "BTC", pair: "BTC/AUD",
-    quote: { pair: "BTC/AUD", bid, ask, last: 100050, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000 },
+    quote: { pair: "BTC/AUD", bid, ask, last: 100050, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000, retrievedAt: openedAt },
     signal: {
       strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1", status: "BUY_CANDIDATE_PAPER_ONLY",
       signalAt, entryModel: "DONCHIAN_BREAKOUT",
@@ -33,7 +33,7 @@ test("controlled simulation completes a full paper buy-to-stop-exit lifecycle wi
   const stop = account.openPosition.stopPrice;
   const bid = stop * 0.99, ask = stop * 0.991;
   const exitMarket = { ...candidate,
-    quote: { pair: "BTC/AUD", bid, ask, last: bid, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000 },
+    quote: { pair: "BTC/AUD", bid, ask, last: bid, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000, retrievedAt: now },
     signal: { ...candidate.signal, status: "NO_TRADE", checks: { dailyTrend: true, fourHourTrend: true } }
   };
   account = processMtfPaperAccount(account, { markets: [exitMarket], now });
@@ -107,7 +107,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     assert.equal(blockedExisting.gates.BTC, "AI_BLOCKED");
     const stop = account.openPosition.stopPrice, bid = stop * 0.99, ask = bid * 1.001;
     const exitMarket = { ...blockedExisting.markets[0], quote: {
-      pair: "BTC/AUD", bid, ask, last: bid, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000
+      pair: "BTC/AUD", bid, ask, last: bid, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000, retrievedAt: now
     } };
     const closed = processMtfPaperAccount(account, { markets: [exitMarket], now });
     assert.equal(closed.openPosition, null, "AI veto must not disable existing-position stop management");

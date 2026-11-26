@@ -1229,7 +1229,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       coin: m.coin, pair: m.pair,
       signalStatus: aiGate.gates[m.coin] === "AI_BLOCKED" ? "AI_REVIEW_BLOCKED" : m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
-      spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
+      spreadBps: m.quote?.spreadBps ?? null, quoteRetrievedAt: m.quote?.retrievedAt || null,
+      dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0,
       contiguousDailyCandles: m.history?.contiguousDailyCandles ?? m.history?.dailyCandles ?? 0,
       contiguousFourHourCandles: m.history?.contiguousFourHourCandles ?? m.history?.fourHourCandles ?? 0,
@@ -1858,6 +1859,7 @@ export default {
               breakoutVotes: market.indicators.breakoutVotes
             } : null,
             spreadBps: market.spreadBps,
+            quoteRetrievedAt: market.quoteRetrievedAt || null,
             aiReviewStatus: market.aiReview?.status || "NOT_RUN",
             aiGateStatus: market.aiGateStatus || "NOT_REQUIRED"
           })),

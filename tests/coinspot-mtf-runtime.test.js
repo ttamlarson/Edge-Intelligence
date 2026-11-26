@@ -49,6 +49,7 @@ test("CoinSpot MTF status keeps signals blocked during warm-up but still retriev
   assert.equal(status.markets[0].signal,null);
   assert.equal(status.markets[0].quote.bid,100);
   assert.equal(status.markets[0].quote.ask,101);
+  assert.equal(status.markets[0].quote.retrievedAt,"2026-11-25T08:00:00.000Z");
   assert.equal(status.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
@@ -75,6 +76,7 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   assert.equal(result.paperOnly,true);
   assert.equal(result.markets.length,2);
   assert.equal(result.markets[0].signalStatus,"WARMUP_REQUIRED");
+   assert.equal(result.markets[0].quoteRetrievedAt,"2026-11-25T08:00:00.000Z");
   const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(history.lastProcessedDate,"2026-07-28");
   const account=JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));
@@ -139,7 +141,7 @@ test("existing paper positions remain stop-managed while historical candles are 
  const kv=kvStore(),originalFetch=globalThis.fetch;
  const now="2026-11-25T08:00:00.000Z";
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[{
-  coin:"BTC",pair:"BTC/AUD",quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:100000,spreadBps:10},
+  coin:"BTC",pair:"BTC/AUD",quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:100000,spreadBps:10,retrievedAt:now},
   signal:{strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt:"2026-11-25T04:00:00.000Z",
    indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},
    checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,pullbackReclaim:false,entryTrigger:true,liquidity:true,volatility:true},
@@ -483,6 +485,7 @@ test("CoinSpot MTF scheduled success emits a structured paper-only runtime summa
   assert.equal(summary.backfill.requested,4);
   assert.equal(summary.backfill.processed,4);
   assert.deepEqual(summary.markets.map(m=>m.pair),["BTC/AUD","ETH/AUD"]);
+   assert.ok(summary.markets.every(m=>Number.isFinite(Date.parse(m.quoteRetrievedAt))));
   assert.equal(summary.ledger.equityAud,100);
   assert.equal(summary.ledger.openPosition,null);
   assert.ok(!line.includes("test-readonly-key"));

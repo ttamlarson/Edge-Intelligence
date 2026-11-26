@@ -13,16 +13,23 @@ const validTimestamp = value => typeof value === "string" && Number.isFinite(Dat
   new Date(Date.parse(value)).toISOString() === value;
 const positiveFinite = value => Number.isFinite(value) && value > 0;
 const nonNegativeFinite = value => Number.isFinite(value) && value >= 0;
-function validPaperExitQuote(market) {
-  if (!validAudMarket(market)) return false;
+function quoteIsFresh(market, now) {
+  const retrievedAt = market?.quote?.retrievedAt;
+  const retrievedMs = Date.parse(retrievedAt || "");
+  const scanMs = Date.parse(now || "");
+  return validTimestamp(retrievedAt) && Number.isFinite(scanMs) &&
+    retrievedMs <= scanMs && scanMs - retrievedMs <= MARK_STALE_AFTER_MS;
+}
+function validPaperExitQuote(market, now) {
+  if (!validAudMarket(market) || !quoteIsFresh(market, now)) return false;
   const quote = market.quote;
   // Exits must use a coherent executable bid/ask, but the entry spread ceiling
   // must not prevent a protective stop from closing into a temporarily wide market.
   return [quote.bid, quote.ask, quote.last].every(Number.isFinite) &&
     quote.bid > 0 && quote.ask >= quote.bid && quote.last > 0;
 }
-function validPaperQuote(market) {
-  if (!validAudMarket(market)) return false;
+function validPaperQuote(market, now) {
+  if (!validAudMarket(market) || !quoteIsFresh(market, now)) return false;
   const quote = market.quote;
   if (![quote.bid, quote.ask, quote.last, quote.spreadBps].every(Number.isFinite) ||
       quote.bid <= 0 || quote.ask < quote.bid || quote.last <= 0 || quote.spreadBps < 0) return false;
@@ -159,7 +166,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   const p = a.openPosition;
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;
-    if (validPaperExitQuote(m)) {
+    if (validPaperExitQuote(m, now)) {
       p.lastMarkAt = now;
       p.markStatus = "CURRENT";
       // The trailing-stop high-water mark advances only on a completed four-hour
@@ -206,7 +213,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
       const ageAfterSignalClose = scanAt - (signalAt + 4 * 60 * 60 * 1000);
       const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "entryTrigger", "liquidity", "volatility"];
-      return validPaperQuote(m) &&
+      return validPaperQuote(m, now) &&
         signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
         signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
         signal?.execution?.orderIntent === "NONE" &&
@@ -225,8 +232,6 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
     for (const m of candidates) {
       const signalAt = m.signal.signalAt;
       if (!signalAt || a.lastProcessed[m.coin] === signalAt) continue;
-      a.lastProcessed[m.coin] = signalAt;
-
       const ask = m.quote.ask, entry = ask * (1 + MTF_PAPER_CONFIG.slippageBps / 10000);
       const equity = Math.max(0, Number.isFinite(a.equityAud) ? a.equityAud : a.cashAud);
       const riskBudget = equity * MTF_PAPER_CONFIG.riskBudgetPct / 100;
@@ -255,6 +260,10 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         entryFeeAud:round(fee), entryCost:round(entryCost),
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
         highestPrice:entry, lastMarkAt:now, markStatus:"CURRENT", status:"OPEN_PAPER_ONLY" };
+      // A signal is consumed only after a position is actually opened. If risk
+      // sizing or the minimum notional rejects it, the same fresh signal may be
+      // reconsidered on a later scan while it remains within its validity window.
+      a.lastProcessed[m.coin] = signalAt;
       // Mark the new position to the executable bid immediately. This includes
       // the modeled round-trip costs in equity and the daily-loss circuit from
       // the first scan rather than temporarily reporting par after entry.
