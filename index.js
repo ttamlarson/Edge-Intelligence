@@ -1109,6 +1109,9 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       contiguousDailyCandles: m.history?.contiguousDailyCandles ?? m.history?.dailyCandles ?? 0,
       contiguousFourHourCandles: m.history?.contiguousFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       signalWindowFourHourCandles: m.history?.signalWindowFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      indicatorFourHourCandles: m.history?.indicatorFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      indicatorFourHourGapCount: m.history?.indicatorFourHourGapCount ?? m.history?.fourHourGapCount ?? 0,
+      indicatorFourHourHistoryMode: m.history?.indicatorFourHourHistoryMode ?? "UNKNOWN",
       signalWindowElapsedIntervals: m.history?.signalWindowElapsedIntervals ?? m.history?.signalWindowFourHourCandles ?? 0,
       signalWindowMissingIntervals: m.history?.signalWindowMissingIntervals ?? 0,
       signalWindowConfirmedZeroTradeIntervals: m.history?.signalWindowConfirmedZeroTradeIntervals ?? 0,
@@ -1284,6 +1287,18 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     });
     const confirmedSignalWindowGaps=signalWindowGapDiagnostics.filter(item=>item.status==="CONFIRMED_NO_TRADES");
     const unverifiedSignalWindowGaps=signalWindowGapDiagnostics.filter(item=>item.status!=="CONFIRMED_NO_TRADES");
+    // Warm EMA50/EMA200 with all retained completed four-hour history when the
+    // full series is valid and has at most one reconciled zero-trade interval.
+    // Entry readiness still uses the latest 240 actual bars; older unverified
+    // or multiple gaps fall back to that signal window rather than being guessed.
+    const confirmedIndicatorHistoryGaps=historySummary.fourHourGapDiagnostics.filter(item=>item.status==="CONFIRMED_NO_TRADES");
+    const unverifiedIndicatorHistoryGaps=historySummary.fourHourGapDiagnostics.filter(item=>item.status!=="CONFIRMED_NO_TRADES");
+    const useFullIndicatorHistory=unverifiedIndicatorHistoryGaps.length===0&&confirmedIndicatorHistoryGaps.length<=1;
+    const indicatorFourHourCandles=useFullIndicatorHistory?fourHour:fourHourSignalWindow;
+    const indicatorConfirmedZeroTradeGaps=useFullIndicatorHistory?confirmedIndicatorHistoryGaps:confirmedSignalWindowGaps;
+    historySummary.indicatorFourHourCandles=indicatorFourHourCandles.length;
+    historySummary.indicatorFourHourGapCount=indicatorConfirmedZeroTradeGaps.length;
+    historySummary.indicatorFourHourHistoryMode=useFullIndicatorHistory?"FULL_VALIDATED_HISTORY":"SIGNAL_WINDOW_FALLBACK";
     const elapsedSignalWindowIntervals=fourHourSignalWindow.length
       ? Math.round((signalWindowEnd-signalWindowStart)/COINSPOT_INTERVALS.fourHour)+1 : 0;
     historySummary.signalWindowFourHourCandles=fourHourSignalWindow.length;
@@ -1333,8 +1348,8 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     else {
       try { signal=evaluateEdgeBreakoutSignal({
         dailyCandles:dailyContinuity.candles.slice(-120),
-        fourHourCandles:fourHourSignalWindow,
-        confirmedZeroTradeIntervals:confirmedSignalWindowGaps,
+        fourHourCandles:indicatorFourHourCandles,
+        confirmedZeroTradeIntervals:indicatorConfirmedZeroTradeGaps,
         asOf:clock,spreadBps:quote.spreadBps
       }); }
       catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
@@ -1682,6 +1697,9 @@ export default {
             signalStatus: market.signalStatus,
             completedDailyCandles: market.dailyCandles,
             completedFourHourCandles: market.fourHourCandles,
+            signalWindowFourHourCandles: market.signalWindowFourHourCandles,
+            indicatorFourHourCandles: market.indicatorFourHourCandles,
+            indicatorFourHourHistoryMode: market.indicatorFourHourHistoryMode,
             storedDailyCandles: market.storedDailyCandles,
             storedFourHourCandles: market.storedFourHourCandles,
             lastCompletedDailyAt: market.lastCompletedDailyAt,
