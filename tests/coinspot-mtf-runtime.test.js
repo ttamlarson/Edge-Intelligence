@@ -646,3 +646,74 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
 function multiplegapsBars(bars) {
  return bars.filter(c=>c.timestamp!=="2026-11-22T20:00:00.000Z");
 }
+
+
+test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history blockers", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch,originalLog=console.log,calls=[],messages=[];
+ const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const daily=Array.from({length:122},(_,index)=>{
+  const close=150-index*0.3;
+  return {
+   timestamp:new Date(Date.parse("2026-07-28T00:00:00.000Z")+index*day).toISOString(),
+   open:close+0.1,high:close+1,low:close-1,close,volume:1000,tradeCount:100
+  };
+ });
+ const fourHourBars=Array.from({length:420},(_,index)=>{
+  const close=200-index*0.2;
+  return {
+   timestamp:new Date(Date.parse("2026-09-17T20:00:00.000Z")+index*fourHours).toISOString(),
+   open:close+0.1,high:close+1,low:close-1,close,volume:100,tradeCount:20
+  };
+ });
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",
+  nextDate:"2026-11-26",lastProcessedDate:"2026-11-26",liveTradingEnabled:false,
+  markets:{
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:42000,lastHistoryDate:"2026-11-26"},
+   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:18000,lastHistoryDate:"2026-11-26"}
+  }
+ }));
+ globalThis.fetch=async url=>{
+  const target=String(url);calls.push(target);
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
+  throw new Error("Unexpected request in paper-only telemetry test: "+target);
+ };
+ console.log=(...args)=>messages.push(args.join(" "));
+ let pending;
+ try{
+  await worker.scheduled({scheduledTime:Date.parse("2026-11-26T20:15:00.000Z")},{EDGE_KV:kv.binding},{waitUntil:promise=>{pending=promise;}});
+  assert.ok(pending instanceof Promise);
+  await pending;
+  const line=messages.find(message=>message.includes('"event":"COINSPOT_MTF_SCAN"'));
+  assert.ok(line);
+  const summary=JSON.parse(line);
+  const btc=summary.markets.find(market=>market.pair==="BTC/AUD");
+  assert.equal(btc.signalStatus,"NO_TRADE");
+  assert.ok(btc.failedChecks.includes("dailyTrend"));
+  assert.ok(btc.failedChecks.includes("fourHourTrend"));
+  assert.ok(btc.failedChecks.includes("positiveLongTrendSlope"));
+  assert.ok(btc.failedChecks.includes("entryTrigger"));
+  assert.equal(btc.checks.liquidity,true);
+  assert.equal(btc.checks.volatility,true);
+  assert.equal(btc.signalWindowStatus,"READY_CONTIGUOUS");
+  assert.equal(btc.signalWindowMissingIntervals,0);
+  assert.equal(btc.signalWindowConfirmedZeroTradeIntervals,0);
+  assert.equal(btc.signalError,null);
+  assert.equal(btc.aiGateStatus,"NOT_REQUIRED");
+  assert.equal(summary.lastError,"CoinSpot Read Only API credentials are not configured.");
+  assert.equal(summary.historySync,null);
+  assert.equal(summary.paperOnly,true);
+  assert.equal(summary.liveTradingEnabled,false);
+  assert.equal(calls.length,2);
+  assert.ok(calls.every(url=>url.includes("/pubapi/v2/latest/")));
+  const saved=JSON.parse(kv.values.get("coinspot-mtf-paper-status-global-v1"));
+  assert.deepEqual(saved.markets.find(market=>market.pair==="BTC/AUD").failedChecks,btc.failedChecks);
+  assert.equal(saved.paperOnly,true);
+  assert.equal(saved.liveTradingEnabled,false);
+ }finally{
+  globalThis.fetch=originalFetch;
+  console.log=originalLog;
+ }
+});
