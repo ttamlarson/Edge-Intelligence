@@ -1061,7 +1061,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
     strategyStatus: strategy.status || "UNKNOWN", historySync,
     backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
-      coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
+      coin: m.coin, pair: m.pair, signalStatus: aiGate.gates[m.coin] === "AI_BLOCKED" ? "AI_REVIEW_BLOCKED" : m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
       spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0,
