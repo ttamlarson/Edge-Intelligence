@@ -8,7 +8,7 @@ import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpo
 import { evaluateEdgeBreakoutSignal } from "./edge-mtf-breakout-strategy.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
-import { AUTO_SYMBOLS, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
+import { AUTO_SYMBOLS, calculateAutoPaperPerformance, createAutoPaperAccount, normalizeAutoPaperAccount, validateAutoPaperAccount, evaluateAutoSignal, processAutoPaperSignals } from "./crypto-auto-paper.js";
 import { normalizeBinanceHourlyKlines } from "./binance-market-data.js";
 
 const PRED_BASE = "https://prediction.com/api/v2";
@@ -479,7 +479,7 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
   const signals = Object.fromEntries(results.filter(x => x.signal).map(x => [x.symbol,x.signal]));
   account = processAutoPaperSignals(account, { signals, prices, now: nowIso });
   const liveMarkets = results.filter(x => x.status === "LIVE_PUBLIC_DATA").length;
-  const snapshot = { ...account, markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,errorDetail:x.errorDetail||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:nowIso, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
+  const snapshot = { ...account, paperOnly:true, performance:calculateAutoPaperPerformance(account), candidateRanking:account.lastCandidateRanking||[], markets: results.map(x => ({ symbol:x.symbol,status:x.status,provider:x.provider||null,errorCode:x.errorCode||null,errorDetail:x.errorDetail||null,latestClosedCandle:x.latestClosedCandle||null,signal:x.signal?.signal||false,reason:x.signal?.reason||x.errorCode||"NO_QUALIFYING_SIGNAL",rsi:x.signal?.rsi??null,adx:x.signal?.adx??null,checks:x.signal?.checks||null,failedChecks:x.signal?.failedChecks||[] })), marketDataStatus: liveMarkets ? "PARTIAL_OR_FULL" : "ALL_PROVIDERS_UNAVAILABLE", liveMarketCount:liveMarkets, lastScanAt:nowIso, scanIntervalMinutes:15, dataSource:"Binance public market-data API · USDT pairs", observationType:"AUTOMATED_SIMULATED_PAPER_TRADING", liveTradingEnabled:false };
   await env.EDGE_KV.put(key, JSON.stringify(snapshot));
   return snapshot;
 }
@@ -1150,7 +1150,7 @@ async function handle(request, env, ctx) {
   // Access authentication first-party (including Safari/iOS).
   if (!requestUrl.pathname.startsWith("/api/")) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed." }, 405, origin, env);
-    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/crypto-auto-paper.js", "/coinspot-strategy.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js", "/regime-adaptive-breakout.js", "/trend-following-indicators.js"]);
+    const allowedAssets = new Set(["/", "/index.html", "/app.js", "/domain.js", "/au-sources.js", "/autonomous-engine.js", "/crypto-engine.js", "/crypto-csv.js", "/coinspot.js", "/coinspot-paper.js", "/crypto-auto-paper.js", "/coinspot-strategy.js", "/crypto-strategy-comparison.js", "/styles.css", "/manifest.webmanifest", "/sw.js", "/icon.svg", "/icon-192.png", "/icon-512.png", "/adaptive-regime-strategy.js", "/regime-adaptive-breakout.js", "/trend-following-indicators.js"]);
     if (!allowedAssets.has(requestUrl.pathname)) return json({ error: "Not found" }, 404, origin, env);
     const assetPath = requestUrl.pathname === "/" ? "/" : requestUrl.pathname;
     const upstream = await fetch("https://edge-intelligence-486.pages.dev" + assetPath, { headers: { Accept: request.headers.get("Accept") || "*/*" } });
@@ -1216,11 +1216,16 @@ async function handle(request, env, ctx) {
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
     if (request.method === "POST") return reply(await runAutomatedCryptoPaper(env));
     const stored = await env.EDGE_KV.get("crypto-auto-paper-global-v1");
-    if (!stored) return reply({ ...createAutoPaperAccount(), markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", liveTradingEnabled: false });
+    if (!stored) {
+      const account = createAutoPaperAccount();
+      return reply({ ...account, markets: [], status: "WAITING_FOR_FIRST_SCHEDULED_SCAN", performance: calculateAutoPaperPerformance(account), candidateRanking: [] });
+    }
     let snapshot; try { snapshot = JSON.parse(stored); } catch { throw new HttpError(502, "Automated paper ledger is invalid JSON; stored data was preserved."); }
-    try { validateAutoPaperAccount(snapshot); } catch { throw new HttpError(409, "Automated paper ledger failed validation; stored data was preserved."); }
-    if (snapshot?.mode !== "AUTOMATED_PAPER_ONLY" || snapshot.liveTradingEnabled !== false) throw new HttpError(409, "Automated paper ledger failed its safety validation; stored data was preserved.");
-    return reply(snapshot);
+    const needsPaperOnlyMigration = snapshot?.paperOnly !== true;
+    try { validateAutoPaperAccount(snapshot); snapshot = normalizeAutoPaperAccount(snapshot, snapshot.updatedAt); }
+    catch { throw new HttpError(409, "Automated paper ledger failed validation; stored data was preserved."); }
+    if (needsPaperOnlyMigration) await env.EDGE_KV.put("crypto-auto-paper-global-v1", JSON.stringify(snapshot));
+    return reply({ ...snapshot, paperOnly: true, performance: calculateAutoPaperPerformance(snapshot), candidateRanking: Array.isArray(snapshot.lastCandidateRanking) ? snapshot.lastCandidateRanking : [] });
   }
 
   if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "GET") {
