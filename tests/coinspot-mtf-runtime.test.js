@@ -651,6 +651,16 @@ function multiplegapsBars(bars) {
 test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history blockers", async () => {
  const kv=kvStore(),originalFetch=globalThis.fetch,originalLog=console.log,calls=[],messages=[];
  const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const targetDate="2026-11-26",startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+day;
+ const completeMarket=()=>({
+  windows:[],processedThroughMs:endMs,trades:[],rawRowsSeen:0,rawBuyOrders:0,rawSellOrders:0,
+  apiCallsTotal:0,emptyPrimaryResponses:0,emptyHistoryWindows:0,dateFormatFallbackHits:0,
+  queryFormatsAttempted:[],marketsSeen:[],sampleOrderAt:null,saturatedWindows:0,complete:true,tradeCount:0
+ });
+ const probeMarket=coin=>({coin,pair:coin+"/AUD",readOnlyHistory:{partitionHistory:[
+  {variants:[{format:"date"},{format:"epoch"},{format:"epoch-ms"}]},
+  {variants:[{format:"date"},{format:"epoch"},{format:"epoch-ms"}]}
+ ]}});
  const daily=Array.from({length:122},(_,index)=>{
   const close=150-index*0.3;
   return {
@@ -666,11 +676,15 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   };
  });
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
-  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",
-  nextDate:"2026-11-26",lastProcessedDate:"2026-11-26",liveTradingEnabled:false,
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
+  nextDate:targetDate,lastProcessedDate:"2026-11-25",lastBatchDate:"2026-11-25",
+  lastProviderProbeAt:"2026-11-26T20:00:00.000Z",
+  providerProbe:{readOnlyStatus:"AUTHENTICATED",markets:[probeMarket("BTC"),probeMarket("ETH")]},
+  pendingHistorySync:{targetDate,coins:{BTC:completeMarket(),ETH:completeMarket()}},
+  liveTradingEnabled:false,
   markets:{
-   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:42000,lastHistoryDate:"2026-11-26"},
-   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:18000,lastHistoryDate:"2026-11-26"}
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:42000,lastHistoryDate:targetDate},
+   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:18000,lastHistoryDate:targetDate}
   }
  }));
  globalThis.fetch=async url=>{
@@ -683,7 +697,9 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
  console.log=(...args)=>messages.push(args.join(" "));
  let pending;
  try{
-  await worker.scheduled({scheduledTime:Date.parse("2026-11-26T20:15:00.000Z")},{EDGE_KV:kv.binding},{waitUntil:promise=>{pending=promise;}});
+  await worker.scheduled({scheduledTime:Date.parse("2026-11-26T20:15:00.000Z")},{
+   EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-readonly-key",COINSPOT_READONLY_SECRET:"test-readonly-secret"
+  },{waitUntil:promise=>{pending=promise;}});
   assert.ok(pending instanceof Promise);
   await pending;
   const line=messages.find(message=>message.includes('"event":"COINSPOT_MTF_SCAN"'));
@@ -701,9 +717,14 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   assert.equal(btc.signalWindowMissingIntervals,0);
   assert.equal(btc.signalWindowConfirmedZeroTradeIntervals,0);
   assert.equal(btc.signalError,null);
+  assert.ok(btc.signalMetrics.dailyTrendDistancePct<0);
+  assert.ok(btc.signalMetrics.fourHourTrendSpreadPct<0);
+  assert.ok(btc.signalMetrics.longTrendSlopePct<0);
   assert.equal(btc.aiGateStatus,"NOT_REQUIRED");
-  assert.equal(summary.lastError,"CoinSpot Read Only API credentials are not configured.");
-  assert.equal(summary.historySync,null);
+  assert.equal(summary.lastError,null);
+  assert.equal(summary.historySync.status,"COLLECTING_LIVE_DAY");
+  assert.equal(summary.historySync.dateComplete,true);
+  assert.equal(summary.historyRequestsThisScan,0);
   assert.equal(summary.paperOnly,true);
   assert.equal(summary.liveTradingEnabled,false);
   assert.equal(calls.length,2);
