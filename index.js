@@ -1169,8 +1169,9 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       fourHourGapDiagnostics:[]
     };
     let dailyContinuity, fourHourContinuity, candleValidationError = null;
-    // Missing intervals are never filled with synthetic OHLCV candles. The
-    // latest genuinely contiguous run is evaluated independently of older gaps.
+    // Missing intervals are never filled with synthetic OHLCV candles. A
+    // signal window may span one interval only when daily/four-hour trade
+    // counts reconcile exactly; all other gaps remain blocked.
     try {
       dailyContinuity = latestContiguousCandleRun(daily, COINSPOT_INTERVALS.daily, "Daily history");
       fourHourContinuity = latestContiguousCandleRun(fourHour, COINSPOT_INTERVALS.fourHour, "Four-hour history");
