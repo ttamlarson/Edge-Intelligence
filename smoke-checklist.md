@@ -204,3 +204,10 @@
 - [ ] Confirm the ledger records `DONCHIAN_BREAKOUT` or `PULLBACK_RECLAIM` and rejects `entryTrigger: true` if neither underlying trigger is true.
 - [ ] Confirm an intrabar quote cannot advance the trailing-stop high-water mark; only a completed four-hour candle after the position opened can do so.
 - [ ] Confirm fees, slippage, 25% allocation cap, 0.5% risk budget, A$3 daily-loss circuit, ATR stops, paper-only marker and disabled live-trading flag remain unchanged.
+
+
+## CoinSpot MTF quote and ledger integrity
+- [ ] Confirm the paper execution layer recomputes midpoint spread from bid/ask and rejects a quote whose reported spread is missing, inconsistent or understated.
+- [ ] Confirm persisted open-position entry cost equals notional plus entry fee within rounding tolerance, and stop/ATR/timestamps are valid before a position is managed.
+- [ ] Confirm closed trades require finite net P&L, entry/exit fees, prices, quantity and chronological timestamps before daily-loss calculations.
+- [ ] Confirm invalid KV ledger data is rejected without resetting or overwriting the existing record; paper-only and live-trading safety flags remain unchanged.
