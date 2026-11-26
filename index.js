@@ -1844,7 +1844,38 @@ export default {
             status: snapshot.historySync.status || null,
             processedDate: snapshot.historySync.processedDate || null,
             nextDate: snapshot.historySync.nextDate || null,
-            dateComplete: snapshot.historySync.dateComplete === true
+            dateComplete: snapshot.historySync.dateComplete === true,
+            progress: snapshot.historySync.progress || null,
+            lastBatch: (snapshot.historySync.markets || []).map(market => ({
+              coin: market.coin,
+              tradeCount: market.tradeCount ?? null,
+              partialTradeCount: market.partialTradeCount ?? null,
+              complete: market.complete === true,
+              apiCalls: market.apiCalls ?? null,
+              pendingWindows: market.pendingWindows ?? null,
+              rawBuyOrders: market.rawBuyOrders ?? null,
+              rawSellOrders: market.rawSellOrders ?? null,
+              marketsSeen: market.marketsSeen || []
+            })),
+            providerProbe: snapshot.historySync.providerProbe ? {
+              checkedAt: snapshot.historySync.providerProbe.checkedAt || null,
+              readOnlyStatus: snapshot.historySync.providerProbe.readOnlyStatus || null,
+              partitionValidationComputedAt: snapshot.historySync.providerProbe.partitionValidationComputedAt || null,
+              markets: (snapshot.historySync.providerProbe.markets || []).map(market => ({
+                pair: market.pair || (market.coin ? market.coin + "/AUD" : null),
+                validAudTrades: market.readOnlyHistory?.validAudTrades ?? null,
+                outOfRangeTrades: market.readOnlyHistory?.outOfRangeTrades ?? null,
+                publicHistoryPossiblyCapped: market.publicHistory?.possiblyCapped === true,
+                partitionValidation: market.readOnlyHistory?.partitionValidation ? {
+                  status: market.readOnlyHistory.partitionValidation.status || null,
+                  reason: market.readOnlyHistory.partitionValidation.reason || null,
+                  fullDayTradeCount: market.readOnlyHistory.partitionValidation.fullDayTradeCount ?? null,
+                  partitionTradeCount: market.readOnlyHistory.partitionValidation.partitionTradeCount ?? null,
+                  fullDayOutOfRangeTrades: market.readOnlyHistory.partitionValidation.fullDayOutOfRangeTrades ?? null,
+                  partitionOutOfRangeTrades: market.readOnlyHistory.partitionValidation.partitionOutOfRangeTrades ?? null
+                } : null
+              }))
+            } : null
           } : null,
           historyRequestsThisScan: snapshot.historyRequestsThisScan || 0,
           lastError: snapshot.lastError || null,
