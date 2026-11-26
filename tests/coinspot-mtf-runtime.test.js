@@ -601,7 +601,6 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   assert.equal(eth.history.signalWindowStatus,"READY_WITH_CONFIRMED_ZERO_TRADE_GAP");
   assert.ok(eth.signal.failedChecks.includes("dailyTrend"));
   assert.equal(eth.history.fourHourCandles,419);
-  assert.equal(eth.history.fourHourCandles,419);
   assert.equal(eth.history.storedFourHourCandles,420);
 
   const storedState=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
