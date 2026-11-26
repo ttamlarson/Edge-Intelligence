@@ -230,3 +230,6 @@
 - [ ] Confirm persisted-ledger validation rejects a daily-loss value that understates current-day realized losses plus the retained open-position loss.
 - [ ] Invoke the paper runner with a scan timestamp older than the persisted ledger; confirm it rejects before CoinSpot history requests and leaves history, ledger and status KV values unchanged.
 - [ ] Confirm a same-time or newer scan remains processable and that all entries/exits remain simulated with `paperOnly: true` and `liveTradingEnabled: false`.
+
+
+- [ ] Confirm a legacy open-position ledger with no `riskAccountingVersion` is accepted for one-time migration, its retained unrealized loss is restored to `dailyLossAud`, and version 2 is persisted without resetting cash, position or trade history.

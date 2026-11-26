@@ -318,3 +318,6 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Reject backdated paper scan clocks before CoinSpot history synchronization, preserving the existing history cursor, ledger and status records.
 - [x] Add regression tests for stale-quote day rollover, understated daily-loss metadata, direct backdated ledger processing and scheduled-runner no-write behavior.
 - Risk limits, capital, fees, slippage, position sizing, stops, entry gates and all live-trading safety flags remain unchanged. This remains simulated paper trading only.
+
+
+- Legacy MTF ledgers without a risk-accounting version are migrated additively on the next scan; version 2 requires persisted daily loss to cover realized and retained open-position losses. No cash, position or trade history is reset.

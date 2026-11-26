@@ -268,3 +268,16 @@ test("rejects a backdated MTF paper scan without changing the supplied ledger",(
  assert.throws(()=>processMtfPaperAccount(opened,{markets:[],now:"2026-11-25T07:59:59.999Z"}),/cannot move backwards/);
  assert.deepEqual(opened,before);
 });
+
+
+test("migrates a legacy open-position ledger whose stored daily loss omitted its unrealized loss",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const legacy={...opened};
+ delete legacy.riskAccountingVersion;
+ legacy.dailyLossAud=0;
+ assert.equal(validateMtfPaperAccount(legacy),true);
+ const upgraded=processMtfPaperAccount(legacy,{markets:[],now:"2026-11-25T08:15:00.000Z"});
+ assert.equal(upgraded.riskAccountingVersion,2);
+ assert.ok(upgraded.dailyLossAud>=Math.max(0,-opened.unrealizedPnlAud));
+ assert.equal(validateMtfPaperAccount(upgraded),true);
+});

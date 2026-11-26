@@ -252,3 +252,6 @@ The automated paper engine accepts an entry only when both the market and its qu
 - Persisted-ledger validation requires the daily-loss amount to cover current-day realized losses plus the retained open-position unrealized loss.
 - Backdated or replayed scan timestamps are rejected before CoinSpot history synchronization, preventing a delayed scheduled event from rewinding history or ledger state.
 - The A$100 simulated capital, fee/slippage assumptions, sizing, stops, holding period, entry gates and live-trading safety flags are unchanged. No exchange order, withdrawal or transfer is submitted.
+
+
+- Legacy CoinSpot MTF ledgers without `riskAccountingVersion` are upgraded additively on the next paper scan. The version-2 ledger requires daily loss to cover realized losses plus any retained open-position unrealized loss.
