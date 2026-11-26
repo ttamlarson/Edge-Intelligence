@@ -464,8 +464,9 @@ export function calculatePaperPortfolioEquity(portfolio) {
 export function recordPaperMark(portfolio, positionId, markPrice, {
   markedAt = new Date().toISOString(), costs, now = Date.now(), maxFutureSkewMs = 5 * 60_000
 } = {}) {
-  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) {
-    return { accepted: false, reason: "Simulation-only portfolio required." };
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true)) {
+    return { accepted: false, reason: "Simulation-only paper-only portfolio required." };
   }
   if (portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) ||
       !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
