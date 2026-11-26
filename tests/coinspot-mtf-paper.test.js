@@ -60,6 +60,13 @@ test("open-position mark freshness becomes unavailable then stale without changi
  assert.equal(validateMtfPaperAccount(recovered),true);
 });
 
+test("rejects malformed or inconsistent persisted position mark metadata",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,markStatus:"UNKNOWN"}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,markStatus:"STALE",lastMarkAt:undefined}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,lastMarkAt:"2026-11-25T09:00:00.000Z"}}),/position failed validation/);
+});
+
 test("legacy open positions acquire a conservative stale-mark timestamp when quotes are unavailable",()=>{
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  const legacy={...opened,openPosition:{...opened.openPosition}};
