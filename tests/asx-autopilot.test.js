@@ -338,3 +338,32 @@ test("ASX autopilot retries the same completed bar after a recoverable AI provid
   assert.equal(second.lastBarBySymbol.BHP, undefined);
   assert.equal(second.scanCount, 2);
 });
+
+test("ASX paper-only migration preserves an existing ledger and rejects an explicit unsafe marker",async()=>{
+ const now=Date.parse("2026-11-26T08:00:00.000Z"),legacy=__test.initialSnapshot();
+ delete legacy.paperOnly;delete legacy.portfolio.paperOnly;
+ legacy.portfolio.cashAud=412.5;
+ legacy.portfolio.closedTrades=[{id:"legacy-close",status:"CLOSED_PAPER",profitLossAud:7,closedAt:"2026-11-25T08:00:00.000Z"}];
+ legacy.lastScanAt=new Date(now-60*60_000).toISOString();
+ const normalized=__test.validateSnapshot(legacy);
+ assert.equal(normalized.paperOnly,true);assert.equal(normalized.portfolio.paperOnly,true);
+ assert.equal(normalized.portfolio.cashAud,412.5);assert.equal(normalized.portfolio.closedTrades.length,1);
+ const store=kv(JSON.stringify(legacy));
+ const result=await runAsxAutopilot({
+  ASX_AUTOPILOT_ENABLED:"true",ASX_AUTOPILOT_SYMBOLS:"BHP",DATACEDAR_API_KEY:"server-secret",EDGE_KV:store.binding
+ },{now:new Date(now),fetchImpl:async()=>{throw new Error("Throttled scan must not call DataCedar.");}});
+ assert.equal(result.status,"SCAN_THROTTLED");
+ const persisted=JSON.parse(store.values.get(__test.STORAGE_KEY));
+ assert.equal(persisted.paperOnly,true);assert.equal(persisted.portfolio.paperOnly,true);
+ assert.equal(persisted.portfolio.cashAud,412.5);assert.equal(persisted.portfolio.closedTrades[0].profitLossAud,7);
+ const unsafe={...legacy,paperOnly:false};
+ const unsafeStore=kv(JSON.stringify(unsafe)),before=unsafeStore.values.get(__test.STORAGE_KEY);
+ await assert.rejects(()=>runAsxAutopilot({
+  ASX_AUTOPILOT_ENABLED:"true",ASX_AUTOPILOT_SYMBOLS:"BHP",DATACEDAR_API_KEY:"server-secret",EDGE_KV:unsafeStore.binding
+ },{now:new Date(now),fetchImpl:async()=>{throw new Error("Must not fetch.");}}),/corrupt|validation/i);
+ assert.equal(unsafeStore.values.get(__test.STORAGE_KEY),before);
+});
+
+test("ASX paper portfolio constructor is explicitly paper-only",()=>{
+ assert.equal(createPaperPortfolio().paperOnly,true);
+});
