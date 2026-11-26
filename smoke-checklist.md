@@ -118,8 +118,8 @@
 - [ ] Verify Read Only API key can access `/orders/market/completed` for BTC/AUD and ETH/AUD.
 - [ ] Verify HMAC signature and nonce ordering on repeated historical requests.
 - [ ] Verify historical fetch splits saturated windows and never saves truncated results.
-- [ ] Confirm candles are derived only from actual CoinSpot AUD completed orders; missing 4h/daily intervals are not filled.
-- [ ] Confirm 110 completed daily and 210 completed 4h candles plus freshness and spread checks are required before any candidate signal.
+- [ ] Confirm candles are derived only from actual CoinSpot AUD completed orders; missing 4h/daily intervals are not filled. The strategy may use a newer contiguous tail after an older gap, but must not bridge or fabricate the missing interval.
+- [ ] Confirm 110 completed daily and 210 completed 4h candles in the latest contiguous runs plus freshness and spread checks are required before any candidate signal; verify exact gap timestamps and contiguous counts are surfaced when blocked.
 - [ ] Confirm strategy status is authenticated, rate-limited, and never places an exchange order.
 - [ ] Confirm scheduled backfill advances one UTC day per 15-minute cron and preserves history on errors.
 
