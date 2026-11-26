@@ -103,7 +103,7 @@ test("signal rejects incomplete candles and broken chronological series", () => 
   gap[100].timestamp = new Date(Date.parse(gap[100].timestamp) + 3600000).toISOString();
   assert.throws(() => evaluateEdgeBreakoutSignal({
     dailyCandles, fourHourCandles: gap, asOf: latest + 4 * 3600000
-  }), /non-contiguous/i);
+  }), /misaligned|non-contiguous/i);
 });
 
 test("spread, liquidity and bearish regime filters fail closed", () => {
@@ -156,6 +156,80 @@ test("exit helper applies trailing stop, daily reversal and maximum holding peri
   assert.equal(timed.reason, "MAXIMUM_HOLDING_PERIOD");
 });
 
+
+
+test("accepts one reconciled zero-trade interval without fabricating a candle and time-adjusts indicators", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const gapBars = fourHourCandles.map((candle, index) => ({
+    ...candle,
+    timestamp: new Date(Date.parse(candle.timestamp) + (index >= 100 ? 4 * 3600000 : 0)).toISOString()
+  }));
+  const startAt = new Date(Date.parse(fourHourCandles[99].timestamp) + 4 * 3600000).toISOString();
+  const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
+  const signal = evaluateEdgeBreakoutSignal({
+    dailyCandles, fourHourCandles: gapBars,
+    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 }],
+    asOf: Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000,
+    spreadBps: 10
+  });
+  assert.equal(signal.status, "BUY_CANDIDATE_PAPER_ONLY");
+  assert.equal(signal.signalAt, gapBars.at(-1).timestamp);
+  assert.equal(signal.indicators.fourHourActualCandles, 220);
+  assert.equal(signal.indicators.fourHourElapsedIntervals, 221);
+  assert.equal(signal.indicators.fourHourConfirmedZeroTradeIntervals, 1);
+  assert.equal(gapBars.length, 220, "the missing interval must not be represented by a synthetic candle");
+  assert.equal(Date.parse(gapBars[100].timestamp) - Date.parse(gapBars[99].timestamp), 8 * 3600000);
+});
+
+test("does not treat a candle after a confirmed zero-trade gap as an adjacent pullback reclaim", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  fourHourCandles[218] = {
+    ...fourHourCandles[218], open: 221.7, high: 221.8, low: 219.8, close: 220
+  };
+  fourHourCandles[219] = {
+    ...fourHourCandles[219], open: 220.1, high: 221.3, low: 220, close: 221.2,
+    timestamp: new Date(Date.parse(fourHourCandles[219].timestamp) + 4 * 3600000).toISOString()
+  };
+  const startAt = new Date(Date.parse(fourHourCandles[218].timestamp) + 4 * 3600000).toISOString();
+  const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
+  const signal = evaluateEdgeBreakoutSignal({
+    dailyCandles, fourHourCandles,
+    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 }],
+    asOf: Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000,
+    spreadBps: 10
+  });
+  assert.equal(signal.checks.pullbackReclaim, false);
+  assert.equal(signal.checks.entryTrigger, false);
+  assert.equal(signal.status, "NO_TRADE");
+});
+
+test("rejects unverified, unused and excessive zero-trade gap metadata", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const gapBars = fourHourCandles.map((candle, index) => ({
+    ...candle,
+    timestamp: new Date(Date.parse(candle.timestamp) + (index >= 100 ? 4 * 3600000 : 0)).toISOString()
+  }));
+  const startAt = new Date(Date.parse(fourHourCandles[99].timestamp) + 4 * 3600000).toISOString();
+  const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
+  const gap = { startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 };
+  const args = { dailyCandles, fourHourCandles: gapBars, asOf: Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000 };
+  assert.throws(() => evaluateEdgeBreakoutSignal(args), /unverified or unapproved missing interval/i);
+  assert.throws(() => evaluateEdgeBreakoutSignal({
+    ...args, confirmedZeroTradeIntervals: [{ ...gap, status: "UNVERIFIED_GAP" }]
+  }), /unverified or malformed zero-trade interval/i);
+  assert.throws(() => evaluateEdgeBreakoutSignal({
+    ...args, confirmedZeroTradeIntervals: [{ ...gap, observedFourHourTradeCount: 4 }]
+  }), /unverified or malformed zero-trade interval/i);
+  assert.throws(() => evaluateEdgeBreakoutSignal({
+    ...args, confirmedZeroTradeIntervals: [gap, { ...gap, startAt: new Date(Date.parse(startAt) + 4 * 3600000).toISOString(),
+      endAt: new Date(Date.parse(endAt) + 4 * 3600000).toISOString() }]
+  }), /at most one confirmed zero-trade interval/i);
+  assert.throws(() => evaluateEdgeBreakoutSignal({
+    dailyCandles, fourHourCandles,
+    confirmedZeroTradeIntervals: [gap],
+    asOf: Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000
+  }), /diagnostics do not exactly match/i);
+});
 
 test("latest contiguous candle run reports gaps without fabricating missing bars", () => {
   const { fourHourCandles } = fixtures();

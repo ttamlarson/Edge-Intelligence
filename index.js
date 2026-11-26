@@ -1045,6 +1045,11 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       fourHourCandles: m.history?.fourHourCandles || 0,
       contiguousDailyCandles: m.history?.contiguousDailyCandles ?? m.history?.dailyCandles ?? 0,
       contiguousFourHourCandles: m.history?.contiguousFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      signalWindowFourHourCandles: m.history?.signalWindowFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      signalWindowElapsedIntervals: m.history?.signalWindowElapsedIntervals ?? m.history?.signalWindowFourHourCandles ?? 0,
+      signalWindowMissingIntervals: m.history?.signalWindowMissingIntervals ?? 0,
+      signalWindowConfirmedZeroTradeIntervals: m.history?.signalWindowConfirmedZeroTradeIntervals ?? 0,
+      signalWindowStatus: m.history?.signalWindowStatus ?? "UNKNOWN",
       dailyGapCount: m.history?.dailyGapCount ?? 0,
       fourHourGapCount: m.history?.fourHourGapCount ?? 0,
       latestDailyGap: m.history?.latestDailyGap ?? null,
@@ -1201,38 +1206,49 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
+    const fourHourSignalWindow=fourHour.slice(-240);
+    const signalWindowStart=Date.parse(fourHourSignalWindow[0]?.timestamp||"");
+    const signalWindowEnd=Date.parse(fourHourSignalWindow.at(-1)?.timestamp||"");
+    const signalWindowGapDiagnostics=historySummary.fourHourGapDiagnostics.filter(item=>{
+      const start=Date.parse(item.startAt),end=Date.parse(item.endAt);
+      return Number.isFinite(start)&&Number.isFinite(end)&&
+        start>=signalWindowStart&&end<=signalWindowEnd;
+    });
+    const confirmedSignalWindowGaps=signalWindowGapDiagnostics.filter(item=>item.status==="CONFIRMED_NO_TRADES");
+    const unverifiedSignalWindowGaps=signalWindowGapDiagnostics.filter(item=>item.status!=="CONFIRMED_NO_TRADES");
+    const elapsedSignalWindowIntervals=fourHourSignalWindow.length
+      ? Math.round((signalWindowEnd-signalWindowStart)/COINSPOT_INTERVALS.fourHour)+1 : 0;
+    historySummary.signalWindowFourHourCandles=fourHourSignalWindow.length;
+    historySummary.signalWindowElapsedIntervals=elapsedSignalWindowIntervals;
+    historySummary.signalWindowMissingIntervals=signalWindowGapDiagnostics.length;
+    historySummary.signalWindowConfirmedZeroTradeIntervals=confirmedSignalWindowGaps.length;
+    historySummary.signalWindowUnverifiedGaps=unverifiedSignalWindowGaps.length;
+    historySummary.signalWindowStatus=fourHourSignalWindow.length<210?"WARMUP_REQUIRED":
+      unverifiedSignalWindowGaps.length?"BLOCKED_UNVERIFIED_GAP":
+      confirmedSignalWindowGaps.length>1?"BLOCKED_EXCESSIVE_ZERO_TRADE_GAPS":
+      confirmedSignalWindowGaps.length?"READY_WITH_CONFIRMED_ZERO_TRADE_GAP":"READY_CONTIGUOUS";
+
     const readiness = [];
     if(dailyContinuity.contiguousCandles<110){
       const gap=dailyContinuity.latestGap?" after gap "+dailyContinuity.latestGap.previousAt+" -> "+dailyContinuity.latestGap.nextAt:"";
       readiness.push("Daily contiguous history "+dailyContinuity.contiguousCandles+"/110 completed candles"+gap);
     }
-    if(fourHourContinuity.contiguousCandles<210){
-      const latestGap=fourHourContinuity.latestGap;
-      let gap="";
-      if(latestGap){
-        const missingStartMs=Date.parse(latestGap.previousAt)+COINSPOT_INTERVALS.fourHour;
-        const nextAtMs=Date.parse(latestGap.nextAt);
-        const missingStartAt=new Date(missingStartMs).toISOString();
-        const expectedIntervals=Number.isSafeInteger(latestGap.missingIntervals)&&latestGap.missingIntervals>0
-          ? latestGap.missingIntervals : Math.max(1,Math.round((nextAtMs-Date.parse(latestGap.previousAt))/COINSPOT_INTERVALS.fourHour)-1);
-        const diagnostics=historySummary.fourHourGapDiagnostics.filter(item=>{
-          const start=Date.parse(item.startAt),end=Date.parse(item.endAt);
-          return start>=missingStartMs&&end<=nextAtMs;
-        });
-        const confirmed=diagnostics.length===expectedIntervals&&diagnostics.every(item=>item.status==="CONFIRMED_NO_TRADES");
-        if(confirmed){
-          const dates=[...new Set(diagnostics.map(item=>item.startAt.slice(0,10)))];
-          const dateLabel=dates.length===1?"UTC date ":"UTC dates ";
-          const intervalLabel=expectedIntervals===1?"confirmed zero-trade interval":"confirmed zero-trade intervals";
-          gap=" after "+intervalLabel+" "+missingStartAt+" -> "+latestGap.nextAt+" (daily and four-hour counts reconcile for "+dateLabel+dates.join(", ")+")";
-        }else gap=" after unverified gap "+latestGap.previousAt+" -> "+latestGap.nextAt;
-      }
-      readiness.push("Four-hour contiguous history "+fourHourContinuity.contiguousCandles+"/210 completed candles"+gap);
+    if(fourHourSignalWindow.length<210){
+      readiness.push("Four-hour signal history "+fourHourSignalWindow.length+"/210 actual completed candles");
+    }
+    if(unverifiedSignalWindowGaps.length){
+      readiness.push("Four-hour signal window contains unverified gap(s): "+
+        unverifiedSignalWindowGaps.map(item=>item.startAt+" -> "+item.endAt).join(", ")+
+        "; latest contiguous run "+fourHourContinuity.contiguousCandles+"/210");
+    }
+    if(confirmedSignalWindowGaps.length>1){
+      readiness.push("Four-hour signal window exceeds the one-interval zero-trade allowance: confirmed zero-trade intervals "+
+        confirmedSignalWindowGaps[0].startAt+" -> "+confirmedSignalWindowGaps.at(-1).endAt);
     }
     if(readiness.length){
       const blockedByGap =
         (dailyContinuity.gapCount>0&&dailyContinuity.contiguousCandles<110) ||
-        (fourHourContinuity.gapCount>0&&fourHourContinuity.contiguousCandles<210);
+        unverifiedSignalWindowGaps.length>0 || confirmedSignalWindowGaps.length>1;
       signalError=[signalError,...readiness].filter(Boolean).join("; ");
       markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,
         signalStatus:blockedByGap?"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP":"WARMUP_REQUIRED",
@@ -1247,7 +1263,12 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     const fourHourAge=fourHour.length?clock-(Date.parse(fourHour.at(-1).timestamp)+COINSPOT_INTERVALS.fourHour):Infinity;
     if(dailyAge>48*3600000||fourHourAge>8*3600000) signalError="STALE_COINSPOT_HISTORY";
     else {
-      try { signal=evaluateEdgeBreakoutSignal({dailyCandles:dailyContinuity.candles.slice(-120),fourHourCandles:fourHourContinuity.candles.slice(-240),asOf:clock,spreadBps:quote.spreadBps}); }
+      try { signal=evaluateEdgeBreakoutSignal({
+        dailyCandles:dailyContinuity.candles.slice(-120),
+        fourHourCandles:fourHourSignalWindow,
+        confirmedZeroTradeIntervals:confirmedSignalWindowGaps,
+        asOf:clock,spreadBps:quote.spreadBps
+      }); }
       catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
     }
     markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});

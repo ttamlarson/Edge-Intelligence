@@ -5,11 +5,25 @@ const round = value => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 const PERIOD_4H = 4 * 60 * 60 * 1000;
 const PERIOD_1D = 24 * 60 * 60 * 1000;
 
-function ema(values, period) {
+function ema(values, period, timestamps = null, interval = null) {
   if (values.length < period) return null;
-  const alpha = 2 / (period + 1);
+  const timestamped = timestamps !== null;
+  if (timestamped && (!Array.isArray(timestamps) || timestamps.length !== values.length ||
+      !Number.isSafeInteger(interval) || interval <= 0)) {
+    throw new Error("EMA elapsed-time inputs are invalid.");
+  }
+  const baseAlpha = 2 / (period + 1);
   let result = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
-  for (const value of values.slice(period)) result = value * alpha + result * (1 - alpha);
+  for (let index = period; index < values.length; index++) {
+    let alpha = baseAlpha;
+    if (timestamped) {
+      const elapsed = Date.parse(timestamps[index]) - Date.parse(timestamps[index - 1]);
+      const steps = elapsed / interval;
+      if (!Number.isSafeInteger(steps) || steps < 1) throw new Error("EMA candles contain invalid elapsed intervals.");
+      alpha = 1 - Math.pow(1 - baseAlpha, steps);
+    }
+    result = values[index] * alpha + result * (1 - alpha);
+  }
   return result;
 }
 
@@ -60,34 +74,86 @@ export function latestContiguousCandleRun(candles, interval, label = "OHLCV hist
   };
 }
 
-function validateCandles(candles, interval, label, minimum) {
+function validateCandles(candles, interval, label, minimum, confirmedZeroTradeIntervals = []) {
   if (!Array.isArray(candles) || candles.length < minimum || candles.length > 50000) {
     throw new Error(`${label} requires between ${minimum} and 50,000 completed OHLCV candles.`);
   }
+  if (!Array.isArray(confirmedZeroTradeIntervals) || confirmedZeroTradeIntervals.length > 1) {
+    throw new Error(`${label} permits at most one confirmed zero-trade interval in the signal window.`);
+  }
+  const confirmed = new Map();
+  for (const gap of confirmedZeroTradeIntervals) {
+    const start = Date.parse(gap?.startAt || "");
+    const end = Date.parse(gap?.endAt || "");
+    if (gap?.status !== "CONFIRMED_NO_TRADES" ||
+        typeof gap.dailyTradeCount !== "number" || !Number.isSafeInteger(gap.dailyTradeCount) || gap.dailyTradeCount < 0 ||
+        typeof gap.observedFourHourTradeCount !== "number" || !Number.isSafeInteger(gap.observedFourHourTradeCount) ||
+        gap.observedFourHourTradeCount !== gap.dailyTradeCount ||
+        !Number.isFinite(start) || !Number.isFinite(end) || start % interval !== 0 ||
+        end - start !== interval || confirmed.has(start)) {
+      throw new Error(`${label} includes an unverified or malformed zero-trade interval.`);
+    }
+    confirmed.set(start, end);
+  }
   let previous = -Infinity;
-  return candles.map(candle => {
+  const usedGaps = new Set();
+  const normalized = candles.map(candle => {
     const timestamp = Date.parse(candle.timestamp);
     const open = finite(candle.open), high = finite(candle.high), low = finite(candle.low);
     const close = finite(candle.close), volume = finite(candle.volume);
-    if (!Number.isFinite(timestamp) || (previous !== -Infinity && timestamp - previous !== interval) ||
+    if (!Number.isFinite(timestamp) || timestamp % interval !== 0 ||
+        (previous !== -Infinity && timestamp <= previous) ||
         ![open, high, low, close, volume].every(Number.isFinite) ||
         Math.min(open, high, low, close) <= 0 || high < Math.max(open, close) ||
         low > Math.min(open, close) || high < low || volume < 0) {
-      throw new Error(`${label} contains invalid, unordered, incomplete or non-contiguous OHLCV data.`);
+      throw new Error(`${label} contains invalid, unordered, incomplete or misaligned OHLCV data.`);
+    }
+    if (previous !== -Infinity) {
+      const elapsed = timestamp - previous;
+      if (elapsed % interval !== 0) {
+        throw new Error(`${label} contains timestamps that are not aligned to the candle interval.`);
+      }
+      const missingIntervals = elapsed / interval - 1;
+      if (missingIntervals > 0) {
+        if (missingIntervals !== 1) {
+          throw new Error(`${label} contains more than one consecutive missing interval.`);
+        }
+        const missingAt = previous + interval;
+        if (confirmed.get(missingAt) !== missingAt + interval) {
+          throw new Error(`${label} contains an unverified or unapproved missing interval.`);
+        }
+        usedGaps.add(missingAt);
+      }
     }
     previous = timestamp;
     return { timestamp: new Date(timestamp).toISOString(), open, high, low, close, volume };
   });
+  if (usedGaps.size !== confirmed.size) {
+    throw new Error(`${label} zero-trade diagnostics do not exactly match the missing candle intervals.`);
+  }
+  return normalized;
 }
 
-function atr(candles, period = 20) {
-  if (candles.length <= period) return null;
-  let total = 0;
-  for (let index = candles.length - period; index < candles.length; index++) {
-    const candle = candles[index], previousClose = candles[index - 1].close;
-    total += Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose));
+function atr(candles, period = 20, interval = PERIOD_4H) {
+  if (!Array.isArray(candles) || candles.length < 2) return null;
+  let total = 0, coveredIntervals = 0;
+  for (let index = candles.length - 1; index > 0 && coveredIntervals < period; index--) {
+    const candle = candles[index], previous = candles[index - 1];
+    const elapsed = Date.parse(candle.timestamp) - Date.parse(previous.timestamp);
+    const steps = elapsed / interval;
+    if (!Number.isSafeInteger(steps) || steps < 1) throw new Error("ATR candles contain invalid elapsed intervals.");
+    const trueRange = Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previous.close),
+      Math.abs(candle.low - previous.close)
+    );
+    const usedIntervals = Math.min(steps, period - coveredIntervals);
+    // A confirmed no-trade interval has no OHLCV candle. Spread the observed
+    // multi-interval true range across elapsed time; never synthesize a bar.
+    total += (trueRange / steps) * usedIntervals;
+    coveredIntervals += usedIntervals;
   }
-  return total / period;
+  return coveredIntervals === period ? total / period : null;
 }
 
 function donchianHigh(candles, lookback) {
@@ -99,10 +165,13 @@ function donchianHigh(candles, lookback) {
 
 export function evaluateEdgeBreakoutSignal({
   dailyCandles, fourHourCandles, asOf = Date.now(), spreadBps = 0,
-  minimumVolume = 0, volatilityMinPct = 0.002, volatilityMaxPct = 0.12
+  minimumVolume = 0, volatilityMinPct = 0.002, volatilityMaxPct = 0.12,
+  confirmedZeroTradeIntervals = []
 } = {}) {
   const daily = validateCandles(dailyCandles, PERIOD_1D, "Daily history", 110);
-  const fourHour = validateCandles(fourHourCandles, PERIOD_4H, "Four-hour history", 210);
+  const fourHour = validateCandles(
+    fourHourCandles, PERIOD_4H, "Four-hour history", 210, confirmedZeroTradeIntervals
+  );
   const clock = asOf instanceof Date ? asOf.getTime() : typeof asOf === "string" ? Date.parse(asOf) : Number(asOf);
   if (!Number.isFinite(clock) || !Number.isFinite(spreadBps) || spreadBps < 0 ||
       !Number.isFinite(minimumVolume) || minimumVolume < 0 ||
@@ -121,20 +190,22 @@ export function evaluateEdgeBreakoutSignal({
 
   const dailyCloses = daily.map(candle => candle.close);
   const fourHourCloses = fourHour.map(candle => candle.close);
+  const fourHourTimestamps = fourHour.map(candle => candle.timestamp);
   const dailyEma100 = ema(dailyCloses, 100);
-  const fourHourEma20 = ema(fourHourCloses, 20);
-  const priorFourHourEma20 = ema(fourHourCloses.slice(0, -1), 20);
-  const ema50 = ema(fourHourCloses, 50);
-  const ema200 = ema(fourHourCloses, 200);
-  const priorEma200 = ema(fourHourCloses.slice(0, -10), 200);
-  const volatility = atr(fourHour, 20);
+  const fourHourEma20 = ema(fourHourCloses, 20, fourHourTimestamps, PERIOD_4H);
+  const priorFourHourEma20 = ema(fourHourCloses.slice(0, -1), 20, fourHourTimestamps.slice(0, -1), PERIOD_4H);
+  const ema50 = ema(fourHourCloses, 50, fourHourTimestamps, PERIOD_4H);
+  const ema200 = ema(fourHourCloses, 200, fourHourTimestamps, PERIOD_4H);
+  const priorEma200 = ema(fourHourCloses.slice(0, -10), 200, fourHourTimestamps.slice(0, -10), PERIOD_4H);
+  const volatility = atr(fourHour, 20, PERIOD_4H);
   const volatilityPct = volatility / signalBar.close;
   const channel = [20, 55, 100].map(lookback => ({
     lookback, high: donchianHigh(fourHour, lookback)
   }));
   const votes = channel.filter(level => signalBar.close > level.high).length;
   const previousSignalBar = fourHour.at(-2);
-  const pullbackReclaim = previousSignalBar.close <= priorFourHourEma20 &&
+  const adjacentSignalBars = Date.parse(signalBar.timestamp) - Date.parse(previousSignalBar.timestamp) === PERIOD_4H;
+  const pullbackReclaim = adjacentSignalBars && previousSignalBar.close <= priorFourHourEma20 &&
     signalBar.close > fourHourEma20 && signalBar.close > signalBar.open;
   const breakoutTrigger = votes >= 2;
   const entryTrigger = breakoutTrigger || pullbackReclaim;
@@ -157,6 +228,9 @@ export function evaluateEdgeBreakoutSignal({
     .filter(([key, passed]) => passed === false && !["breakoutVotes", "pullbackReclaim"].includes(key))
     .map(([key]) => key);
   const stopDistance = volatility * 2.5;
+  const elapsedIntervals = Math.round(
+    (Date.parse(fourHour.at(-1).timestamp) - Date.parse(fourHour[0].timestamp)) / PERIOD_4H
+  ) + 1;
   return {
     strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1",
     status: eligible ? "BUY_CANDIDATE_PAPER_ONLY" : "NO_TRADE",
@@ -171,6 +245,9 @@ export function evaluateEdgeBreakoutSignal({
       dailyEma100: round(dailyEma100), fourHourEma20: round(fourHourEma20),
       fourHourEma50: round(ema50), fourHourEma200: round(ema200), atr20: round(volatility),
       atrPct: round(volatilityPct * 100), breakoutVotes: votes,
+      fourHourActualCandles: fourHour.length,
+      fourHourElapsedIntervals: elapsedIntervals,
+      fourHourConfirmedZeroTradeIntervals: confirmedZeroTradeIntervals.length,
       breakoutLevels: channel.map(level => ({ lookback: level.lookback, priorHigh: round(level.high) })),
       spreadBps
     },
