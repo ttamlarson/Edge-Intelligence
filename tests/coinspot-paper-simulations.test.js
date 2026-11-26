@@ -71,7 +71,7 @@ test("AI advisory simulation reviews a deterministic paper candidate but cannot 
     assert.equal(review.assessment, "CAUTION");
     assert.equal(review.advisoryOnly, true);
     assert.equal(requestBody.text.format.name, "edge_coinspot_signal_review");
-    assert.match(requestBody.input[0].content, /Do not authorise execution/);
+    assert.match(requestBody.input[0].content, /do not authorise execution/i);
     assert.equal(writes.length, 1);
     assert.equal(candidate.signal.execution.orderIntent, "NONE");
     const account = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: [candidate], now: openedAt });
