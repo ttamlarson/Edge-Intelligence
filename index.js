@@ -576,7 +576,7 @@ function validateCoinSpotSubdayEpochMsProbe(readOnlyHistory) {
     return result("UNVERIFIED", "TWO_SUBDAY_PARTITIONS_REQUIRED");
   }
   const date = readOnlyHistory?.date;
-  const dayStartMs = typeof date === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(date)
+  const dayStartMs = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
     ? Date.parse(date + "T00:00:00.000Z") : NaN;
   if (!Number.isFinite(dayStartMs) || new Date(dayStartMs).toISOString().slice(0, 10) !== date) {
     return result("UNVERIFIED", "FULL_DAY_PROBE_DATE_INVALID");
