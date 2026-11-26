@@ -1,5 +1,9 @@
 // EDGE crypto strategy research reviewer. This is a structured research critique, not a predictor or execution gate.
-import { validateCoinSpotCandles, walkForwardCoinSpotTrend } from "./coinspot-strategy.js";
+import { backtestCoinSpotTrend, validateCoinSpotCandles, walkForwardCoinSpotTrend } from "./coinspot-strategy.js";
+import { backtestAdaptiveRegime } from "./adaptive-regime-strategy.js";
+import { backtestRegimeAdaptiveBreakout } from "./regime-adaptive-breakout.js";
+import { backtestTrendFollowingIndicators } from "./trend-following-indicators.js";
+import { buildCryptoStrategyComparison } from "./crypto-strategy-comparison.js";
 
 const MAX_RESPONSE_CHARS = 12000;
 const MAX_INPUT_BARS = 5000;
@@ -47,6 +51,19 @@ async function sha256(value) {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function compareCryptoStrategies(candles, market, quoteCurrency) {
+  const common = {
+    candles, market, quoteCurrency, startingCapital: 100,
+    feeRate: 0.001, slippageBps: 15, spreadBps: 10, trainFraction: 0.7
+  };
+  let legacy = null, adaptive = null, breakout = null, trendFollowing = null;
+  try { legacy = backtestCoinSpotTrend({ ...common, market: undefined }); } catch { /* insufficient history for this comparator */ }
+  try { adaptive = backtestAdaptiveRegime(common); } catch { /* retain the other independent comparisons */ }
+  try { breakout = backtestRegimeAdaptiveBreakout(common); } catch { /* 4h history may be insufficient */ }
+  try { trendFollowing = backtestTrendFollowingIndicators({ ...common, minimumOutOfSampleTrades: 30 }); } catch { /* 4h history may be insufficient */ }
+  return buildCryptoStrategyComparison({ legacy, adaptive, breakout, trendFollowing });
 }
 
 const REVIEW_SCHEMA = {
@@ -101,13 +118,25 @@ export async function reviewCryptoWalkForward({
   }
 
   const recentCandles = data.slice(-MAX_REVIEW_BARS);
-  let fingerprint;
+  const strategyComparison = compareCryptoStrategies(data, research.market, research.quoteCurrency);
+  let fingerprint, modelFingerprint;
   try {
-    fingerprint = await sha256(recentCandles);
+    fingerprint = await sha256({
+      market: research.market,
+      quoteCurrency: research.quoteCurrency,
+      source: research.source,
+      strategy: research.strategy,
+      methodology: research.methodology,
+      parameterPolicy: research.parameterPolicy,
+      costs: research.costs,
+      data: research.data,
+      candles: data
+    });
+    modelFingerprint = await sha256({ model });
   } catch {
     return {
       status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true,
-      reason: "Source-candle fingerprinting failed; AI review was not attempted.",
+      reason: "Full-dataset or model-version fingerprinting failed; AI review was not attempted.",
       liveTradingEnabled: false
     };
   }
@@ -120,9 +149,10 @@ export async function reviewCryptoWalkForward({
     barsProvided: data.length,
     barsReviewed: recentCandles.length,
     fingerprintAlgorithm: "SHA-256",
+    fingerprintScope: "FULL_VALIDATED_DATASET_AND_FIXED_RESEARCH_ASSUMPTIONS",
     fingerprint
   };
-  const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + fingerprint.slice(0, 16);
+  const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
   const packet = {
     strategy: research.strategy,
     market: research.market,
@@ -134,6 +164,7 @@ export async function reviewCryptoWalkForward({
     parameterPolicy: research.parameterPolicy,
     data: research.data,
     summary: research.summary,
+    strategyComparison,
     folds: research.folds.map(fold => ({
       fold: fold.fold, priorHistoryBars: fold.priorHistoryBars,
       testStartAt: fold.testStartAt, testEndAt: fold.testEndAt,
@@ -157,7 +188,7 @@ export async function reviewCryptoWalkForward({
         max_output_tokens: 1400,
         input: [{
           role: "system",
-          content: "You are EDGE's conservative crypto strategy research reviewer. Critique only the supplied deterministic walk-forward results and recent hourly candles. Do not invent market data, news, fundamentals, licensing, exchange access or source verification. Do not search the web. Do not predict returns or win probabilities. Do not change strategy rules, parameters, capital, sizing, fees, slippage, spread, loss limits or execution settings. This is model-assisted review, not a trained predictive model. An ADVANCE decision means only that the fixed strategy may enter a longer forward paper-observation phase; it is not an approval for a real trade, profitability claim or order instruction. If the deterministic assessment is not CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW, choose HOLD_FOR_MORE_DATA. Confidence is subjective review confidence, not a calibrated probability. Identify overfitting risk, sample limitations, market-regime concentration, drawdown, cost sensitivity, gaps and source uncertainty. Return only the exact structured JSON schema."
+          content: "You are EDGE's conservative crypto strategy research reviewer. Critique only the supplied deterministic walk-forward results and recent hourly candles. Do not invent market data, news, fundamentals, licensing, exchange access or source verification. Do not search the web. Do not predict returns or win probabilities. Do not change strategy rules, parameters, capital, sizing, fees, slippage, spread, loss limits or execution settings. This is model-assisted review, not a trained predictive model. An ADVANCE decision means only that the fixed strategy may enter a longer forward paper-observation phase; it is not an approval for a real trade, profitability claim or order instruction. If the deterministic assessment is not CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW, choose HOLD_FOR_MORE_DATA. Confidence is subjective review confidence, not a calibrated probability. Identify overfitting risk, sample limitations, market-regime concentration, drawdown, cost sensitivity, gaps and source uncertainty. Review the separate strategyComparison holdouts cautiously: timeframes and risk settings differ, so do not select a best strategy or describe any result as proven profitable. Return only the exact structured JSON schema."
         }, {
           role: "user",
           content: "Review this fixed-rule crypto walk-forward report. The supplied metrics, folds, recent candles and provenance are the only evidence. The deterministic assessment remains authoritative and cannot be overridden. Return a cautious research decision.\n\n" + JSON.stringify(packet)
@@ -219,7 +250,7 @@ export async function reviewCryptoWalkForward({
       research: {
         strategy: research.strategy, market: research.market, quoteCurrency: research.quoteCurrency,
         source: research.source, data: research.data, summary: research.summary,
-        folds: packet.folds, methodology: research.methodology
+        strategyComparison, folds: packet.folds, methodology: research.methodology
       },
       interpretation: "This is a model-assisted critique of a deterministic historical simulation. It is not a trained predictive model, calibrated probability, profitability guarantee or execution instruction.",
       liveTradingEnabled: false
