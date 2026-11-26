@@ -64,7 +64,7 @@ test("position sizing caps stop-loss risk after round-trip fees and slippage",()
 test("daily loss circuit includes open mark-to-market loss and closes at the limit",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
- a.closedTrades.push({coin:"ETH",pair:"ETH/AUD",closedAt:now,pnlAud:-2.9});
+ a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2490,quantity:0.01,entryFeeAud:0.025,exitFeeAud:0.0249,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
  const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
