@@ -142,7 +142,7 @@ test("existing paper positions remain stop-managed while historical candles are 
   coin:"BTC",pair:"BTC/AUD",quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:100000,spreadBps:10},
   signal:{strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt:"2026-11-25T04:00:00.000Z",
    indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},
-   checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,liquidity:true,volatility:true},
+   checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,pullbackReclaim:false,entryTrigger:true,liquidity:true,volatility:true},
    execution:{orderIntent:"NONE",paperOnly:true,liveTradingEnabled:false}}
  }],now});
  assert.ok(opened.openPosition);

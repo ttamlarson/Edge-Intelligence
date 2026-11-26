@@ -31,7 +31,42 @@ test("multi-timeframe breakout requires completed daily and four-hour candles", 
   assert.equal(signal.execution.orderIntent, "NONE");
   assert.equal(signal.execution.liveTradingEnabled, false);
   assert.equal(signal.indicators.breakoutVotes, 3);
+  assert.equal(signal.entryModel, "DONCHIAN_BREAKOUT");
+  assert.equal(signal.checks.entryTrigger, true);
   assert.equal(signal.risk.riskBudgetPct, 0.5);
+});
+
+test("bullish four-hour EMA20 reclaim creates a pullback entry without a Donchian breakout", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  fourHourCandles[218] = {
+    ...fourHourCandles[218], open: 221.7, high: 221.8, low: 219.8, close: 220
+  };
+  fourHourCandles[219] = {
+    ...fourHourCandles[219], open: 220.1, high: 221.3, low: 220, close: 221.2
+  };
+  const asOf = Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000;
+  const signal = evaluateEdgeBreakoutSignal({ dailyCandles, fourHourCandles, asOf, spreadBps: 10 });
+  assert.equal(signal.indicators.breakoutVotes, 0);
+  assert.equal(signal.checks.breakoutVotes, false);
+  assert.equal(signal.checks.pullbackReclaim, true);
+  assert.equal(signal.checks.entryTrigger, true);
+  assert.equal(signal.entryModel, "PULLBACK_RECLAIM");
+  assert.equal(signal.status, "BUY_CANDIDATE_PAPER_ONLY");
+});
+
+test("a bullish regime without a breakout or pullback reclaim does not create an entry", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const last = fourHourCandles.at(-1);
+  last.open -= 2;
+  last.high -= 2;
+  last.low -= 2;
+  last.close -= 2;
+  const asOf = Date.parse(last.timestamp) + 4 * 3600000;
+  const signal = evaluateEdgeBreakoutSignal({ dailyCandles, fourHourCandles, asOf, spreadBps: 10 });
+  assert.equal(signal.checks.dailyTrend, true);
+  assert.equal(signal.checks.fourHourTrend, true);
+  assert.equal(signal.checks.entryTrigger, false);
+  assert.equal(signal.status, "NO_TRADE");
 });
 
 test("signal rejects incomplete candles and broken chronological series", () => {

@@ -284,3 +284,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Added explicit `CONFIRMED_NO_TRADES` versus `UNVERIFIED_GAP` diagnostics. A confirmed zero-trade interval is not a missing provider batch, but it still breaks the fixed four-hour time series.
 - Kept the 210-contiguous-four-hour-candle readiness gate unchanged. No carry-forward, interpolation or synthetic OHLCV candle is created.
 - Added regression coverage for exact daily/four-hour trade-count reconciliation and for gaps with insufficient metadata. Paper execution and all live-trading safety flags remain unchanged.
+
+
+## 2026-11-26 — CoinSpot MTF pullback entry and completed-candle stop timing
+
+- Added a second deterministic entry path: a bullish four-hour EMA20 reclaim following a completed close at/below the prior EMA20. The daily trend, four-hour EMA50/EMA200 trend, positive long-term slope, spread, positive volume and volatility checks remain mandatory.
+- Kept the Donchian breakout path and record the selected entry model in the paper position and closed-trade ledger.
+- Corrected trailing-stop high-water tracking so it advances only from a completed four-hour close after the simulated position opened; live quotes can trigger but cannot tighten the stop using an unfinished candle.
+- Added regression tests for pullback entries, invalid trigger flags, and completed-candle stop timing. Fee/slippage assumptions, position sizing, daily loss limit and all live-trading safety flags remain unchanged.

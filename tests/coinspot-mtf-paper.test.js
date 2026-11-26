@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {MTF_PAPER_CONFIG,createMtfPaperAccount,processMtfPaperAccount,validateMtfPaperAccount} from "../coinspot-mtf-paper.js";
 const now="2026-11-25T08:00:00.000Z";
-function candidate(coin="BTC",signalAt="2026-11-25T04:00:00.000Z",ask=100000){
+function candidate(coin="BTC",signalAt="2026-11-25T04:00:00.000Z",ask=100000,entryModel="DONCHIAN_BREAKOUT"){
  const bid=ask*.999;
+ const breakoutVotes=entryModel==="DONCHIAN_BREAKOUT";
+ const pullbackReclaim=entryModel==="PULLBACK_RECLAIM";
  return {coin,pair:coin+"/AUD",quote:{pair:coin+"/AUD",bid,ask,last:ask,spreadBps:(ask-bid)/ask*10000},signal:{
-  strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,
-  indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},
-  checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,liquidity:true,volatility:true},
+  strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,entryModel,
+  indicators:{breakoutVotes:breakoutVotes?3:0,atr20:1000},risk:{initialStopDistance:2500},
+  checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes,pullbackReclaim,entryTrigger:true,liquidity:true,volatility:true},
   execution:{orderIntent:"NONE",paperOnly:true,liveTradingEnabled:false}
  }};
 }
@@ -15,7 +17,36 @@ test("starts with AUD 100 and immutable paper-only safety flags",()=>{const a=cr
 test("migrates legacy ledgers to an explicit paper-only marker and rejects a false marker",()=>{const legacy=createMtfPaperAccount(now);delete legacy.paperOnly;assert.equal(validateMtfPaperAccount(legacy),true);const migrated=processMtfPaperAccount(legacy,{markets:[],now});assert.equal(migrated.paperOnly,true);assert.equal(migrated.liveTradingEnabled,false);assert.throws(()=>processMtfPaperAccount({...migrated,paperOnly:false},{markets:[],now}),/failed validation/);});
 test("opens a single risk-sized simulated CoinSpot position and retains reserve",()=>{const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});assert.ok(a.openPosition);assert.equal(a.openPosition.coin,"BTC");assert.ok(a.cashAud>=75);assert.ok(a.unrealizedPnlAud<0);assert.ok(a.equityAud<100);assert.ok(a.dailyLossAud>0);assert.equal(a.liveTradingEnabled,false);});
 test("does not repeat an already processed signal",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const next=processMtfPaperAccount(a,{markets:[candidate()],now:"2026-11-25T08:15:00.000Z"});assert.equal(next.openPosition.id,a.openPosition.id);});
+test("opens a validated pullback reclaim candidate without weakening higher-timeframe gates",()=>{
+ const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate("BTC","2026-11-25T04:00:00.000Z",100000,"PULLBACK_RECLAIM")],now});
+ assert.ok(a.openPosition);
+ assert.equal(a.openPosition.entryModel,"PULLBACK_RECLAIM");
+ assert.equal(a.openPosition.pair,"BTC/AUD");
+ assert.equal(a.liveTradingEnabled,false);
+});
+test("rejects an entry flag when neither breakout nor pullback trigger is present",()=>{
+ const invalid=candidate();
+ invalid.signal.checks={...invalid.signal.checks,breakoutVotes:false,pullbackReclaim:false,entryTrigger:true};
+ const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[invalid],now});
+ assert.equal(a.openPosition,null);
+ assert.equal(a.cashAud,100);
+ assert.deepEqual(a.lastProcessed,{});
+});
 test("trailing stop closes position and records net fees",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:a.openPosition.stopPrice*.9,ask:a.openPosition.stopPrice,last:a.openPosition.stopPrice}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades.length,1);assert.equal(a.closedTrades[0].reason,"TRAILING_STOP");assert.equal(a.liveTradingEnabled,false);});
+test("trailing-stop high-water mark advances only on completed post-entry four-hour closes",()=>{
+ let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const entryHigh=a.openPosition.highestPrice;
+ const intrabar={...candidate(),history:{lastCompletedFourHourAt:"2026-11-25T04:00:00.000Z",lastCompletedFourHourClose:120000},
+  quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:120000,spreadBps:10}};
+ a=processMtfPaperAccount(a,{markets:[intrabar],now:"2026-11-25T08:30:00.000Z"});
+ assert.equal(a.openPosition.highestPrice,entryHigh);
+ assert.equal(a.openPosition.trailingStop,entryHigh-2500);
+ const completed={...intrabar,history:{lastCompletedFourHourAt:"2026-11-25T08:00:00.000Z",lastCompletedFourHourClose:104000},
+  quote:{pair:"BTC/AUD",bid:102000,ask:102100,last:104000,spreadBps:9.8}};
+ a=processMtfPaperAccount(a,{markets:[completed],now:"2026-11-25T12:15:00.000Z"});
+ assert.equal(a.openPosition.highestPrice,104000);
+ assert.equal(a.openPosition.trailingStop,101000);
+});
 test("daily trend reversal closes an open paper position",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:101000,ask:101100,last:101000},signal:{...candidate().signal,status:"NO_TRADE",checks:{dailyTrend:false,fourHourTrend:true}}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades[0].reason,"TREND_REVERSAL");});
 test("rejects corrupt or live-enabled paper ledger without resetting it",()=>{assert.throws(()=>processMtfPaperAccount({...createMtfPaperAccount(now),cashAud:-1},{markets:[],now}),/failed validation/);assert.throws(()=>processMtfPaperAccount({...createMtfPaperAccount(now),liveTradingEnabled:true},{markets:[],now}),/failed validation/);});
 

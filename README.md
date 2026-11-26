@@ -226,3 +226,11 @@ The automated paper engine accepts an entry only when both the market and its qu
 - Automated USDT paper candidates are ranked deterministically by net reward/risk after modeled entry/exit fees, spread and slippage, then estimated net target profit, risk-budget use and ADX. Position quantity is sized against modeled stop-exit costs and remaining daily-loss capacity. A missing quote does not consume the signal cursor, allowing a retry; a valid priced signal blocked by an existing position or daily-loss stop is consumed to prevent stale later entry.
 - The automated crypto paper panel reports closed-trade sample size, win rate, profit factor, expectancy, net return, estimated fees and realized drawdown, plus the current risk-aware candidate ranking. Metrics are descriptive and remain explicitly not proven.
 - All new behavior remains simulated. The daily-loss stop uses realized paper losses; gaps can exceed the planned stop-risk estimate. No broker credentials, wallet routes, live order routes or real-money execution were added.
+
+
+### CoinSpot MTF paper entry and exit discipline — 26 November 2026
+
+- The daily regime and four-hour trend/slope filters remain mandatory. A paper entry may now be triggered by either a 2-of-3 Donchian breakout (20/55/100 completed four-hour bars) or a bullish four-hour EMA20 reclaim after the previous completed four-hour close was at/below its EMA20.
+- The entry model is recorded as `DONCHIAN_BREAKOUT` or `PULLBACK_RECLAIM` in the simulated position and closed-trade ledger. A trigger alone is not sufficient: the spread, positive volume, volatility, freshness, AUD-pair, fee/slippage, position-sizing, stop and daily-loss checks still apply.
+- The trailing-stop high-water mark advances only on a completed four-hour close that completed after the paper position opened. Intrabar quotes can trigger an existing stop but cannot tighten it using an unfinished candle.
+- This change does not alter the A$100 starting capital, 25% allocation ceiling, 0.5% risk budget, modeled 0.1% fee, 15 bps slippage, A$3 daily-loss limit, ATR stops or 30-day maximum hold. All entries and exits remain simulated; no exchange order endpoint is used.

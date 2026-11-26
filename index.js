@@ -961,7 +961,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
   if (cached) { try { return JSON.parse(cached); } catch { /* invalid advisory cache is ignored */ } }
   const packet = {
     pair: market.pair, quote: market.quote, signal: market.signal,
-    strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; breakout above at least two of prior 20/55/100-bar Donchian highs.",
+    strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; entry trigger is either a 2-of-3 prior 20/55/100-bar Donchian breakout or a bullish 4h EMA20 reclaim after the previous 4h close was at/below its EMA20. Spread, liquidity, volatility and paper risk gates remain mandatory.",
     constraints: { spotOnly: true, paperOnly: true, maximumAllocationPct: 25, riskBudgetPct: 0.5, initialStopAtr: 2.5, trailingStopAtr: 3, maxHoldingDays: 30 }
   };
   const schema = { type:"object", additionalProperties:false, properties:{
@@ -1054,6 +1054,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       storedFourHourCandles: m.history?.storedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
       lastCompletedFourHourAt: m.history?.lastCompletedFourHourAt || null,
+      lastCompletedFourHourClose: m.history?.lastCompletedFourHourClose ?? null,
+      entryModel: m.signal?.entryModel || null,
       tradesFetched: m.history?.tradesFetched || 0,
       checks: m.signal?.checks || null, signalError: m.signalError || null,
       aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
@@ -1172,6 +1174,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
         fourHourGapCount: fourHourContinuity.gapCount,
         latestDailyGap: dailyContinuity.latestGap,
         latestFourHourGap: fourHourContinuity.latestGap,
+        lastCompletedFourHourClose: fourHourContinuity.candles.at(-1)?.close ?? null,
         fourHourGapDiagnostics: coinSpotFourHourGapDiagnostics(daily, fourHour)
       });
     } catch(error) {
@@ -1592,6 +1595,8 @@ export default {
             storedFourHourCandles: market.storedFourHourCandles,
             lastCompletedDailyAt: market.lastCompletedDailyAt,
             lastCompletedFourHourAt: market.lastCompletedFourHourAt,
+            lastCompletedFourHourClose: market.lastCompletedFourHourClose,
+            entryModel: market.entryModel,
             spreadBps: market.spreadBps,
             aiReviewStatus: market.aiReview?.status || "NOT_RUN"
           })),

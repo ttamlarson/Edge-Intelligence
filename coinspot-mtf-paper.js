@@ -5,6 +5,7 @@ export const MTF_PAPER_CONFIG = Object.freeze({
   maxHoldingDays: 30, initialStopAtr: 2.5, trailingStopAtr: 3
 });
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
 const validAudMarket = market => validCoin(market?.coin) && market?.pair === market.coin + "/AUD" && market?.quote?.pair === market.coin + "/AUD";
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
@@ -48,6 +49,7 @@ function closePosition(a, bid, now, reason) {
   a.realizedPnlAud = round(a.realizedPnlAud + pnl);
   a.closedTrades.push({ id:p.id, coin:p.coin, pair:p.pair, openedAt:p.openedAt, closedAt:now,
     signalAt:p.signalAt, entryPrice:p.entryPrice, exitPrice:exit, quantity:p.quantity,
+    entryModel:p.entryModel || null,
     entryFeeAud:p.entryFeeAud, exitFeeAud:round(exitFee), pnlAud:round(pnl), reason,
     strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1" });
   a.closedTrades = a.closedTrades.slice(-200);
@@ -66,8 +68,20 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;
     if (q && Number.isFinite(q.bid) && q.bid > 0) {
-      p.highestPrice = Math.max(p.highestPrice, Number(q.last) || q.bid);
-      p.trailingStop = Math.max(p.trailingStop, p.highestPrice - MTF_PAPER_CONFIG.trailingStopAtr * p.atr);
+      // The trailing-stop high-water mark advances only on a completed four-hour
+      // close that occurred after this position was opened. Intrabar quotes still
+      // trigger an existing stop, but cannot tighten it using an unfinished candle.
+      const completedFourHourClose = Number(m?.history?.lastCompletedFourHourClose);
+      const completedFourHourAt = Date.parse(m?.history?.lastCompletedFourHourAt || "");
+      const openedAt = Date.parse(p.openedAt || "");
+      const completedFourHourCloseAt = completedFourHourAt + FOUR_HOUR_MS;
+      if (Number.isFinite(completedFourHourClose) && completedFourHourClose > 0 &&
+          Number.isFinite(completedFourHourAt) && Number.isFinite(openedAt) &&
+          completedFourHourCloseAt > openedAt && completedFourHourCloseAt <= Date.parse(now)) {
+        p.highestPrice = Math.max(p.highestPrice, completedFourHourClose);
+        p.trailingStop = Math.max(p.trailingStop,
+          p.highestPrice - MTF_PAPER_CONFIG.trailingStopAtr * p.atr);
+      }
       const heldDays = (Date.parse(now) - Date.parse(p.openedAt)) / 86400000;
       const mark = quoteCost(q.bid), gross = p.quantity * mark, fee = gross * MTF_PAPER_CONFIG.feeRate;
       a.unrealizedPnlAud = round(gross - fee - p.entryCost);
@@ -90,7 +104,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       const stopDistance = Number(signal?.risk?.initialStopDistance);
       const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
       const ageAfterSignalClose = scanAt - (signalAt + 4 * 60 * 60 * 1000);
-      const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "breakoutVotes", "liquidity", "volatility"];
+      const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "entryTrigger", "liquidity", "volatility"];
       return validAudMarket(m) &&
         signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
         signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
@@ -98,6 +112,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         signal?.execution?.paperOnly === true &&
         signal?.execution?.liveTradingEnabled === false &&
         requiredChecks.every(key => checks?.[key] === true) &&
+        (checks?.breakoutVotes === true || checks?.pullbackReclaim === true) &&
         quote && Number.isFinite(quote.bid) && quote.bid > 0 &&
         Number.isFinite(quote.ask) && quote.ask >= quote.bid &&
         Number.isFinite(quote.last) && quote.last > 0 &&
@@ -137,7 +152,9 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
 
       a.cashAud = round(a.cashAud - entryCost);
       a.openPosition = { id:m.coin + "-" + signalAt, coin:m.coin, pair:m.coin + "/AUD", openedAt:now,
-        signalAt, referenceAsk:ask, entryPrice:entry, quantity, notionalAud:round(notional),
+        signalAt, entryModel:m.signal.entryModel ||
+          (m.signal.checks?.pullbackReclaim === true ? "PULLBACK_RECLAIM" : "DONCHIAN_BREAKOUT"),
+        referenceAsk:ask, entryPrice:entry, quantity, notionalAud:round(notional),
         entryFeeAud:round(fee), entryCost:round(entryCost),
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
         highestPrice:entry, status:"OPEN_PAPER_ONLY" };
