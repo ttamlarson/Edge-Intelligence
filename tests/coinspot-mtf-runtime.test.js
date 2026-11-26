@@ -592,8 +592,15 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
    dailyTradeCount:144,
    observedFourHourTradeCount:144
   }]);
-  assert.equal(eth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
-  assert.match(eth.signalError,/confirmed zero-trade interval 2026-11-22T16:00:00.000Z/);
+  assert.equal(eth.signalStatus,"NO_TRADE");
+  assert.equal(eth.signal.status,"NO_TRADE");
+  assert.equal(eth.history.signalWindowFourHourCandles,240);
+  assert.equal(eth.history.signalWindowElapsedIntervals,241);
+  assert.equal(eth.history.signalWindowMissingIntervals,1);
+  assert.equal(eth.history.signalWindowConfirmedZeroTradeIntervals,1);
+  assert.equal(eth.history.signalWindowStatus,"READY_WITH_CONFIRMED_ZERO_TRADE_GAP");
+  assert.ok(eth.signal.failedChecks.includes("dailyTrend"));
+  assert.equal(eth.history.fourHourCandles,419);
   assert.equal(eth.history.fourHourCandles,419);
   assert.equal(eth.history.storedFourHourCandles,420);
 
@@ -603,12 +610,16 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(invalidDaily));
   const dailyCountUnknown=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
   assert.equal(dailyCountUnknown.markets.find(m=>m.coin==="ETH").history.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
+  assert.equal(dailyCountUnknown.markets.find(m=>m.coin==="ETH").signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
+  assert.equal(dailyCountUnknown.markets.find(m=>m.coin==="ETH").signal,null);
 
   const invalidFourHour=structuredClone(storedState);
   invalidFourHour.markets.ETH.fourHourCandles.find(c=>c.timestamp==="2026-11-22T12:00:00.000Z").tradeCount=null;
   kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(invalidFourHour));
   const fourHourCountUnknown=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
   assert.equal(fourHourCountUnknown.markets.find(m=>m.coin==="ETH").history.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
+  assert.equal(fourHourCountUnknown.markets.find(m=>m.coin==="ETH").signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
+  assert.equal(fourHourCountUnknown.markets.find(m=>m.coin==="ETH").signal,null);
 
   const multipleGaps=structuredClone(storedState);
   multipleGaps.markets.ETH.fourHourCandles=multiplegapsBars(multipleGaps.markets.ETH.fourHourCandles);
