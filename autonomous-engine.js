@@ -177,11 +177,11 @@ export function createPaperPortfolio({ capitalAud = EDGE_STARTING_CAPITAL_AUD } 
   const capital = num(capitalAud);
   const roundedCapital = capital === null ? null : round2(capital);
   if (capital === null || capital <= 0 || roundedCapital <= 0) throw new TypeError("Paper capital must be positive AUD after cent rounding.");
-  return { mode: "PAPER_ONLY", currency: "AUD", startingCapitalAud: roundedCapital, cashAud: roundedCapital, positions: [], closedTrades: [], liveTradingEnabled: false };
+  return { mode: "PAPER_ONLY", paperOnly: true, currency: "AUD", startingCapitalAud: roundedCapital, cashAud: roundedCapital, positions: [], closedTrades: [], liveTradingEnabled: false };
 }
 
 export function openPaperPosition(portfolio, candidate, { id, openedAt = new Date().toISOString(), now = Date.now() } = {}) {
-  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) throw new TypeError("A simulation-only portfolio is required.");
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false || (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true)) throw new TypeError("A simulation-only paper-only portfolio is required.");
   if (portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) || (portfolio.closedTrades !== undefined && !Array.isArray(portfolio.closedTrades)) || !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0 || !Number.isFinite(portfolio.startingCapitalAud) || portfolio.startingCapitalAud <= 0) {
     return { accepted: false, reason: "Paper portfolio cash or ledger state is invalid." };
   }
@@ -283,7 +283,7 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
   const position = { id: positionId, symbol, shares, entryPrice, stopPrice, targetPrice, entryCostsAud: round2(entryCosts), entryCostBreakdown: { ...expectedEntryCost }, debitAud: debit, costAssumptions: costs, openedAt, status: "OPEN_PAPER", ...(aiReview ? { aiReview: { ...aiReview, inputProvenance: { ...aiReview.inputProvenance } } } : {}) };
   return {
     accepted: true,
-    portfolio: { ...portfolio, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position], closedTrades: portfolio.closedTrades || [] },
+    portfolio: { ...portfolio, paperOnly: true, cashAud: round2(portfolio.cashAud - debit), positions: [...portfolio.positions, position], closedTrades: portfolio.closedTrades || [] },
     position
   };
 }
@@ -295,13 +295,14 @@ export function updatePaperMarksFromBars(portfolio, barsBySymbol, {
   maxAgeMs = EDGE_MAX_DAILY_BAR_AGE_MS
 } = {}) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true) ||
       portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) ||
       !barsBySymbol || typeof barsBySymbol !== "object" || Array.isArray(barsBySymbol) ||
       typeof source !== "string" || !source.trim() || currency !== "AUD" ||
       !Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) {
     return { accepted: false, portfolio, markedSymbols: [], skippedSymbols: [], reason: "Simulation-only portfolio, AUD source and valid symbol bars are required." };
   }
-  let next = portfolio;
+  let next = { ...portfolio, paperOnly: true };
   const markedSymbols = [], skippedSymbols = [];
   for (const position of portfolio.positions.filter(item => item?.status === "OPEN_PAPER")) {
     const bars = barsBySymbol[position.symbol];
@@ -399,7 +400,7 @@ export function parseAsxDailyCsv(csvText, { currency } = {}) {
 }
 
 export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt = new Date().toISOString(), costs, now = Date.now(), exitType = "MANUAL_PAPER_CLOSE" } = {}) {
-  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false) return { accepted: false, reason: "Simulation-only portfolio required." };
+  if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false || (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true)) return { accepted: false, reason: "Simulation-only paper-only portfolio required." };
   if (portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) || !Array.isArray(portfolio.closedTrades) || !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) {
     return { accepted: false, reason: "Paper portfolio cash or trade history is invalid." };
   }
@@ -428,7 +429,7 @@ export function closePaperPosition(portfolio, positionId, exitPrice, { closedAt 
   if (!Number.isFinite(proceeds) || !Number.isFinite(nextCash) || nextCash < 0) return { accepted: false, reason: "Close proceeds or resulting cash are invalid." };
   const closed = { ...position, status: "CLOSED_PAPER", exitPrice: normalizedPrice, exitValueAud: round2(exitValue), exitCostsAud: exitCost.totalAud, exitCostBreakdown: { ...exitCost }, exitCostAssumptions, proceedsAud: proceeds, profitLossAud: pnl, closedAt, exitType };
   const positions = portfolio.positions.slice(); positions[index] = closed;
-  return { accepted: true, portfolio: { ...portfolio, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
+  return { accepted: true, portfolio: { ...portfolio, paperOnly: true, cashAud: nextCash, positions, closedTrades: [...portfolio.closedTrades, closed] }, trade: closed };
 }
 
 export function markPaperPosition(position, markPrice, costs = position?.lastMarkCostAssumptions ?? position?.costAssumptions ?? {}) {
@@ -446,6 +447,7 @@ export function markPaperPosition(position, markPrice, costs = position?.lastMar
 
 export function calculatePaperPortfolioEquity(portfolio) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true) ||
       portfolio.currency !== "AUD" || !Array.isArray(portfolio.positions) ||
       !Number.isFinite(portfolio.cashAud) || portfolio.cashAud < 0) return null;
   let equity = portfolio.cashAud;
@@ -497,7 +499,7 @@ export function recordPaperMark(portfolio, positionId, markPrice, {
   positions[index] = updatedPosition;
   return {
     accepted: true,
-    portfolio: { ...portfolio, positions },
+    portfolio: { ...portfolio, paperOnly: true, positions },
     position: updatedPosition,
     mark
   };
