@@ -41,6 +41,7 @@ function initialSnapshot() {
   return {
     schemaVersion: 1,
     mode: "AUTOMATED_ASX_PAPER_ONLY",
+    paperOnly: true,
     liveTradingEnabled: false,
     status: "WAITING_FOR_FIRST_SCAN",
     portfolio: createPaperPortfolio(),
@@ -53,6 +54,7 @@ function initialSnapshot() {
 
 export function calculateAsxPaperPerformance(portfolio) {
   if (!portfolio || portfolio.mode !== "PAPER_ONLY" || portfolio.liveTradingEnabled !== false ||
+      (portfolio.paperOnly !== undefined && portfolio.paperOnly !== true) ||
       !Number.isFinite(portfolio.startingCapitalAud) || portfolio.startingCapitalAud <= 0 ||
       !Array.isArray(portfolio.closedTrades)) {
     return { status: "INVALID_PAPER_LEDGER", tradeCount: 0 };
@@ -95,13 +97,14 @@ export function calculateAsxPaperPerformance(portfolio) {
 
 function validateSnapshot(value) {
   if (!value || value.schemaVersion !== 1 || value.mode !== "AUTOMATED_ASX_PAPER_ONLY" ||
-      value.liveTradingEnabled !== false || value.portfolio?.mode !== "PAPER_ONLY" ||
-      value.portfolio?.liveTradingEnabled !== false || !Array.isArray(value.portfolio.positions) ||
+      value.liveTradingEnabled !== false || (value.paperOnly !== undefined && value.paperOnly !== true) ||
+      value.portfolio?.mode !== "PAPER_ONLY" || value.portfolio?.liveTradingEnabled !== false ||
+      (value.portfolio?.paperOnly !== undefined && value.portfolio.paperOnly !== true) || !Array.isArray(value.portfolio.positions) ||
       !Array.isArray(value.portfolio.closedTrades) || !value.lastBarBySymbol || typeof value.lastBarBySymbol !== "object" ||
       !Array.isArray(value.signals)) {
     throw new Error("Automated ASX paper ledger failed its safety validation.");
   }
-  return value;
+  return { ...value, paperOnly: true, portfolio: { ...value.portfolio, paperOnly: true } };
 }
 
 export async function readAsxAutopilot(env) {
@@ -171,8 +174,15 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
 
   const raw = await env.EDGE_KV.get(STORAGE_KEY);
   let snapshot;
-  try { snapshot = raw ? validateSnapshot(JSON.parse(raw)) : initialSnapshot(); }
-  catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
+  let needsPaperOnlyMigration = false;
+  try {
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      needsPaperOnlyMigration = parsed?.paperOnly !== true || parsed?.portfolio?.paperOnly !== true;
+      snapshot = validateSnapshot(parsed);
+    } else snapshot = initialSnapshot();
+  } catch { throw new Error("Automated ASX paper ledger is corrupt; scan stopped without overwriting it."); }
+  if (raw && needsPaperOnlyMigration) await env.EDGE_KV.put(STORAGE_KEY, JSON.stringify(snapshot));
   const previousScanMs = Date.parse(snapshot.lastScanAt || "");
   if (Number.isFinite(previousScanMs) && nowMs - previousScanMs < MIN_SCAN_INTERVAL_MS) {
     return { ...snapshot, status: "SCAN_THROTTLED", configured: true, symbols, liveTradingEnabled: false, performance: calculateAsxPaperPerformance(snapshot.portfolio), aiCalibration: calculateAsxAiCalibration(snapshot.portfolio.closedTrades), message: "The next scheduled DataCedar scan is due after the six-hour provider-call interval." };
@@ -325,7 +335,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   }
 
   const next = {
-    ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", liveTradingEnabled: false,
+    ...snapshot, schemaVersion: 1, mode: "AUTOMATED_ASX_PAPER_ONLY", paperOnly: true, liveTradingEnabled: false,
     status: data.rows === 0 ? "NO_DATA" : retryableAiFailureCount > 0
       ? processedBarsThisScan > 0 ? "SCAN_COMPLETED_WITH_AI_RETRIES" : "AI_REVIEW_RETRY_PENDING"
       : processedBarsThisScan > 0 ? "SCAN_COMPLETED" : incompleteSessionBars > 0 ? "WAITING_FOR_SESSION_CLOSE" : "NO_NEW_COMPLETED_BAR",
