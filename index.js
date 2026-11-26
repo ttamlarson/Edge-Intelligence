@@ -567,23 +567,93 @@ function validateCoinSpotHistoryProgress(progress, targetDate, startMs, endMs) {
   return true;
 }
 
-function hasValidatedCoinSpotSubdayEpochMsFormat(providerProbe, coin) {
-  if (providerProbe?.readOnlyStatus !== "AUTHENTICATED" || !Array.isArray(providerProbe.markets)) return false;
-  const market = providerProbe.markets.find(item => item?.coin === coin || item?.pair === coin + "/AUD");
-  const partitions = market?.readOnlyHistory?.partitionHistory;
-  if (!Array.isArray(partitions) || partitions.length !== 2) return false;
+function validateCoinSpotSubdayEpochMsProbe(readOnlyHistory) {
+  const result = (status, reason, details = {}) => ({
+    version: 1, status, reason, ...details
+  });
+  const partitions = readOnlyHistory?.partitionHistory;
+  if (!Array.isArray(partitions) || partitions.length !== 2) {
+    return result("UNVERIFIED", "TWO_SUBDAY_PARTITIONS_REQUIRED");
+  }
+  const date = readOnlyHistory?.date;
+  const dayStartMs = typeof date === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(date)
+    ? Date.parse(date + "T00:00:00.000Z") : NaN;
+  if (!Number.isFinite(dayStartMs) || new Date(dayStartMs).toISOString().slice(0, 10) !== date) {
+    return result("UNVERIFIED", "FULL_DAY_PROBE_DATE_INVALID");
+  }
+  const midpointMs = dayStartMs + 12 * 60 * 60 * 1000;
+  const expectedRanges = [
+    [dayStartMs, midpointMs],
+    [midpointMs, dayStartMs + 24 * 60 * 60 * 1000]
+  ];
+  if (partitions.some((partition, index) =>
+    Date.parse(partition?.startAt || "") !== expectedRanges[index][0] ||
+    Date.parse(partition?.endAt || "") !== expectedRanges[index][1]
+  )) {
+    return result("UNVERIFIED", "SUBDAY_PARTITION_RANGE_MISMATCH");
+  }
+
+  const fullDayTradeCount = readOnlyHistory.validAudTrades;
+  const fullDayOutOfRangeTrades = readOnlyHistory.outOfRangeTrades;
+  const fullDayRawBuyOrders = readOnlyHistory.rawBuyOrders;
+  const fullDayRawSellOrders = readOnlyHistory.rawSellOrders;
+  if (![fullDayTradeCount, fullDayOutOfRangeTrades, fullDayRawBuyOrders, fullDayRawSellOrders]
+    .every(value => Number.isSafeInteger(value) && value >= 0)) {
+    return result("UNVERIFIED", "FULL_DAY_PROBE_COUNTS_MISSING");
+  }
+
   const epochMsVariants = partitions.map(partition =>
-    Array.isArray(partition?.variants) ? partition.variants.find(variant => variant?.format === "epoch-ms") : null
+    Array.isArray(partition?.variants)
+      ? partition.variants.find(variant => variant?.format === "epoch-ms")
+      : null
   );
   if (epochMsVariants.some(variant =>
     !variant || variant.status === "ERROR" ||
-    !Number.isSafeInteger(variant.validAudTrades) || variant.validAudTrades < 0 ||
-    !Number.isSafeInteger(variant.outOfRangeTrades) || variant.outOfRangeTrades !== 0
-  )) return false;
-  // Require at least one real in-range trade in the probe. An all-empty
-  // response cannot distinguish a genuinely quiet interval from an unsupported
-  // timestamp format, so it must not authorize dense-history partitioning.
-  return epochMsVariants.some(variant => variant.validAudTrades > 0);
+    ![variant.rawBuyOrders, variant.rawSellOrders, variant.validAudTrades, variant.outOfRangeTrades]
+      .every(value => Number.isSafeInteger(value) && value >= 0)
+  )) {
+    return result("UNVERIFIED", "EPOCH_MS_PARTITION_COUNTS_MISSING", {
+      fullDayTradeCount
+    });
+  }
+
+  const partitionTradeCount = epochMsVariants.reduce((sum, variant) => sum + variant.validAudTrades, 0);
+  const partitionOutOfRangeTrades = epochMsVariants.reduce((sum, variant) => sum + variant.outOfRangeTrades, 0);
+  const partitionRawBuyOrders = epochMsVariants.reduce((sum, variant) => sum + variant.rawBuyOrders, 0);
+  const partitionRawSellOrders = epochMsVariants.reduce((sum, variant) => sum + variant.rawSellOrders, 0);
+  const details = {
+    fullDayTradeCount, partitionTradeCount,
+    fullDayRawBuyOrders, fullDayRawSellOrders,
+    partitionRawBuyOrders, partitionRawSellOrders,
+    fullDayOutOfRangeTrades, partitionOutOfRangeTrades
+  };
+
+  if (fullDayOutOfRangeTrades > 0 || partitionOutOfRangeTrades > 0) {
+    return result("UNVERIFIED", "OUT_OF_RANGE_TRADES", details);
+  }
+  // CoinSpot caps each side at 500 rows. Counts from a capped full-day or
+  // half-day response cannot prove that the two sub-day windows are complete.
+  if (fullDayRawBuyOrders >= 500 || fullDayRawSellOrders >= 500) {
+    return result("UNVERIFIED", "FULL_DAY_PROBE_SATURATED", details);
+  }
+  if (epochMsVariants.some(variant => variant.rawBuyOrders >= 500 || variant.rawSellOrders >= 500)) {
+    return result("UNVERIFIED", "SUBDAY_PARTITION_PROBE_SATURATED", details);
+  }
+  if (partitionTradeCount !== fullDayTradeCount) {
+    return result("UNVERIFIED", "PARTITION_TRADE_COUNT_MISMATCH", details);
+  }
+  // An all-empty probe cannot distinguish a quiet market from unsupported
+  // timestamp filtering, so it must never authorise dense-history partitioning.
+  if (partitionTradeCount === 0) {
+    return result("UNVERIFIED", "NO_IN_RANGE_TRADES", details);
+  }
+  return result("VALIDATED", "FULL_DAY_AND_PARTITIONS_RECONCILED", details);
+}
+
+function hasValidatedCoinSpotSubdayEpochMsFormat(providerProbe, coin) {
+  if (providerProbe?.readOnlyStatus !== "AUTHENTICATED" || !Array.isArray(providerProbe.markets)) return false;
+  const market = providerProbe.markets.find(item => item?.coin === coin || item?.pair === coin + "/AUD");
+  return validateCoinSpotSubdayEpochMsProbe(market?.readOnlyHistory).status === "VALIDATED";
 }
 
 async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC, allowEpochMsSubday = false) {
@@ -766,7 +836,7 @@ async function probeCoinSpotHistory(env, coin, clock) {
       variants
     });
   }
-  return {
+  const readOnlyHistory = {
     date, queryFormat: usedFormat,
     rawBuyOrders: payload.buyorders.length,
     rawSellOrders: payload.sellorders.length,
@@ -774,6 +844,10 @@ async function probeCoinSpotHistory(env, coin, clock) {
     outOfRangeTrades,
     sampleOrderAt: trades.length ? new Date(trades.at(-1).timestamp).toISOString() : null,
     marketsSeen, partitionHistory
+  };
+  return {
+    ...readOnlyHistory,
+    partitionValidation: validateCoinSpotSubdayEpochMsProbe(readOnlyHistory)
   };
 }
 
