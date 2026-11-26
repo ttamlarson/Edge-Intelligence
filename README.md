@@ -234,3 +234,10 @@ The automated paper engine accepts an entry only when both the market and its qu
 - The entry model is recorded as `DONCHIAN_BREAKOUT` or `PULLBACK_RECLAIM` in the simulated position and closed-trade ledger. A trigger alone is not sufficient: the spread, positive volume, volatility, freshness, AUD-pair, fee/slippage, position-sizing, stop and daily-loss checks still apply.
 - The trailing-stop high-water mark advances only on a completed four-hour close that completed after the paper position opened. Intrabar quotes can trigger an existing stop but cannot tighten it using an unfinished candle.
 - This change does not alter the A$100 starting capital, 25% allocation ceiling, 0.5% risk budget, modeled 0.1% fee, 15 bps slippage, A$3 daily-loss limit, ATR stops or 30-day maximum hold. All entries and exits remain simulated; no exchange order endpoint is used.
+
+
+### CoinSpot MTF paper ledger and quote validation — 26 November 2026
+
+- The paper execution layer independently recomputes the bid/ask spread from the quote midpoint and rejects candidates whose reported spread is missing, inconsistent or understated, even if the signal payload claims the spread is within the configured limit.
+- Persisted open positions now require finite entry cost, notional, fee, stop, ATR and timestamp accounting. Closed trades require finite net P&L, fees, prices, quantity and chronological timestamps before the daily-loss circuit can use them. Invalid stored ledgers fail closed and are preserved rather than silently reset.
+- The A$50 bps spread ceiling, A$100 starting capital, 25% allocation ceiling, 0.5% risk budget, 0.1% fee, 15 bps slippage, A$3 daily-loss limit, stop rules and all live-trading safety flags are unchanged. No real exchange orders, withdrawals or transfers are added.

@@ -6,7 +6,7 @@ function candidate(coin="BTC",signalAt="2026-11-25T04:00:00.000Z",ask=100000,ent
  const bid=ask*.999;
  const breakoutVotes=entryModel==="DONCHIAN_BREAKOUT";
  const pullbackReclaim=entryModel==="PULLBACK_RECLAIM";
- return {coin,pair:coin+"/AUD",quote:{pair:coin+"/AUD",bid,ask,last:ask,spreadBps:(ask-bid)/ask*10000},signal:{
+ return {coin,pair:coin+"/AUD",quote:{pair:coin+"/AUD",bid,ask,last:ask,spreadBps:(ask-bid)/((ask+bid)/2)*10000},signal:{
   strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,entryModel,
   indicators:{breakoutVotes:breakoutVotes?3:0,atr20:1000},risk:{initialStopDistance:2500},
   checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes,pullbackReclaim,entryTrigger:true,liquidity:true,volatility:true},
@@ -64,7 +64,7 @@ test("position sizing caps stop-loss risk after round-trip fees and slippage",()
 test("daily loss circuit includes open mark-to-market loss and closes at the limit",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
- a.closedTrades.push({coin:"ETH",pair:"ETH/AUD",closedAt:now,pnlAud:-2.9});
+ a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2490,quantity:0.01,entryFeeAud:0.025,exitFeeAud:0.0249,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
  const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
@@ -86,6 +86,20 @@ test("rejects malformed MTF candidates with invalid ATR or crossed quotes",()=>{
  assert.equal(a.equityAud,100);
  assert.equal(a.liveTradingEnabled,false);
  assert.equal(validateMtfPaperAccount(a),true);
+});
+
+test("recomputes midpoint spread from bid/ask and rejects understated or inconsistent spread metadata",()=>{
+ const understated=candidate();
+ understated.quote.bid=99500;
+ understated.quote.spreadBps=1;
+ const inconsistent=candidate();
+ inconsistent.quote.spreadBps=1;
+ const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[understated,inconsistent],now});
+ assert.equal(a.openPosition,null);
+ assert.equal(a.cashAud,100);
+ assert.deepEqual(a.lastProcessed,{});
+ assert.equal(a.paperOnly,true);
+ assert.equal(a.liveTradingEnabled,false);
 });
 
 test("rejects wide-spread, stale, incomplete-check, malformed-stop and non-paper candidates before sizing",()=>{
@@ -122,4 +136,20 @@ test("rejects persisted positions and closed trades outside the exact AUD pairs"
  assert.ok(opened.openPosition);
  assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,pair:"BTC/USDT"}}),/position failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[{coin:"ETH",pair:"ETH/USDT"}]}),/ledger failed validation/);
+});
+
+test("rejects persisted positions with invalid cost, fee or timestamp accounting",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,entryCost:NaN}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,entryFeeAud:-0.01}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,openedAt:"not-a-date"}}),/position failed validation/);
+});
+
+test("rejects closed trades with non-finite P&L or fee accounting before daily-loss calculation",()=>{
+ const trade={coin:"BTC",pair:"BTC/AUD",openedAt:"2026-11-25T08:00:00.000Z",closedAt:"2026-11-25T09:00:00.000Z",
+  signalAt:"2026-11-25T04:00:00.000Z",entryPrice:100000,exitPrice:99000,quantity:0.001,
+  entryFeeAud:0.1,exitFeeAud:0.099,pnlAud:NaN,reason:"TRAILING_STOP"};
+ assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[trade]}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[{...trade,pnlAud:-1,exitFeeAud:Infinity}]}),/ledger failed validation/);
 });

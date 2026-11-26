@@ -292,3 +292,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Kept the Donchian breakout path and record the selected entry model in the paper position and closed-trade ledger.
 - Corrected trailing-stop high-water tracking so it advances only from a completed four-hour close after the simulated position opened; live quotes can trigger but cannot tighten the stop using an unfinished candle.
 - Added regression tests for pullback entries, invalid trigger flags, and completed-candle stop timing. Fee/slippage assumptions, position sizing, daily loss limit and all live-trading safety flags remain unchanged.
+
+
+## 2026-11-26 — CoinSpot MTF quote and ledger integrity
+
+- Added a second execution-layer spread check that recomputes the executable bid/ask spread from the midpoint instead of trusting the signal payload. Understated, missing or inconsistent spread metadata is rejected before sizing.
+- Strengthened persisted-ledger validation for open-position cost/fee reconciliation, positive stop and ATR values, high-water/trailing-stop consistency, ISO timestamps, and closed-trade net P&L/fee/price/quantity fields.
+- Invalid KV ledger records remain fail-closed and are not reset. No entry thresholds, fee/slippage assumptions, position sizing, stops, daily-loss limit or live-trading safety flags were relaxed or changed.
+- Added regression tests for spoofed spread metadata and malformed persisted position/closed-trade accounting.

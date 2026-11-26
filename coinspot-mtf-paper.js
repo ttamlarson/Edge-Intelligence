@@ -8,6 +8,24 @@ const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
 const validAudMarket = market => validCoin(market?.coin) && market?.pair === market.coin + "/AUD" && market?.quote?.pair === market.coin + "/AUD";
+const validTimestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) &&
+  new Date(Date.parse(value)).toISOString() === value;
+const positiveFinite = value => Number.isFinite(value) && value > 0;
+const nonNegativeFinite = value => Number.isFinite(value) && value >= 0;
+function validPaperQuote(market) {
+  if (!validAudMarket(market)) return false;
+  const quote = market.quote;
+  if (![quote.bid, quote.ask, quote.last, quote.spreadBps].every(Number.isFinite) ||
+      quote.bid <= 0 || quote.ask < quote.bid || quote.last <= 0 || quote.spreadBps < 0) return false;
+  const midpoint = (quote.bid + quote.ask) / 2;
+  if (!Number.isFinite(midpoint) || midpoint <= 0) return false;
+  const actualSpreadBps = (quote.ask - quote.bid) / midpoint * 10000;
+  // Defense in depth: never trust a caller-supplied spread that understates
+  // the executable bid/ask width. Allow only normal two-decimal quote rounding.
+  return Number.isFinite(actualSpreadBps) &&
+    Math.abs(quote.spreadBps - actualSpreadBps) <= 0.05 &&
+    actualSpreadBps <= MTF_PAPER_CONFIG.maxSpreadBps;
+}
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
 export function createMtfPaperAccount(now = new Date().toISOString()) {
   return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", paperOnly:true, currency:"AUD", startingCapitalAud:100,
@@ -16,6 +34,14 @@ export function createMtfPaperAccount(now = new Date().toISOString()) {
     liveTradingEnabled:false, updatedAt:now };
 }
 export function validateMtfPaperAccount(a) {
+  const validClosedTrade = trade => trade && validCoin(trade.coin) &&
+    trade.pair === trade.coin + "/AUD" &&
+    validTimestamp(trade.openedAt) && validTimestamp(trade.closedAt) &&
+    validTimestamp(trade.signalAt) && Date.parse(trade.closedAt) >= Date.parse(trade.openedAt) &&
+    positiveFinite(trade.entryPrice) && positiveFinite(trade.exitPrice) &&
+    positiveFinite(trade.quantity) && nonNegativeFinite(trade.entryFeeAud) &&
+    nonNegativeFinite(trade.exitFeeAud) && Number.isFinite(trade.pnlAud) &&
+    typeof trade.reason === "string" && trade.reason.length > 0;
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       a.startingCapitalAud!==100 || a.liveTradingEnabled!==false ||
@@ -23,17 +49,27 @@ export function validateMtfPaperAccount(a) {
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
       !Number.isFinite(a.dailyLossAud) || a.dailyLossAud<0 ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
-      a.closedTrades.some(t => !validCoin(t?.coin) || t?.pair !== t.coin + "/AUD") ||
+      a.closedTrades.some(trade => !validClosedTrade(trade)) ||
       !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed))
     throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
-  if (a.openPosition && (!validCoin(a.openPosition.coin) || a.openPosition.pair !== a.openPosition.coin + "/AUD" ||
-      !Number.isFinite(a.openPosition.quantity) || a.openPosition.quantity<=0 ||
-      !Number.isFinite(a.openPosition.entryPrice) || a.openPosition.entryPrice<=0 ||
-      !Number.isFinite(a.openPosition.stopPrice) || a.openPosition.stopPrice<=0 ||
-      !Number.isFinite(a.openPosition.atr) || a.openPosition.atr<=0 ||
-      !Number.isFinite(a.openPosition.highestPrice) || a.openPosition.highestPrice<=0 ||
-      !Number.isFinite(a.openPosition.trailingStop) || a.openPosition.trailingStop<=0 || !a.openPosition.signalAt))
-    throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
+  if (a.openPosition) {
+    const p = a.openPosition;
+    const entryCostMatches = Number.isFinite(p.entryCost) && Number.isFinite(p.notionalAud) &&
+      Number.isFinite(p.entryFeeAud) &&
+      Math.abs(p.entryCost - (p.notionalAud + p.entryFeeAud)) <= 0.02 &&
+      Math.abs(p.notionalAud - p.quantity * p.entryPrice) <= 0.02;
+    if (!validCoin(p.coin) || p.pair !== p.coin + "/AUD" ||
+        !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
+        !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
+        !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches ||
+        !positiveFinite(p.stopPrice) || p.stopPrice >= p.entryPrice ||
+        !positiveFinite(p.atr) || !positiveFinite(p.highestPrice) || p.highestPrice < p.entryPrice ||
+        !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
+        !validTimestamp(p.openedAt) || !validTimestamp(p.signalAt) ||
+        Date.parse(p.openedAt) < Date.parse(p.signalAt) + FOUR_HOUR_MS ||
+        (p.entryModel !== undefined && !["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(p.entryModel)))
+      throw new Error("CoinSpot MTF paper position failed validation; stored data was not changed.");
+  }
   return true;
 }
 function realizedDailyLoss(a, now) {
@@ -105,7 +141,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
       const ageAfterSignalClose = scanAt - (signalAt + 4 * 60 * 60 * 1000);
       const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "entryTrigger", "liquidity", "volatility"];
-      return validAudMarket(m) &&
+      return validPaperQuote(m) &&
         signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
         signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
         signal?.execution?.orderIntent === "NONE" &&
@@ -113,11 +149,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         signal?.execution?.liveTradingEnabled === false &&
         requiredChecks.every(key => checks?.[key] === true) &&
         (checks?.breakoutVotes === true || checks?.pullbackReclaim === true) &&
-        quote && Number.isFinite(quote.bid) && quote.bid > 0 &&
-        Number.isFinite(quote.ask) && quote.ask >= quote.bid &&
-        Number.isFinite(quote.last) && quote.last > 0 &&
-        Number.isFinite(quote.spreadBps) && quote.spreadBps >= 0 &&
-        quote.spreadBps <= MTF_PAPER_CONFIG.maxSpreadBps &&
+        quote &&
         Number.isFinite(atr) && atr > 0 &&
         Number.isFinite(stopDistance) && stopDistance > 0 &&
         Math.abs(stopDistance - expectedStopDistance) <= Math.max(1e-8, expectedStopDistance * 1e-6) &&
