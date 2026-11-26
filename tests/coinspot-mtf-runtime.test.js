@@ -694,11 +694,11 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
   nextDate:targetDate,lastProcessedDate:"2026-11-25",lastBatchDate:"2026-11-25",
-  lastProviderProbeAt:"2026-11-26T20:00:00.000Z",
+  lastProviderProbeAt:"2026-11-26T20:15:00.000Z",
   providerProbe:{
-   checkedAt:"2026-11-26T20:00:00.000Z",
+   checkedAt:"2026-11-26T20:15:00.000Z",
    readOnlyStatus:"AUTHENTICATED",
-   partitionValidationComputedAt:"2026-11-26T20:00:00.000Z",
+   partitionValidationComputedAt:"2026-11-26T20:15:00.000Z",
    markets:[probeMarket("BTC"),probeMarket("ETH")]
   },
   pendingHistorySync:{targetDate,coins:{BTC:completeMarket(),ETH:completeMarket()}},
@@ -754,8 +754,8 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
    {coin:"ETH",tradeCount:0,partialTradeCount:0,complete:true,apiCalls:0,pendingWindows:0}
   ]);
   assert.equal(summary.historySync.providerProbe.readOnlyStatus,"AUTHENTICATED");
-  assert.equal(summary.historySync.providerProbe.checkedAt,"2026-11-26T20:00:00.000Z");
-  assert.equal(summary.historySync.providerProbe.partitionValidationComputedAt,"2026-11-26T20:00:00.000Z");
+  assert.equal(summary.historySync.providerProbe.checkedAt,"2026-11-26T20:15:00.000Z");
+  assert.equal(summary.historySync.providerProbe.partitionValidationComputedAt,"2026-11-26T20:15:00.000Z");
   assert.deepEqual(summary.historySync.providerProbe.markets.map(market=>({
    pair:market.pair,status:market.partitionValidation.status,reason:market.partitionValidation.reason,
    fullDayTradeCount:market.partitionValidation.fullDayTradeCount,
