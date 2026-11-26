@@ -3,7 +3,7 @@ import { aecIntegrationStatus, fetchAbsIndicators, fetchAecResults, fetchBomObse
 import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
-import { normalizeCoinSpotMarket } from "./coinspot.js";
+import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.js";
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
@@ -1197,7 +1197,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
       const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
       if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
-      quote={pair:coin+"/AUD",bid,ask,last,spreadBps:Number(((ask-bid)/ask*10000).toFixed(2)),retrievedAt:new Date(clock).toISOString()};
+      quote={pair:coin+"/AUD",bid,ask,last,spreadBps:calculateCoinSpotSpreadBps(bid,ask),retrievedAt:new Date(clock).toISOString()};
     } catch(error) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
     }
