@@ -33,7 +33,7 @@ test("position sizing caps stop-loss risk after round-trip fees and slippage",()
 test("daily loss circuit includes open mark-to-market loss and closes at the limit",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
- a.closedTrades.push({closedAt:now,pnlAud:-2.9});
+ a.closedTrades.push({coin:"ETH",pair:"ETH/AUD",closedAt:now,pnlAud:-2.9});
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
  const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
