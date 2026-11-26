@@ -74,10 +74,25 @@ test("AI advisory simulation reviews a deterministic paper candidate but cannot 
     assert.match(requestBody.input[0].content, /do not authorise execution/i);
     assert.equal(writes.length, 1);
     assert.equal(candidate.signal.execution.orderIntent, "NONE");
-    const account = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: [candidate], now: openedAt });
+    const cautious = __test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review }]);
+    assert.equal(cautious.gates.BTC, "AI_BLOCKED");
+    const blockedAccount = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: cautious.markets, now: openedAt });
+    assert.equal(blockedAccount.openPosition, null);
+    assert.equal(blockedAccount.cashAud, 100);
+    assert.equal(blockedAccount.liveTradingEnabled, false);
+    assert.equal(blockedAccount.paperOnly, true);
+
+    const approvedReview = { ...review, assessment: "LOW_CONCERN" };
+    const approved = __test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: approvedReview }]);
+    assert.equal(approved.gates.BTC, "AI_APPROVED");
+    const account = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: approved.markets, now: openedAt });
     assert.ok(account.openPosition);
     assert.equal(account.openPosition.pair, "BTC/AUD");
     assert.equal(account.liveTradingEnabled, false);
     assert.equal(account.paperOnly, true);
+
+    const unavailable = __test.applyCoinSpotMtfAiGate([candidate], []);
+    assert.equal(unavailable.gates.BTC, "AI_BLOCKED");
+    assert.equal(processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: unavailable.markets, now: openedAt }).openPosition, null);
   } finally { globalThis.fetch = previousFetch; }
 });
