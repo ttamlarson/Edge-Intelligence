@@ -6,6 +6,7 @@ export const MTF_PAPER_CONFIG = Object.freeze({
 });
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
+const validAudMarket = market => validCoin(market?.coin) && market?.pair === market.coin + "/AUD" && market?.quote?.pair === market.coin + "/AUD";
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
 export function createMtfPaperAccount(now = new Date().toISOString()) {
   return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", paperOnly:true, currency:"AUD", startingCapitalAud:100,
@@ -21,9 +22,10 @@ export function validateMtfPaperAccount(a) {
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
       !Number.isFinite(a.dailyLossAud) || a.dailyLossAud<0 ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
+      a.closedTrades.some(t => !validCoin(t?.coin) || t?.pair !== t.coin + "/AUD") ||
       !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed))
     throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
-  if (a.openPosition && (!validCoin(a.openPosition.coin) ||
+  if (a.openPosition && (!validCoin(a.openPosition.coin) || a.openPosition.pair !== a.openPosition.coin + "/AUD" ||
       !Number.isFinite(a.openPosition.quantity) || a.openPosition.quantity<=0 ||
       !Number.isFinite(a.openPosition.entryPrice) || a.openPosition.entryPrice<=0 ||
       !Number.isFinite(a.openPosition.stopPrice) || a.openPosition.stopPrice<=0 ||
@@ -59,7 +61,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   validateMtfPaperAccount(a);
   if (a.day !== now.slice(0, 10)) { a.day = now.slice(0, 10); a.dailyLossAud = 0; }
 
-  const byCoin = new Map(markets.filter(m => validCoin(m.coin)).map(m => [m.coin, m]));
+  const byCoin = new Map(markets.filter(validAudMarket).map(m => [m.coin, m]));
   const p = a.openPosition;
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;
@@ -89,7 +91,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
       const ageAfterSignalClose = scanAt - (signalAt + 4 * 60 * 60 * 1000);
       const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "breakoutVotes", "liquidity", "volatility"];
-      return validCoin(m?.coin) &&
+      return validAudMarket(m) &&
         signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
         signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
         signal?.execution?.orderIntent === "NONE" &&

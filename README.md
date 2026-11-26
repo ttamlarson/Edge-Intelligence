@@ -211,7 +211,11 @@ Production validation on 2026-11-25 confirmed Unix milliseconds return correctly
 
 
 Because early legacy batches may have advanced with incomplete history, the first integrity migration performs a one-time rebuild of the original 120-day window from `today - 120`. It clears only the derived CoinSpot candle cache and trade counters—not the paper account or risk settings—then replays each date using validated millisecond partitions. The migration marker is persisted before upstream calls and cannot repeat.
- 
+
+
+## CoinSpot MTF AUD pair validation
+
+The automated paper engine accepts an entry only when both the market and its quote identify the exact `BTC/AUD` or `ETH/AUD` pair. Persisted open positions and closed trades must keep the same pair identity. Any mismatch is rejected without changing the paper ledger. This remains a simulated AUD 100 paper system; no live CoinSpot trading capability is enabled.
 
 ## AI research and paper-ledger hardening — 2026-11-26
 

@@ -258,7 +258,13 @@ Updated after local implementation and automated verification on `edge-productio
 - Legacy accounts with no marker remain readable and are upgraded on the next scan; an explicit false marker is rejected without resetting the ledger.
 - The existing `liveTradingEnabled: false` requirement is unchanged. No CoinSpot order, withdrawal or transfer route, credential or safety flag was added or enabled.
 - Regression coverage verifies account creation, legacy migration and rejection of a false paper-only marker.
- 
+
+
+## 2026-11-26 — Enforce exact CoinSpot AUD pair identity
+
+- Paper entries and open-position marks now require matching market and quote pair identifiers for BTC/AUD or ETH/AUD.
+- Persisted open positions and closed trades with a non-AUD pair label fail ledger validation rather than being accepted or reset.
+- Added regressions for BTC/USDT and ETH/USDT pair mismatches. Fees, slippage, sizing, stops, loss limits and live-trading safety flags remain unchanged.
 
 ## 2026-11-26 — ASX/crypto research and paper-ledger hardening
 

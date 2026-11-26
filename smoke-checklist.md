@@ -169,7 +169,12 @@
 - [ ] Confirm persisted MTF account reports `paperOnly: true` and `liveTradingEnabled: false`.
 - [ ] Confirm a legacy account with no `paperOnly` marker is upgraded on its next scan.
 - [ ] Confirm an explicit `paperOnly: false` ledger is rejected without resetting cash, positions or trade history.
- 
+
+
+## CoinSpot MTF AUD pair guard
+- [ ] Confirm only exact BTC/AUD and ETH/AUD market + quote pairs are accepted for paper entries and position marks.
+- [ ] Confirm BTC/USDT and ETH/USDT mismatches are rejected without changing the paper ledger.
+- [ ] Confirm persisted positions and closed trades with non-AUD pair labels fail validation.
 
 ## 2026-11-26 — Research and paper-ledger hardening
 
