@@ -300,3 +300,54 @@ test("latest contiguous candle run rejects duplicate, unordered, unaligned and m
   malformed[10].close = 0;
   assert.throws(() => latestContiguousCandleRun(malformed, 4 * 3600000), /invalid/i);
 });
+
+
+test("time-adjusted EMAs carry the previous close through a confirmed zero-trade interval", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const gapIndex = 100;
+  const gapBars = fourHourCandles.map((candle, index) => ({
+    ...candle,
+    timestamp: new Date(Date.parse(candle.timestamp) + (index >= gapIndex ? 4 * 3600000 : 0)).toISOString()
+  }));
+  const missingAt = fourHourCandles[gapIndex].timestamp;
+  const endAt = new Date(Date.parse(missingAt) + 4 * 3600000).toISOString();
+  const previousClose = fourHourCandles[gapIndex - 1].close;
+  const carriedCloseBar = {
+    timestamp: missingAt,
+    open: previousClose,
+    high: previousClose,
+    low: previousClose,
+    close: previousClose,
+    volume: 0
+  };
+  const referenceBars = [
+    ...fourHourCandles.slice(0, gapIndex),
+    carriedCloseBar,
+    ...fourHourCandles.slice(gapIndex)
+  ];
+  const asOf = Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000;
+  const gapAware = evaluateEdgeBreakoutSignal({
+    dailyCandles,
+    fourHourCandles: gapBars,
+    confirmedZeroTradeIntervals: [{
+      startAt: missingAt,
+      endAt,
+      status: "CONFIRMED_NO_TRADES",
+      dailyTradeCount: 5,
+      observedFourHourTradeCount: 5
+    }],
+    asOf,
+    spreadBps: 10
+  });
+  const explicitCarryForward = evaluateEdgeBreakoutSignal({
+    dailyCandles,
+    fourHourCandles: referenceBars,
+    asOf,
+    spreadBps: 10
+  });
+  for (const key of ["fourHourEma20", "fourHourEma50", "fourHourEma200"]) {
+    assert.equal(gapAware.indicators[key], explicitCarryForward.indicators[key], key + " must use the prior close for the no-trade interval");
+  }
+  assert.equal(gapAware.indicators.fourHourActualCandles, 220, "the live series must retain only actual candles");
+  assert.equal(gapBars.length, 220, "indicator carry-forward must not create a stored or signal candle");
+});
