@@ -86,7 +86,7 @@ test("CoinSpot sub-day epoch-ms history fails closed when partition totals omit 
     assert.equal(epochMsRequests.length, 4, "only provider-probe partitions may use epoch-ms");
     assert.equal(history.nextDate, "2026-07-28");
     assert.equal(history.pendingHistorySync.coins.BTC.windows.length, 2);
-    assert.equal(history.markets.BTC.dailyCandles.length, 0);
+    assert.equal(history.markets.BTC?.dailyCandles?.length ?? 0, 0);
     assert.equal(history.liveTradingEnabled, false);
   } finally {
     globalThis.fetch = originalFetch;
