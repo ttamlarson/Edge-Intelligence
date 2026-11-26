@@ -244,3 +244,11 @@ The automated paper engine accepts an entry only when both the market and its qu
 
 
 - Closed-trade net P&L is also reconciled against quantity, executable entry/exit prices and recorded fees. The ledger rejects a finite but arithmetically inconsistent P&L, and the daily-loss field cannot be lower than the current UTC day's realized closed-trade losses.
+
+
+### CoinSpot MTF daily-loss rollover and monotonic scan clock — 27 November 2026
+
+- When the UTC day rolls while an open paper position has no valid exit quote, the ledger carries forward the last validated unrealized loss until a fresh quote recalculates it; it no longer resets the daily-loss circuit to zero during a quote outage.
+- Persisted-ledger validation requires the daily-loss amount to cover current-day realized losses plus the retained open-position unrealized loss.
+- Backdated or replayed scan timestamps are rejected before CoinSpot history synchronization, preventing a delayed scheduled event from rewinding history or ledger state.
+- The A$100 simulated capital, fee/slippage assumptions, sizing, stops, holding period, entry gates and live-trading safety flags are unchanged. No exchange order, withdrawal or transfer is submitted.

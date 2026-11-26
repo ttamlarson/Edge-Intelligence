@@ -62,14 +62,20 @@ export function validateMtfPaperAccount(a) {
     ? a.closedTrades.filter(trade => String(trade?.closedAt || "").slice(0, 10) === ledgerDay)
       .reduce((sum, trade) => sum + Math.max(0, -Number(trade?.pnlAud)), 0)
     : NaN;
+  const unrealizedLossForLedgerDay = a?.openPosition
+    ? (Number.isFinite(a?.unrealizedPnlAud) ? Math.max(0, -a.unrealizedPnlAud) : NaN)
+    : 0;
+  const minimumDailyLossForLedgerDay = Number.isFinite(realizedLossForLedgerDay) &&
+      Number.isFinite(unrealizedLossForLedgerDay)
+    ? round(realizedLossForLedgerDay + unrealizedLossForLedgerDay) : NaN;
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       a.startingCapitalAud!==100 || a.liveTradingEnabled!==false ||
       !Number.isFinite(a.cashAud) || a.cashAud<0 || !Number.isFinite(a.realizedPnlAud) ||
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
       !Number.isFinite(a.dailyLossAud) || a.dailyLossAud<0 ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(ledgerDay) || !validTimestamp(a.updatedAt) || a.day !== a.updatedAt.slice(0, 10) ||
-      !Number.isFinite(realizedLossForLedgerDay) || a.dailyLossAud + 0.02 < realizedLossForLedgerDay ||
+      !/^\\d{4}-\\d{2}-\\d{2}$/.test(ledgerDay) || !validTimestamp(a.updatedAt) || a.day !== a.updatedAt.slice(0, 10) ||
+      !Number.isFinite(minimumDailyLossForLedgerDay) || a.dailyLossAud + 0.02 < minimumDailyLossForLedgerDay ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||
       !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed))
@@ -127,9 +133,18 @@ function closePosition(a, bid, now, reason) {
   a.equityAud = round(a.cashAud);
 }
 export function processMtfPaperAccount(account, {markets=[], now=new Date().toISOString()}={}) {
+  if (!validTimestamp(now)) throw new Error("CoinSpot MTF paper scan timestamp must be canonical UTC ISO; stored data was not changed.");
+  const scanAt = Date.parse(now);
   let a = account ? structuredClone(account) : createMtfPaperAccount(now);
   validateMtfPaperAccount(a);
-  if (a.day !== now.slice(0, 10)) { a.day = now.slice(0, 10); a.dailyLossAud = 0; }
+  if (scanAt < Date.parse(a.updatedAt)) throw new Error("CoinSpot MTF paper scan timestamp cannot move backwards; stored data was not changed.");
+  if (a.day !== now.slice(0, 10)) {
+    a.day = now.slice(0, 10);
+    // Until a fresh quote arrives, retain the last validated open-position loss.
+    // Resetting it to zero here would understate the daily-loss circuit during
+    // a quote outage that spans UTC midnight.
+    a.dailyLossAud = round(realizedDailyLoss(a, now) + (a.openPosition ? Math.max(0, -a.unrealizedPnlAud) : 0));
+  }
 
   const byCoin = new Map(markets.filter(validAudMarket).map(m => [m.coin, m]));
   const p = a.openPosition;

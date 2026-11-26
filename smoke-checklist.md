@@ -222,3 +222,11 @@
 - [ ] Confirm a missing or crossed exit quote reports `UNAVAILABLE`, then `STALE` after 20 minutes, without inventing a price, changing the last mark timestamp, or overwriting stored equity/P&L.
 - [ ] Confirm the next valid quote restores `CURRENT` and refreshes the mark timestamp; protective stops and all existing fee, slippage, sizing and loss controls remain unchanged.
 - [ ] Confirm legacy open positions without mark metadata are conservatively marked stale when their original opening timestamp exceeds the freshness window.
+
+
+## CoinSpot MTF daily-loss rollover and scan ordering
+
+- [ ] Open a simulated position, roll the UTC day while the quote is unavailable, and confirm the last validated unrealized loss remains included in `dailyLossAud` until a fresh quote recalculates it.
+- [ ] Confirm persisted-ledger validation rejects a daily-loss value that understates current-day realized losses plus the retained open-position loss.
+- [ ] Invoke the paper runner with a scan timestamp older than the persisted ledger; confirm it rejects before CoinSpot history requests and leaves history, ledger and status KV values unchanged.
+- [ ] Confirm a same-time or newer scan remains processable and that all entries/exits remain simulated with `paperOnly: true` and `liveTradingEnabled: false`.
