@@ -71,3 +71,5 @@ button{touch-action:manipulation}
 .allocation-label span{opacity:.75;text-align:right}
 .allocation-track{height:7px;border-radius:99px;background:rgba(127,127,127,.18);overflow:hidden}
 .allocation-track span{display:block;height:100%;border-radius:99px;background:var(--accent,#72d6a0);min-width:2px}
+
+.auto-paper-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:760px){.auto-paper-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}

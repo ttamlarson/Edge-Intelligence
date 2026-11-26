@@ -45,9 +45,11 @@ test("crypto AI review is structured, provenance-bound and cannot override deter
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.research.summary.assessment, "INSUFFICIENT_OUT_OF_SAMPLE_TRADES");
   assert.match(result.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(result.inputProvenance.fingerprintScope, "FULL_VALIDATED_DATASET_AND_FIXED_RESEARCH_ASSUMPTIONS");
   assert.ok(result.reviewId.endsWith(result.inputProvenance.fingerprint.slice(0, 16)));
   assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
   assert.equal(result.inputProvenance.barsReviewed, 50);
+  assert.doesNotMatch(requestBody.input[1].content, /strategyComparison/);
 });
 
 test("crypto AI review fails closed when the model key is missing", async () => {
@@ -103,4 +105,15 @@ test("crypto AI provider and schema failures remain retryable and never advance 
   assert.equal(malformed.status, "AI_BLOCKED_INVALID_DECISION");
   assert.equal(malformed.advanceAllowed, false);
   assert.equal(malformed.retryable, true);
+});
+
+test("crypto review identifiers separate model versions while retaining full-data provenance",async()=>{
+ const review=async model=>reviewCryptoWalkForward({
+  ...base,apiKey:"test-only",model,
+  fetchImpl:async()=>new Response(JSON.stringify({output_text:JSON.stringify(decision)}),{status:200,headers:{"Content-Type":"application/json"}})
+ });
+ const first=await review("model-a"),second=await review("model-b");
+ assert.equal(first.inputProvenance.fingerprint,second.inputProvenance.fingerprint);
+ assert.notEqual(first.reviewId,second.reviewId);
+ assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint.slice(0,16)));
 });

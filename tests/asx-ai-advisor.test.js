@@ -58,6 +58,7 @@ test("AI advisor uses strict structured output and records a SHA-256 source fing
   assert.match(result.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
   assert.equal(result.inputProvenance.barsProvided, 60);
   assert.equal(result.inputProvenance.barsReviewed, 30);
+  assert.equal(result.inputProvenance.fingerprintScope, "DETERMINISTIC_CANDIDATE_AND_REVIEWED_DAILY_BARS");
   assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
   assert.equal(result.reviewId.includes(result.inputProvenance.fingerprint.slice(0, 16)), true);
 });
@@ -153,4 +154,16 @@ test("AI advisor blocks provider errors, redirects and timeouts without approvin
   });
   assert.equal(timeout.status, "AI_BLOCKED_PROVIDER_ERROR");
   assert.equal(timeout.approved, false);
+});
+
+test("ASX review identifiers separate model versions for the same candidate and evidence",async()=>{
+ const review=async model=>evaluateAsxAiDecision({
+  candidate,bars,apiKey:"test-only",model,now:Date.parse(candidate.observedAt)+1000,
+  fetchImpl:async()=>aiResponse(approve)
+ });
+ const first=await review("model-a"),second=await review("model-b");
+ assert.equal(first.inputProvenance.fingerprint,second.inputProvenance.fingerprint);
+ assert.notEqual(first.reviewId,second.reviewId);
+ assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint.slice(0,16)));
+ assert.ok(second.reviewId.endsWith(second.inputProvenance.fingerprint.slice(0,16)));
 });

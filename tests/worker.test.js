@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../index.js";
+import { createAutoPaperAccount } from "../crypto-auto-paper.js";
 import { webcrypto } from "node:crypto";
 
 const ORIGIN = "https://edge.example.au";
@@ -340,4 +341,37 @@ test("CoinSpot read-only status route fails closed when credentials are missing"
   const response = await worker.fetch(new Request("https://api.example.au/api/crypto/coinspot/readonly/status"), baseEnv(), access("user-1"));
   assert.equal(response.status, 503);
   assert.match((await response.json()).error, /read-only API credentials/);
+});
+
+test("Cloudflare asset proxy serves the crypto strategy comparison module",async t=>{
+ const originalFetch=globalThis.fetch;let requested;
+ globalThis.fetch=async url=>{requested=String(url);return new Response("export function buildCryptoStrategyComparison() {}",{status:200,headers:{"Content-Type":"text/javascript"}});};
+ t.after(()=>{globalThis.fetch=originalFetch;});
+ const response=await worker.fetch(new Request("https://edge.example.au/crypto-strategy-comparison.js"),baseEnv());
+ assert.equal(response.status,200);
+ assert.ok(requested.endsWith("edge-intelligence-486.pages.dev/crypto-strategy-comparison.js"));
+ assert.match(await response.text(),/buildCryptoStrategyComparison/);
+});
+
+test("automated crypto paper account safely migrates legacy data and returns feedback",async()=>{
+ const store=kv(),legacy=createAutoPaperAccount("2026-11-26T08:00:00.000Z");
+ delete legacy.paperOnly;legacy.cash=88;
+ legacy.closedTrades=[{closedAt:"2026-11-25T08:00:00.000Z",pnl:-1,symbol:"BTCUSDT"}];
+ store.values.set("crypto-auto-paper-global-v1",JSON.stringify(legacy));
+ const response=await worker.fetch(new Request("https://api.example.au/api/crypto/auto-paper/account"),baseEnv({EDGE_KV:store.binding}),access("user-1"));
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.paperOnly,true);assert.equal(body.liveTradingEnabled,false);
+ assert.equal(body.cash,88);assert.equal(body.closedTrades.length,1);
+ assert.equal(body.performance.tradeCount,1);assert.equal(body.performance.status,"INSUFFICIENT_SAMPLE");
+ assert.equal(JSON.parse(store.values.get("crypto-auto-paper-global-v1")).paperOnly,true);
+});
+
+test("automated crypto paper API refuses an explicit unsafe paper-only marker without overwriting",async()=>{
+ const store=kv(),unsafe=createAutoPaperAccount("2026-11-26T08:00:00.000Z");
+ unsafe.paperOnly=false;store.values.set("crypto-auto-paper-global-v1",JSON.stringify(unsafe));
+ const before=store.values.get("crypto-auto-paper-global-v1");
+ const response=await worker.fetch(new Request("https://api.example.au/api/crypto/auto-paper/account"),baseEnv({EDGE_KV:store.binding}),access("user-1"));
+ assert.equal(response.status,409);
+ assert.equal(store.values.get("crypto-auto-paper-global-v1"),before);
 });

@@ -216,3 +216,13 @@ Because early legacy batches may have advanced with incomplete history, the firs
 ## CoinSpot MTF AUD pair validation
 
 The automated paper engine accepts an entry only when both the market and its quote identify the exact `BTC/AUD` or `ETH/AUD` pair. Persisted open positions and closed trades must keep the same pair identity. Any mismatch is rejected without changing the paper ledger. This remains a simulated AUD 100 paper system; no live CoinSpot trading capability is enabled.
+
+## AI research and paper-ledger hardening — 2026-11-26
+
+- ASX automated and manual paper portfolios now carry an explicit `paperOnly: true` marker. Legacy ledgers without the marker are upgraded additively; an explicit false marker fails closed. Cash, positions, closed trades, scan cursors and browser storage are not reset.
+- ASX AI review fingerprints bind the deterministic candidate to the reviewed daily bars. Review identifiers include a model-version fingerprint so identical evidence reviewed by different model versions is not collapsed during calibration.
+- ASX calibration reports Brier score, expected calibration error, reliability-bin Wilson intervals and descriptive outcome rates grouped by subjective confidence. Confidence remains a human-readable model self-assessment, not a calibrated probability; no trained predictor or profitability claim is produced.
+- The crypto strategy lab now provides a consolidated out-of-sample comparison table for the existing 1-hour and 4-hour variants. Each result retains its own chronological 70/30 split and sample window. The common screen is a research filter only; differing timeframes, holding rules and risk settings mean this is not a statistically matched head-to-head test.
+- Automated USDT paper candidates are ranked deterministically by net reward/risk after modeled entry/exit fees, spread and slippage, then estimated net target profit, risk-budget use and ADX. Position quantity is sized against modeled stop-exit costs and remaining daily-loss capacity. A missing quote does not consume the signal cursor, allowing a retry; a valid priced signal blocked by an existing position or daily-loss stop is consumed to prevent stale later entry.
+- The automated crypto paper panel reports closed-trade sample size, win rate, profit factor, expectancy, net return, estimated fees and realized drawdown, plus the current risk-aware candidate ranking. Metrics are descriptive and remain explicitly not proven.
+- All new behavior remains simulated. The daily-loss stop uses realized paper losses; gaps can exceed the planned stop-risk estimate. No broker credentials, wallet routes, live order routes or real-money execution were added.

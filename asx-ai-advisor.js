@@ -128,11 +128,24 @@ export async function evaluateAsxAiDecision({
   }
 
   const recentBars = validated.bars.slice(-MAX_BARS);
-  let fingerprint;
+  let fingerprint, modelFingerprint;
+  const candidateEvidence = {
+    symbol: candidate.symbol, currency: candidate.currency, source: candidate.source,
+    observedAt: candidate.observedAt, entryReference: candidate.entryReference,
+    stopPrice: candidate.stopPrice, targetPrice: candidate.targetPrice,
+    shares: candidate.shares, notionalAud: candidate.notionalAud,
+    riskBudgetAud: candidate.riskBudgetAud,
+    estimatedEntryCostsAud: candidate.estimatedEntryCostsAud,
+    estimatedNetTargetProfitAud: candidate.estimatedNetTargetProfitAud,
+    estimatedNetStopLossAud: candidate.estimatedNetStopLossAud,
+    rewardRiskAfterCosts: candidate.rewardRiskAfterCosts,
+    deterministicReason: candidate.reason
+  };
   try {
-    fingerprint = await sha256(recentBars);
+    fingerprint = await sha256({ candidate: candidateEvidence, recentDailyBars: recentBars });
+    modelFingerprint = await sha256({ model });
   } catch {
-    return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "Source-bar fingerprinting failed; AI review was not attempted." };
+    return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "Candidate or source-bar fingerprinting failed; AI review was not attempted." };
   }
   const observedAt = new Date(Date.parse(candidate.observedAt)).toISOString();
   const inputProvenance = {
@@ -147,9 +160,10 @@ export async function evaluateAsxAiDecision({
     volumeBarsAvailable: recentBars.filter(bar => bar.volume !== null).length,
     volumeBarsMissing: recentBars.filter(bar => bar.volume === null).length,
     fingerprintAlgorithm: "SHA-256",
+    fingerprintScope: "DETERMINISTIC_CANDIDATE_AND_REVIEWED_DAILY_BARS",
     fingerprint
   };
-  const reviewId = "asx-" + candidate.symbol + "-" + observedAt.slice(0, 10) + "-" + fingerprint.slice(0, 16);
+  const reviewId = "asx-" + candidate.symbol + "-" + observedAt.slice(0, 10) + "-" + modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
   const packet = {
     symbol: candidate.symbol, currency: candidate.currency, source: candidate.source,
     observedAt: candidate.observedAt, entryReference: candidate.entryReference,

@@ -37,6 +37,13 @@ test("AI calibration uses a chronological holdout and reports Brier and reliabil
   assert.equal(typeof result.outOfSample.brierScore, "number");
   assert.equal(typeof result.outOfSample.expectedCalibrationError, "number");
   assert.equal(result.outOfSample.reliabilityBins.length > 0, true);
+  assert.ok(result.outOfSample.observedWinRateInterval95.lower <= result.outOfSample.observedWinRate);
+  assert.ok(result.outOfSample.observedWinRateInterval95.upper >= result.outOfSample.observedWinRate);
+  assert.ok(result.outOfSample.reliabilityBins.every(bin => bin.observedWinRateInterval95?.confidenceLevel === 0.95));
+  assert.equal(result.confidenceBandDiagnostics.length, 1);
+  assert.equal(result.confidenceBandDiagnostics[0].band, "80–89");
+  assert.equal(result.confidenceBandDiagnostics[0].interpretation, "DESCRIPTIVE_OUTCOME_RATE_NOT_PROBABILITY_CALIBRATION");
+  assert.match(result.confidenceInterpretation, /not calibrated probabilities/i);
   assert.equal(result.outOfSampleWindow.firstClosedAt, rows[30].closedAt);
   assert.equal(result.interpretation.includes("not model training"), true);
 });
@@ -99,4 +106,16 @@ test("AI calibration never pools outcomes across different model versions", () =
   assert.equal(result.modelDiagnostics.length, 2);
   assert.deepEqual(result.modelDiagnostics.map(item => item.model), ["model-a", "model-b"]);
   assert.ok(result.modelDiagnostics.every(item => item.outOfSampleSampleCount === 5));
+});
+
+test("subjective confidence bands remain descriptive and carry wide-sample uncertainty",()=>{
+ const rows=Array.from({length:40},(_,i)=>trade(i,.6,i%2===0));
+ rows.forEach((row,index)=>{row.aiReview.confidence=index<30?76:94;});
+ const result=calculateAsxAiCalibration(rows,{holdoutFraction:.25,minimumOutOfSampleSamples:5});
+ assert.equal(result.confidenceBandDiagnostics.length,1);
+ assert.equal(result.confidenceBandDiagnostics[0].band,"90–100");
+ assert.equal(result.confidenceBandDiagnostics[0].sampleCount,10);
+ assert.ok(result.confidenceBandDiagnostics[0].observedWinRateInterval95.lower<=result.confidenceBandDiagnostics[0].observedWinRate);
+ assert.ok(result.confidenceBandDiagnostics[0].observedWinRateInterval95.upper>=result.confidenceBandDiagnostics[0].observedWinRate);
+ assert.equal(result.isCalibrated,false);
 });

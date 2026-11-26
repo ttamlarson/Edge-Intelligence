@@ -101,13 +101,24 @@ export async function reviewCryptoWalkForward({
   }
 
   const recentCandles = data.slice(-MAX_REVIEW_BARS);
-  let fingerprint;
+  let fingerprint, modelFingerprint;
   try {
-    fingerprint = await sha256(recentCandles);
+    fingerprint = await sha256({
+      market: research.market,
+      quoteCurrency: research.quoteCurrency,
+      source: research.source,
+      strategy: research.strategy,
+      methodology: research.methodology,
+      parameterPolicy: research.parameterPolicy,
+      costs: research.costs,
+      data: research.data,
+      candles: data
+    });
+    modelFingerprint = await sha256({ model });
   } catch {
     return {
       status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true,
-      reason: "Source-candle fingerprinting failed; AI review was not attempted.",
+      reason: "Full-dataset or model-version fingerprinting failed; AI review was not attempted.",
       liveTradingEnabled: false
     };
   }
@@ -120,9 +131,10 @@ export async function reviewCryptoWalkForward({
     barsProvided: data.length,
     barsReviewed: recentCandles.length,
     fingerprintAlgorithm: "SHA-256",
+    fingerprintScope: "FULL_VALIDATED_DATASET_AND_FIXED_RESEARCH_ASSUMPTIONS",
     fingerprint
   };
-  const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + fingerprint.slice(0, 16);
+  const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
   const packet = {
     strategy: research.strategy,
     market: research.market,
@@ -157,7 +169,7 @@ export async function reviewCryptoWalkForward({
         max_output_tokens: 1400,
         input: [{
           role: "system",
-          content: "You are EDGE's conservative crypto strategy research reviewer. Critique only the supplied deterministic walk-forward results and recent hourly candles. Do not invent market data, news, fundamentals, licensing, exchange access or source verification. Do not search the web. Do not predict returns or win probabilities. Do not change strategy rules, parameters, capital, sizing, fees, slippage, spread, loss limits or execution settings. This is model-assisted review, not a trained predictive model. An ADVANCE decision means only that the fixed strategy may enter a longer forward paper-observation phase; it is not an approval for a real trade, profitability claim or order instruction. If the deterministic assessment is not CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW, choose HOLD_FOR_MORE_DATA. Confidence is subjective review confidence, not a calibrated probability. Identify overfitting risk, sample limitations, market-regime concentration, drawdown, cost sensitivity, gaps and source uncertainty. Return only the exact structured JSON schema."
+          content: "You are EDGE's conservative crypto strategy research reviewer. Critique only the supplied deterministic walk-forward results and recent hourly candles. Do not invent market data, news, fundamentals, licensing, exchange access or source verification. Do not search the web. Do not predict returns or win probabilities. Do not change strategy rules, parameters, capital, sizing, fees, slippage, spread, loss limits or execution settings. This is model-assisted review, not a trained predictive model. An ADVANCE decision means only that the fixed strategy may enter a longer forward paper-observation phase; it is not an approval for a real trade, profitability claim or order instruction. If the deterministic assessment is not CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW, choose HOLD_FOR_MORE_DATA. Confidence is subjective review confidence, not a calibrated probability. Identify overfitting risk, sample limitations, market-regime concentration, drawdown, cost sensitivity, gaps and source uncertainty. Do not infer that this fixed-rule walk-forward validates other strategies or establishes profitability. Return only the exact structured JSON schema."
         }, {
           role: "user",
           content: "Review this fixed-rule crypto walk-forward report. The supplied metrics, folds, recent candles and provenance are the only evidence. The deterministic assessment remains authoritative and cannot be overridden. Return a cautious research decision.\n\n" + JSON.stringify(packet)
