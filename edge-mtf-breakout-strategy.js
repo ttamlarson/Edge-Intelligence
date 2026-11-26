@@ -135,25 +135,26 @@ function validateCandles(candles, interval, label, minimum, confirmedZeroTradeIn
 }
 
 function atr(candles, period = 20, interval = PERIOD_4H) {
-  if (!Array.isArray(candles) || candles.length < 2) return null;
-  let total = 0, coveredIntervals = 0;
-  for (let index = candles.length - 1; index > 0 && coveredIntervals < period; index--) {
+  if (!Array.isArray(candles) || candles.length <= period) return null;
+  let total = 0;
+  // ATR uses the last period actual candles, not period elapsed slots.
+  // Keep the full true range on a post-gap candle: dividing it by elapsed
+  // slots would assume an unobserved price path and could understate risk.
+  for (let index = candles.length - period; index < candles.length; index++) {
     const candle = candles[index], previous = candles[index - 1];
     const elapsed = Date.parse(candle.timestamp) - Date.parse(previous.timestamp);
     const steps = elapsed / interval;
-    if (!Number.isSafeInteger(steps) || steps < 1) throw new Error("ATR candles contain invalid elapsed intervals.");
+    if (!Number.isSafeInteger(steps) || steps < 1 || steps > 2) {
+      throw new Error("ATR candles contain invalid elapsed intervals.");
+    }
     const trueRange = Math.max(
       candle.high - candle.low,
       Math.abs(candle.high - previous.close),
       Math.abs(candle.low - previous.close)
     );
-    const usedIntervals = Math.min(steps, period - coveredIntervals);
-    // A confirmed no-trade interval has no OHLCV candle. Spread the observed
-    // multi-interval true range across elapsed time; never synthesize a bar.
-    total += (trueRange / steps) * usedIntervals;
-    coveredIntervals += usedIntervals;
+    total += trueRange;
   }
-  return coveredIntervals === period ? total / period : null;
+  return total / period;
 }
 
 function donchianHigh(candles, lookback) {
