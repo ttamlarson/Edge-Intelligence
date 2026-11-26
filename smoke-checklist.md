@@ -169,3 +169,18 @@
 - [ ] Confirm persisted MTF account reports `paperOnly: true` and `liveTradingEnabled: false`.
 - [ ] Confirm a legacy account with no `paperOnly` marker is upgraded on its next scan.
 - [ ] Confirm an explicit `paperOnly: false` ledger is rejected without resetting cash, positions or trade history.
+ 
+
+## 2026-11-26 — Research and paper-ledger hardening
+
+- [ ] Confirm existing ASX and automated crypto ledgers with no paper-only marker are upgraded additively and retain cash, positions, closed trades and scan cursors.
+- [ ] Seed an explicit `paperOnly: false` ASX or crypto ledger; verify the scan/API fails closed and stored bytes remain unchanged.
+- [ ] Confirm new ASX and crypto ledgers persist `paperOnly: true` and `liveTradingEnabled: false`.
+- [ ] Verify ASX review fingerprints change when candidate metrics or reviewed daily bars change, and review IDs differ by model version for the same evidence.
+- [ ] Verify ASX probability reliability bins include Wilson 95% intervals and subjective confidence bands are labeled descriptive, not calibrated probabilities.
+- [ ] Import a multi-year hourly crypto dataset and verify the comparison table includes each available 1h/4h strategy variant, each OOS window and the common research screen; insufficient-history variants must remain absent rather than receive fabricated metrics.
+- [ ] Verify crypto candidate ranking uses net stop/target outcomes after fees, spread and slippage, and the chosen quantity does not exceed modeled remaining per-trade or daily-loss risk.
+- [ ] Remove a candidate quote while retaining its valid signal; verify its timestamp is not consumed and the same signal can be retried when a valid quote arrives.
+- [ ] Verify a valid priced candidate blocked by an open position or daily-loss pause is consumed and cannot become a stale later entry.
+- [ ] Confirm crypto paper feedback uses closed trades only, includes simulated fees and realized drawdown, and remains marked NOT PROVEN at every sample size.
+- [ ] Confirm no new broker credentials, wallet, deposit, withdrawal, live order or real-money execution path exists.
