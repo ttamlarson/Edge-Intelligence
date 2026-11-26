@@ -126,7 +126,7 @@ export function validateAutoPaperAccount(value) {
   const validDate = input => typeof input === "string" && Number.isFinite(Date.parse(input));
   const validNumber = (input, min = -Infinity) =>
     input !== null && input !== undefined && input !== "" && Number.isFinite(Number(input)) && Number(input) >= min;
-  const validTrade = trade => trade && typeof trade === "object" && validDate(trade.closedAt) && validNumber(trade.pnl);
+  const validTrade = trade => trade && typeof trade === "object" && validDate(trade.closedAt) && validNumber(trade.pnl) && (trade.symbol === undefined || AUTO_SYMBOLS.includes(trade.symbol));
   const position = value?.openPosition;
   const validPosition = position === null || (
     position && typeof position === "object" && AUTO_SYMBOLS.includes(position.symbol) &&
@@ -145,6 +145,15 @@ export function validateAutoPaperAccount(value) {
   if (!Array.isArray(value?.closedTrades) || value.closedTrades.length > 200 || !value.closedTrades.every(validTrade)) invalid.push("closed-trade history");
   if (!value?.lastProcessed || typeof value.lastProcessed !== "object" || Array.isArray(value.lastProcessed) ||
       !Object.values(value.lastProcessed).every(validDate)) invalid.push("processed-signal cursor");
+  const validRanking = value?.lastCandidateRanking === undefined || (
+    Array.isArray(value.lastCandidateRanking) && value.lastCandidateRanking.length <= AUTO_SYMBOLS.length &&
+    value.lastCandidateRanking.every(item => item && AUTO_SYMBOLS.includes(item.symbol) &&
+      validDate(item.signalAt) && validNumber(item.rank, 1) &&
+      validNumber(item.entryPrice, 0.00000001) && validNumber(item.quantity, 0.00000001) &&
+      validNumber(item.estimatedNetStopLossQuote, 0) && validNumber(item.estimatedNetTargetProfitQuote, 0) &&
+      validNumber(item.rewardRiskAfterCosts, 0))
+  );
+  if (!validRanking) invalid.push("candidate ranking");
   if (!validNumber(value?.cash, 0) || !validNumber(value?.realizedPnl) || !validNumber(value?.equity, 0) ||
       !validNumber(value?.peakEquity, 0.00000001) || !validNumber(value?.maxDrawdownPct, 0) ||
       !validNumber(value?.dailyLoss, 0)) invalid.push("account balances or risk metrics");
