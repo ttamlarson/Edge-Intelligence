@@ -235,14 +235,25 @@ test("CoinSpot live-day refresh replaces per-date trade counts instead of inflat
 test("CoinSpot dense history resumes in bounded chunks and completes without replaying fetched windows", async () => {
   const store = new Map();
   const now = "2026-11-25T12:00:00.000Z";
+  const probeDate = "2026-11-25";
+  const probeStartMs = Date.parse(probeDate + "T00:00:00.000Z");
+  const probeMidpointMs = probeStartMs + 12 * 60 * 60 * 1000;
+  const probeEndMs = probeStartMs + 24 * 60 * 60 * 1000;
   const variants = [
-    { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
-    { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
-    { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+    { format: "epoch", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", rawBuyOrders: 1, rawSellOrders: 0, validAudTrades: 1, outOfRangeTrades: 0 }
   ];
   const probeMarket = coin => ({
     coin,
-    readOnlyHistory: { partitionHistory: [{ variants }, { variants }] }
+    readOnlyHistory: {
+      date: probeDate, queryFormat: "date",
+      rawBuyOrders: 2, rawSellOrders: 0, validAudTrades: 2, outOfRangeTrades: 0,
+      partitionHistory: [
+        { startAt: new Date(probeStartMs).toISOString(), endAt: new Date(probeMidpointMs).toISOString(), variants },
+        { startAt: new Date(probeMidpointMs).toISOString(), endAt: new Date(probeEndMs).toISOString(), variants }
+      ]
+    }
   });
   store.set("coinspot-mtf-history-global-v1", JSON.stringify({
     mode: "COINSPOT_AUD_RESEARCH_ONLY",
@@ -353,14 +364,25 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
 test("CoinSpot paper runner stops after an incomplete history chunk instead of retrying the same date four times", async () => {
   const store = new Map();
   const now = "2026-11-25T12:00:00.000Z";
+  const probeDate = "2026-11-25";
+  const probeStartMs = Date.parse(probeDate + "T00:00:00.000Z");
+  const probeMidpointMs = probeStartMs + 12 * 60 * 60 * 1000;
+  const probeEndMs = probeStartMs + 24 * 60 * 60 * 1000;
   const variants = [
-    { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
-    { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
-    { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+    { format: "epoch", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", rawBuyOrders: 1, rawSellOrders: 0, validAudTrades: 1, outOfRangeTrades: 0 }
   ];
   const probeMarket = coin => ({
     coin,
-    readOnlyHistory: { partitionHistory: [{ variants }, { variants }] }
+    readOnlyHistory: {
+      date: probeDate, queryFormat: "date",
+      rawBuyOrders: 2, rawSellOrders: 0, validAudTrades: 2, outOfRangeTrades: 0,
+      partitionHistory: [
+        { startAt: new Date(probeStartMs).toISOString(), endAt: new Date(probeMidpointMs).toISOString(), variants },
+        { startAt: new Date(probeMidpointMs).toISOString(), endAt: new Date(probeEndMs).toISOString(), variants }
+      ]
+    }
   });
   store.set("coinspot-mtf-history-global-v1", JSON.stringify({
     mode: "COINSPOT_AUD_RESEARCH_ONLY",

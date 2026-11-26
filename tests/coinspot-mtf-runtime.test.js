@@ -325,7 +325,10 @@ test("CoinSpot backfill uses validated millisecond-epoch partitions when seconds
    }
    if(typeof body.startdate==="number" && body.startdate > 1e12){
     const start=Number(body.startdate);
-    return new Response(JSON.stringify({status:"ok",buyorders:[makeRow(start+5*60*1000)],sellorders:[]}),{status:200});
+    const probeDayStart=Date.parse("2026-11-25T00:00:00.000Z");
+    const rows=start===probeDayStart?[makeRow(Date.parse("2026-11-25T09:00:00.000Z"))]
+      :start===probeDayStart+12*60*60*1000?[]:[makeRow(start+5*60*1000)];
+    return new Response(JSON.stringify({status:"ok",buyorders:rows,sellorders:[]}),{status:200});
    }
    return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200});
   }
