@@ -2,6 +2,93 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { __test } from "../index.js";
 
+test("CoinSpot resumable history rejects completed or non-contiguous windows before fetching", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls++; throw new Error("history fetch must not run for corrupt progress"); };
+  try {
+    const now = "2026-11-25T12:00:00.000Z";
+    const startMs = Date.parse("2026-11-25T00:00:00.000Z");
+    const endMs = startMs + 86400000;
+    const midpoint = startMs + 43200000;
+    const variants = [
+      { format: "epoch", validAudTrades: 0, outOfRangeTrades: 0 },
+      { format: "epoch-string", validAudTrades: 0, outOfRangeTrades: 0 },
+      { format: "epoch-ms", validAudTrades: 1, outOfRangeTrades: 0 }
+    ];
+    const probeMarket = coin => ({
+      coin,
+      readOnlyHistory: { partitionHistory: [{ variants }, { variants }] }
+    });
+    const makeProgress = invalidBtc => ({
+      targetDate: "2026-11-25",
+      coins: {
+        BTC: { ...invalidBtc, trades: [], apiCallsTotal: 0, saturatedWindows: 0 },
+        ETH: {
+          windows: [{ startMs, endMs }],
+          processedThroughMs: startMs,
+          trades: [],
+          complete: false,
+          apiCallsTotal: 0,
+          saturatedWindows: 0
+        }
+      }
+    });
+    const cases = [
+      {
+        label: "complete flag with pending windows",
+        btc: { windows: [{ startMs, endMs }], processedThroughMs: startMs, complete: true }
+      },
+      {
+        label: "gap between remaining windows",
+        btc: {
+          windows: [{ startMs, endMs: midpoint }, { startMs: midpoint + 1000, endMs }],
+          processedThroughMs: startMs,
+          complete: false
+        }
+      }
+    ];
+    for (const item of cases) {
+      const store = new Map();
+      const state = {
+        mode: "COINSPOT_AUD_RESEARCH_ONLY",
+        status: "BACKFILLING",
+        nextDate: "2026-11-25",
+        lastProviderProbeAt: now,
+        providerProbe: {
+          readOnlyStatus: "AUTHENTICATED",
+          markets: [probeMarket("BTC"), probeMarket("ETH")]
+        },
+        markets: {
+          BTC: { dailyCandles: [], fourHourCandles: [], tradesFetched: 0 },
+          ETH: { dailyCandles: [], fourHourCandles: [], tradesFetched: 0 }
+        },
+        pendingHistorySync: makeProgress(item.btc),
+        liveTradingEnabled: false
+      };
+      const serialized = JSON.stringify(state);
+      store.set("coinspot-mtf-history-global-v1", serialized);
+      const env = {
+        EDGE_KV: {
+          get: async key => store.get(key) ?? null,
+          put: async (key, value) => { store.set(key, value); }
+        },
+        COINSPOT_READONLY_KEY: "test-readonly-key",
+        COINSPOT_READONLY_SECRET: "test-readonly-secret"
+      };
+      await assert.rejects(
+        () => __test.syncCoinSpotMtfHistory(env, now),
+        /history window coverage failed validation/,
+        item.label
+      );
+      assert.equal(store.get("coinspot-mtf-history-global-v1"), serialized, item.label + " must preserve the original KV state");
+    }
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("CoinSpot sync retries empty full-day history with epoch seconds and records provider probes", async t => {
   const originalFetch = globalThis.fetch;
   const requests = [];
@@ -231,6 +318,9 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
         assert.ok(runCalls.filter(call => call.coin === coin).length <= 15, "per-market request budget must be respected");
       }
       if (result.dateComplete) break;
+      const savedProgress = JSON.parse(store.get("coinspot-mtf-history-global-v1")).pendingHistorySync;
+      assert.ok(Number.isSafeInteger(savedProgress.coins.BTC.processedThroughMs));
+      assert.equal(savedProgress.coins.BTC.windows[0].startMs, savedProgress.coins.BTC.processedThroughMs);
       assert.equal(result.nextDate, "2026-07-28", "incomplete date must remain the cursor");
     }
 
