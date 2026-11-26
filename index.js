@@ -498,6 +498,7 @@ function createCoinSpotHistoryProgress(targetDate, startMs, endMs) {
     targetDate,
     coins: Object.fromEntries(COINSPOT_MTF_COINS.map(coin => [coin, {
       windows: [{ startMs, endMs }],
+      processedThroughMs: startMs,
       trades: [],
       rawRowsSeen: 0,
       rawBuyOrders: 0,
@@ -530,12 +531,31 @@ function validateCoinSpotHistoryProgress(progress, targetDate, startMs, endMs) {
         !Number.isSafeInteger(market.saturatedWindows) || market.saturatedWindows < 0) {
       throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history state failed validation; stored data was preserved.");
     }
+    // Legacy pending batches did not store an explicit processed cursor.
+    // Their first remaining window is the only safe migration point; new batches
+    // persist the cursor and validate that all remaining windows form a
+    // contiguous suffix through the end of the UTC day.
+    const processedThroughMs = market.processedThroughMs === undefined
+      ? (market.windows[0]?.startMs ?? (market.complete ? endMs : startMs))
+      : market.processedThroughMs;
+    if (!Number.isSafeInteger(processedThroughMs) || processedThroughMs < startMs || processedThroughMs > endMs) {
+      throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history cursor failed validation; stored data was preserved.");
+    }
+    market.processedThroughMs = processedThroughMs;
+    let expectedWindowStart = processedThroughMs;
     for (const window of market.windows) {
       if (!Number.isSafeInteger(window?.startMs) || !Number.isSafeInteger(window?.endMs) ||
           window.startMs < startMs || window.endMs > endMs || window.endMs <= window.startMs ||
+          window.startMs !== expectedWindowStart ||
           (window.format !== undefined && !["date", "epoch"].includes(window.format))) {
-        throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history window failed validation; stored data was preserved.");
+        throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history window coverage failed validation; stored data was preserved.");
       }
+      expectedWindowStart = window.endMs;
+    }
+    if (market.complete
+      ? market.windows.length !== 0 || processedThroughMs !== endMs || expectedWindowStart !== endMs
+      : market.windows.length === 0 || expectedWindowStart !== endMs) {
+      throw new HttpError(409, "CoinSpot resumable " + coin + "/AUD history window coverage failed validation; stored data was preserved.");
     }
     for (const trade of market.trades) {
       if (!Number.isSafeInteger(trade?.timestamp) || trade.timestamp < startMs || trade.timestamp >= endMs ||
@@ -626,6 +646,7 @@ async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = C
         progress.dateFormatFallbackHits++;
       } else {
         progress.emptyHistoryWindows++;
+        progress.processedThroughMs = window.endMs;
         progress.windows.shift();
         continue;
       }
@@ -667,6 +688,7 @@ async function fetchCoinSpotHistoryProgress(env, coin, progress, maxRequests = C
     if (count === 0) progress.emptyHistoryWindows++;
     progress.rawRowsSeen += count;
     progress.trades.push(...normalizedTrades);
+    progress.processedThroughMs = window.endMs;
     progress.windows.shift();
   }
 
