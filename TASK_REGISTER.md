@@ -309,3 +309,15 @@ Updated after local implementation and automated verification on `edge-productio
 - No strategy thresholds, simulated capital, fees, slippage, allocation, stops, loss limit or live-trading safety flags were changed.
 
 - The ledger UTC day must match its update timestamp before daily-loss reconciliation; mismatched day metadata fails closed.
+
+
+## 2026-11-27 — CoinSpot MTF daily-loss rollover and monotonic scan clock
+
+- [x] Preserve the last validated open-position unrealized loss across UTC midnight when a quote is unavailable; recalculate from the next valid quote.
+- [x] Validate persisted daily loss against current-day realized losses plus the retained open-position unrealized loss.
+- [x] Reject backdated paper scan clocks before CoinSpot history synchronization, preserving the existing history cursor, ledger and status records.
+- [x] Add regression tests for stale-quote day rollover, understated daily-loss metadata, direct backdated ledger processing and scheduled-runner no-write behavior.
+- Risk limits, capital, fees, slippage, position sizing, stops, entry gates and all live-trading safety flags remain unchanged. This remains simulated paper trading only.
+
+
+- Legacy MTF ledgers without a risk-accounting version are migrated additively on the next scan; version 2 requires persisted daily loss to cover realized and retained open-position losses. No cash, position or trade history is reset.

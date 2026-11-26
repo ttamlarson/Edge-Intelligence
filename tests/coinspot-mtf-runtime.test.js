@@ -738,3 +738,25 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   console.log=originalLog;
  }
 });
+
+
+test("backdated scheduled MTF paper scans are rejected before CoinSpot sync or KV writes",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const accountKey="coinspot-mtf-paper-global-v1",historyKey="coinspot-mtf-history-global-v1",statusKey="coinspot-mtf-paper-status-global-v1";
+ const accountRaw=JSON.stringify(createMtfPaperAccount("2026-11-25T09:00:00.000Z"));
+ const historyRaw=JSON.stringify({mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-07-28",markets:{},liveTradingEnabled:false});
+ kv.values.set(accountKey,accountRaw);
+ kv.values.set(historyKey,historyRaw);
+ let requests=0;
+ globalThis.fetch=async()=>{requests++;throw new Error("Unexpected CoinSpot request for a backdated scan.");};
+ try{
+  await assert.rejects(
+   ()=>__test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T08:00:00.000Z",1),
+   /older than the stored ledger/
+  );
+  assert.equal(requests,0);
+  assert.equal(kv.values.get(accountKey),accountRaw);
+  assert.equal(kv.values.get(historyKey),historyRaw);
+  assert.equal(kv.values.has(statusKey),false);
+ }finally{globalThis.fetch=originalFetch;}
+});

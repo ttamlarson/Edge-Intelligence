@@ -1115,6 +1115,11 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
     try { account = JSON.parse(stored); validateMtfPaperAccount(account); }
     catch { throw new HttpError(409, "CoinSpot MTF paper ledger failed validation; existing data was preserved."); }
   }
+  // Reject delayed/replayed cron events before they can rewind history cursors
+  // or write a ledger snapshot older than the currently persisted account.
+  if (clock < Date.parse(account.updatedAt)) {
+    throw new HttpError(409, "CoinSpot MTF paper scan timestamp is older than the stored ledger; history and ledger were not changed.");
+  }
   let historySync = null, syncError = null, backfillDaysProcessed = 0;
   const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
   let historyRequestsThisScan = 0;

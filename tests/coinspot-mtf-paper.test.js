@@ -244,3 +244,40 @@ test("reconciles cash basis and net liquidation equity before using stored risk"
  assert.throws(()=>validateMtfPaperAccount({...opened,equityAud:opened.equityAud+1}),/balance\/equity reconciliation/);
  assert.throws(()=>validateMtfPaperAccount({...opened,cashAud:opened.cashAud+1,equityAud:opened.equityAud+1}),/balance\/equity reconciliation/);
 });
+
+
+test("UTC day rollover carries the last validated open-position loss while the quote is unavailable",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ assert.ok(opened.unrealizedPnlAud<0);
+ const expectedLoss=Math.round((Math.max(0,-opened.unrealizedPnlAud)+Number.EPSILON)*100)/100;
+ const rolled=processMtfPaperAccount(opened,{markets:[],now:"2026-11-26T00:15:00.000Z"});
+ assert.equal(rolled.day,"2026-11-26");
+ assert.equal(rolled.openPosition.markStatus,"STALE");
+ assert.equal(rolled.openPosition.lastMarkAt,opened.openPosition.lastMarkAt);
+ assert.equal(rolled.unrealizedPnlAud,opened.unrealizedPnlAud);
+ assert.equal(rolled.dailyLossAud,expectedLoss);
+ assert.ok(rolled.dailyLossAud>0);
+ assert.equal(validateMtfPaperAccount(rolled),true);
+ assert.throws(()=>validateMtfPaperAccount({...rolled,dailyLossAud:0}),/ledger failed validation/);
+});
+
+test("rejects a backdated MTF paper scan without changing the supplied ledger",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const before=structuredClone(opened);
+ assert.throws(()=>processMtfPaperAccount(opened,{markets:[],now:"2026-11-25T07:59:59.999Z"}),/cannot move backwards/);
+ assert.deepEqual(opened,before);
+});
+
+
+test("migrates a legacy open-position ledger whose stored daily loss omitted its unrealized loss",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const legacy={...opened};
+ delete legacy.riskAccountingVersion;
+ legacy.dailyLossAud=0;
+ assert.equal(validateMtfPaperAccount(legacy),true);
+ const upgraded=processMtfPaperAccount(legacy,{markets:[],now:"2026-11-25T08:15:00.000Z"});
+ assert.equal(upgraded.riskAccountingVersion,2);
+ assert.ok(upgraded.dailyLossAud>=Math.max(0,-opened.unrealizedPnlAud));
+ assert.equal(validateMtfPaperAccount(upgraded),true);
+});
