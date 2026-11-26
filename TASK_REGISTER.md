@@ -276,3 +276,11 @@ Updated after local implementation and automated verification on `edge-productio
 - Missing candidate prices now remain retryable; valid priced candidates blocked by an existing position or daily-loss stop are consumed to prevent stale entry. Added closed-trade feedback metrics and surfaced ranking/feedback in the crypto panel.
 - Added regression tests for migration safety, model-version identity, calibration uncertainty, strategy comparison, risk sizing, missing-price retries, feedback metrics and the Worker API/asset paths.
 - Production merge/deploy remains gated on the full GitHub CI test, syntax and Pages build checks.
+
+
+## 2026-11-26 — CoinSpot MTF zero-trade gap diagnostics
+
+- Production history reconciliation found the ETH/AUD four-hour interval 2026-11-22 16:00–20:00 UTC absent from the candle series while the 22 November daily trade count exactly matched the sum of all stored four-hour trade counts (144).
+- Added explicit `CONFIRMED_NO_TRADES` versus `UNVERIFIED_GAP` diagnostics. A confirmed zero-trade interval is not a missing provider batch, but it still breaks the fixed four-hour time series.
+- Kept the 210-contiguous-four-hour-candle readiness gate unchanged. No carry-forward, interpolation or synthetic OHLCV candle is created.
+- Added regression coverage for exact daily/four-hour trade-count reconciliation and for gaps with insufficient metadata. Paper execution and all live-trading safety flags remain unchanged.

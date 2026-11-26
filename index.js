@@ -1049,6 +1049,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       fourHourGapCount: m.history?.fourHourGapCount ?? 0,
       latestDailyGap: m.history?.latestDailyGap ?? null,
       latestFourHourGap: m.history?.latestFourHourGap ?? null,
+      fourHourGapDiagnostics: m.history?.fourHourGapDiagnostics ?? [],
       storedDailyCandles: m.history?.storedDailyCandles ?? m.history?.dailyCandles ?? 0,
       storedFourHourCandles: m.history?.storedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
@@ -1080,6 +1081,59 @@ async function getCoinSpotMtfPaper(env) {
   return { ...snapshot, ...account, markets: snapshot.markets || [], lastScanAt: snapshot.lastScanAt || null, status: snapshot.status || "PAPER_ENGINE_WAITING", liveTradingEnabled: false };
 }
 
+function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
+  const dailyTradeCounts = new Map();
+  for (const candle of dailyCandles) {
+    const timestamp = Date.parse(candle?.timestamp || "");
+    const count = Number(candle?.tradeCount);
+    if (!Number.isFinite(timestamp)) continue;
+    const day = new Date(timestamp).toISOString().slice(0, 10);
+    dailyTradeCounts.set(day, Number.isSafeInteger(count) && count >= 0 ? count : null);
+  }
+
+  // Reconcile every retained four-hour trade count against its UTC daily
+  // candle. Only an exact match can prove that an absent bucket contained no
+  // completed trades; missing metadata or truncated day coverage stays unknown.
+  const fourHourTradeCounts = new Map();
+  for (const candle of fourHourCandles) {
+    const timestamp = Date.parse(candle?.timestamp || "");
+    if (!Number.isFinite(timestamp)) continue;
+    const day = new Date(timestamp).toISOString().slice(0, 10);
+    const aggregate = fourHourTradeCounts.get(day) || { count: 0, valid: true };
+    const count = Number(candle?.tradeCount);
+    if (!Number.isSafeInteger(count) || count < 0) aggregate.valid = false;
+    else aggregate.count += count;
+    fourHourTradeCounts.set(day, aggregate);
+  }
+
+  const diagnostics = [];
+  const intervalMs = COINSPOT_INTERVALS.fourHour;
+  for (let index = 1; index < fourHourCandles.length; index++) {
+    const previousAt = Date.parse(fourHourCandles[index - 1]?.timestamp || "");
+    const nextAt = Date.parse(fourHourCandles[index]?.timestamp || "");
+    if (!Number.isFinite(previousAt) || !Number.isFinite(nextAt) || nextAt - previousAt <= intervalMs) continue;
+    const steps = (nextAt - previousAt) / intervalMs;
+    if (!Number.isInteger(steps)) continue;
+    for (let missingAt = previousAt + intervalMs; missingAt < nextAt; missingAt += intervalMs) {
+      const startAt = new Date(missingAt).toISOString();
+      const endAt = new Date(missingAt + intervalMs).toISOString();
+      const day = startAt.slice(0, 10);
+      const dailyTradeCount = dailyTradeCounts.get(day);
+      const observed = fourHourTradeCounts.get(day);
+      const confirmed = Number.isSafeInteger(dailyTradeCount) && dailyTradeCount >= 0 &&
+        observed?.valid === true && observed.count === dailyTradeCount;
+      diagnostics.push({
+        startAt,
+        endAt,
+        status: confirmed ? "CONFIRMED_NO_TRADES" : "UNVERIFIED_GAP",
+        dailyTradeCount: Number.isSafeInteger(dailyTradeCount) ? dailyTradeCount : null,
+        observedFourHourTradeCount: observed?.valid === true ? observed.count : null
+      });
+    }
+  }
+  return diagnostics;
+}
+
 async function getCoinSpotMtfStrategy(env,now=new Date()) {
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
   let state;
@@ -1102,7 +1156,8 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       lastCompletedDailyAt:daily.at(-1)?.timestamp||null,
       lastCompletedFourHourAt:fourHour.at(-1)?.timestamp||null,
       tradesFetched:history.tradesFetched||0,
-      lastHistoryDate:history.lastHistoryDate||null
+      lastHistoryDate:history.lastHistoryDate||null,
+      fourHourGapDiagnostics:[]
     };
     let dailyContinuity, fourHourContinuity, candleValidationError = null;
     // Missing intervals are never filled with synthetic OHLCV candles. The
@@ -1116,7 +1171,8 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
         dailyGapCount: dailyContinuity.gapCount,
         fourHourGapCount: fourHourContinuity.gapCount,
         latestDailyGap: dailyContinuity.latestGap,
-        latestFourHourGap: fourHourContinuity.latestGap
+        latestFourHourGap: fourHourContinuity.latestGap,
+        fourHourGapDiagnostics: coinSpotFourHourGapDiagnostics(daily, fourHour)
       });
     } catch(error) {
       candleValidationError = String(error?.message || "COINSPOT_CANDLE_VALIDATION_FAILED").slice(0,180);
@@ -1146,7 +1202,15 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       readiness.push("Daily contiguous history "+dailyContinuity.contiguousCandles+"/110 completed candles"+gap);
     }
     if(fourHourContinuity.contiguousCandles<210){
-      const gap=fourHourContinuity.latestGap?" after gap "+fourHourContinuity.latestGap.previousAt+" -> "+fourHourContinuity.latestGap.nextAt:"";
+      const latestGap=fourHourContinuity.latestGap;
+      let gap="";
+      if(latestGap){
+        const missingStartAt=new Date(Date.parse(latestGap.previousAt)+COINSPOT_INTERVALS.fourHour).toISOString();
+        const diagnostic=historySummary.fourHourGapDiagnostics.find(item=>item.startAt===missingStartAt&&item.endAt===latestGap.nextAt);
+        gap=diagnostic?.status==="CONFIRMED_NO_TRADES"
+          ? " after confirmed zero-trade interval "+diagnostic.startAt+" -> "+diagnostic.endAt+" (daily and four-hour counts reconcile at "+diagnostic.dailyTradeCount+" trades)"
+          : " after unverified gap "+latestGap.previousAt+" -> "+latestGap.nextAt;
+      }
       readiness.push("Four-hour contiguous history "+fourHourContinuity.contiguousCandles+"/210 completed candles"+gap);
     }
     if(readiness.length){
