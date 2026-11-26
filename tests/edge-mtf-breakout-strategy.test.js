@@ -323,7 +323,7 @@ test("time-adjusted EMAs carry the previous close through a confirmed zero-trade
   const referenceBars = [
     ...fourHourCandles.slice(0, gapIndex),
     carriedCloseBar,
-    ...fourHourCandles.slice(gapIndex)
+    ...gapBars.slice(gapIndex)
   ];
   const asOf = Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000;
   const gapAware = evaluateEdgeBreakoutSignal({
