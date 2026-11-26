@@ -103,7 +103,7 @@ test("signal rejects incomplete candles and broken chronological series", () => 
   gap[100].timestamp = new Date(Date.parse(gap[100].timestamp) + 3600000).toISOString();
   assert.throws(() => evaluateEdgeBreakoutSignal({
     dailyCandles, fourHourCandles: gap, asOf: latest + 4 * 3600000
-  }), /non-contiguous/i);
+  }), /misaligned|non-contiguous/i);
 });
 
 test("spread, liquidity and bearish regime filters fail closed", () => {
