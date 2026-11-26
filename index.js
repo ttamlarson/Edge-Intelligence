@@ -1056,6 +1056,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       lastCompletedFourHourAt: m.history?.lastCompletedFourHourAt || null,
       lastCompletedFourHourClose: m.history?.lastCompletedFourHourClose ?? null,
       entryModel: m.signal?.entryModel || null,
+      triggerModel: m.signal?.triggerModel || null,
+      failedChecks: m.signal?.failedChecks || [],
       tradesFetched: m.history?.tradesFetched || 0,
       checks: m.signal?.checks || null, signalError: m.signalError || null,
       aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null

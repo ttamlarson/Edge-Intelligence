@@ -152,11 +152,17 @@ export function evaluateEdgeBreakoutSignal({
   // liquidity and volatility gates remain mandatory for both paths.
   const eligible = checks.dailyTrend && checks.fourHourTrend &&
     checks.positiveLongTrendSlope && checks.entryTrigger && checks.liquidity && checks.volatility;
+  const triggerModel = !entryTrigger ? null : breakoutTrigger ? "DONCHIAN_BREAKOUT" : "PULLBACK_RECLAIM";
+  const failedChecks = Object.entries(checks)
+    .filter(([key, passed]) => passed === false && !["breakoutVotes", "pullbackReclaim"].includes(key))
+    .map(([key]) => key);
   const stopDistance = volatility * 2.5;
   return {
     strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1",
     status: eligible ? "BUY_CANDIDATE_PAPER_ONLY" : "NO_TRADE",
-    entryModel: !entryTrigger ? null : breakoutTrigger ? "DONCHIAN_BREAKOUT" : "PULLBACK_RECLAIM",
+    entryModel: eligible ? triggerModel : null,
+    triggerModel,
+    failedChecks,
     signalAt: signalBar.timestamp,
     evaluatedAt: new Date(clock).toISOString(),
     marketRegime: checks.dailyTrend && checks.fourHourTrend && checks.positiveLongTrendSlope ? "BULLISH" : "NOT_BULLISH",
