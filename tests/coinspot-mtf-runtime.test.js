@@ -195,11 +195,13 @@ test("CoinSpot refuses to advance a historical date when non-empty rows fail tra
 
 test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions return no history",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch;
+ const epochMsRequests=[];
  globalThis.fetch=async(url,options={})=>{
   const target=String(url);
   if(target.endsWith("/status")) return new Response(JSON.stringify({status:"ok"}),{status:200});
   if(target.endsWith("/orders/market/completed")){
    const body=JSON.parse(options.body||"{}"),coin=body.cointype;
+   if(typeof body.startdate==="number"&&body.startdate>1e12) epochMsRequests.push(body.startdate);
    if(typeof body.startdate==="string" && /^\d{4}-\d{2}-\d{2}$/.test(body.startdate)){
     const make=offset=>Array.from({length:500},(_,i)=>({
      market:coin+"/AUD",
@@ -216,13 +218,17 @@ test("CoinSpot refuses to advance a saturated day when epoch sub-day partitions 
  try{
   await assert.rejects(
    ()=>__test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T06:00:00.000Z"),
-   /COINSPOT_HISTORY_PARTITION_EMPTY/
+   /COINSPOT_SUBDAY_EPOCH_MS_UNVERIFIED/
   );
   const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(history.nextDate,"2026-07-28");
   assert.equal(history.lastProcessedDate,undefined);
   assert.equal(history.liveTradingEnabled,false);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory.length,2);
+  assert.equal(epochMsRequests.length,4,"only provider-probe epoch-ms requests should run; unvalidated backfill partitions must not be queried");
+  assert.ok(history.pendingHistorySync);
+  assert.equal(history.pendingHistorySync.coins.BTC.windows.length,2);
+  assert.equal(history.markets.BTC.dailyCandles.length,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].validAudTrades,0);
   assert.equal(history.providerProbe.markets[0].readOnlyHistory.outOfRangeTrades,1000);
