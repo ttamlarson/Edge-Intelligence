@@ -181,6 +181,40 @@ test("accepts one reconciled zero-trade interval without fabricating a candle an
   assert.equal(Date.parse(gapBars[100].timestamp) - Date.parse(gapBars[99].timestamp), 8 * 3600000);
 });
 
+test("ATR keeps the full observed range when its actual-candle window includes a confirmed gap", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const gapBars = fourHourCandles.map((candle, index) => ({
+    ...candle,
+    timestamp: new Date(Date.parse(candle.timestamp) + (index >= 200 ? 4 * 3600000 : 0)).toISOString()
+  }));
+  const startAt = new Date(Date.parse(fourHourCandles[199].timestamp) + 4 * 3600000).toISOString();
+  const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
+  const lastTwenty = gapBars.slice(-20);
+  let totalRange = 0;
+  for (let index = 0; index < lastTwenty.length; index++) {
+    const candle = lastTwenty[index];
+    const previous = gapBars[gapBars.length - 21 + index];
+    totalRange += Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previous.close),
+      Math.abs(candle.low - previous.close)
+    );
+  }
+  const expectedAtr = Math.round((totalRange / 20 + Number.EPSILON) * 1e8) / 1e8;
+  const signal = evaluateEdgeBreakoutSignal({
+    dailyCandles, fourHourCandles: gapBars,
+    confirmedZeroTradeIntervals: [{
+      startAt, endAt, status: "CONFIRMED_NO_TRADES",
+      dailyTradeCount: 5, observedFourHourTradeCount: 5
+    }],
+    asOf: Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000,
+    spreadBps: 10
+  });
+  assert.equal(signal.indicators.atr20, expectedAtr);
+  assert.equal(signal.indicators.fourHourActualCandles, 220);
+  assert.equal(signal.indicators.fourHourElapsedIntervals, 221);
+});
+
 test("does not treat a candle after a confirmed zero-trade gap as an adjacent pullback reclaim", () => {
   const { dailyCandles, fourHourCandles } = fixtures();
   fourHourCandles[218] = {
