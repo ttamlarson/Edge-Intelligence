@@ -283,7 +283,9 @@ async function loadCoinSpotMtfPaper(runNow=false){
   const when=a.lastScanAt?" · Last scan "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth"):"";
   $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
   $("mtfPaperPositionTitle").textContent=a.openPosition?"OPEN · "+a.openPosition.pair:"No open paper position";
-  $("mtfPaperPositionDetail").textContent=a.openPosition?"Entry "+fmt(a.openPosition.entryPrice)+" · stop "+fmt(a.openPosition.trailingStop)+" · quantity "+Number(a.openPosition.quantity).toFixed(8)+" · signal "+a.openPosition.signalAt:"One position maximum. No real exchange orders are submitted.";
+  const markStatus=a.openPosition?String(a.openPosition.markStatus||"LEGACY_MARK_UNVERIFIED").replaceAll("_"," "):"";
+  const lastMarkAt=a.openPosition?.lastMarkAt?" · last valid mark "+formatDateTime(a.openPosition.lastMarkAt,$("auTimezone")?.value||"Australia/Perth"):"";
+  $("mtfPaperPositionDetail").textContent=a.openPosition?"Entry "+fmt(a.openPosition.entryPrice)+" · stop "+fmt(a.openPosition.trailingStop)+" · quantity "+Number(a.openPosition.quantity).toFixed(8)+" · signal "+a.openPosition.signalAt+" · mark "+markStatus+lastMarkAt:"One position maximum. No real exchange orders are submitted.";
   $("mtfPaperMarkets").innerHTML=(a.markets||[]).map(m=>{
    const gap=m.latestFourHourGap?m.latestFourHourGap.previousAt+" → "+m.latestFourHourGap.nextAt:"No latest 4h gap";
    const model=m.entryModel||m.triggerModel;

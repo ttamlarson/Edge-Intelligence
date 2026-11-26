@@ -33,6 +33,50 @@ test("rejects an entry flag when neither breakout nor pullback trigger is presen
  assert.deepEqual(a.lastProcessed,{});
 });
 test("trailing stop closes position and records net fees",()=>{let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});const m={...candidate(),quote:{pair:"BTC/AUD",bid:a.openPosition.stopPrice*.9,ask:a.openPosition.stopPrice,last:a.openPosition.stopPrice}};a=processMtfPaperAccount(a,{markets:[m],now:"2026-11-25T09:00:00.000Z"});assert.equal(a.openPosition,null);assert.equal(a.closedTrades.length,1);assert.equal(a.closedTrades[0].reason,"TRAILING_STOP");assert.equal(validateMtfPaperAccount(a),true);assert.equal(a.liveTradingEnabled,false);});
+
+test("open-position mark freshness becomes unavailable then stale without changing the last valuation",()=>{
+ let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const initial={...a.openPosition};
+ assert.equal(initial.markStatus,"CURRENT");
+ assert.equal(initial.lastMarkAt,now);
+ const unavailable=processMtfPaperAccount(a,{markets:[{coin:"BTC",pair:"BTC/AUD",quote:null,signal:null}],now:"2026-11-25T08:15:00.000Z"});
+ assert.equal(unavailable.openPosition.markStatus,"UNAVAILABLE");
+ assert.equal(unavailable.openPosition.lastMarkAt,now);
+ assert.equal(unavailable.unrealizedPnlAud,a.unrealizedPnlAud);
+ assert.equal(unavailable.equityAud,a.equityAud);
+ assert.equal(unavailable.closedTrades.length,0);
+ assert.equal(validateMtfPaperAccount(unavailable),true);
+ const stale=processMtfPaperAccount(unavailable,{markets:[],now:"2026-11-25T08:30:00.000Z"});
+ assert.equal(stale.openPosition.markStatus,"STALE");
+ assert.equal(stale.openPosition.lastMarkAt,now);
+ assert.equal(stale.unrealizedPnlAud,a.unrealizedPnlAud);
+ assert.equal(stale.equityAud,a.equityAud);
+ assert.equal(validateMtfPaperAccount(stale),true);
+ const recovered=processMtfPaperAccount(stale,{markets:[candidate()],now:"2026-11-25T08:45:00.000Z"});
+ assert.equal(recovered.openPosition.markStatus,"CURRENT");
+ assert.equal(recovered.openPosition.lastMarkAt,"2026-11-25T08:45:00.000Z");
+ assert.equal(recovered.liveTradingEnabled,false);
+ assert.equal(recovered.paperOnly,true);
+ assert.equal(validateMtfPaperAccount(recovered),true);
+});
+
+test("rejects malformed or inconsistent persisted position mark metadata",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,markStatus:"UNKNOWN"}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,markStatus:"STALE",lastMarkAt:undefined}}),/position failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,openPosition:{...opened.openPosition,lastMarkAt:"2026-11-25T09:00:00.000Z"}}),/position failed validation/);
+});
+
+test("legacy open positions acquire a conservative stale-mark timestamp when quotes are unavailable",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const legacy={...opened,openPosition:{...opened.openPosition}};
+ delete legacy.openPosition.lastMarkAt;
+ delete legacy.openPosition.markStatus;
+ const stale=processMtfPaperAccount(legacy,{markets:[],now:"2026-11-25T08:30:00.000Z"});
+ assert.equal(stale.openPosition.lastMarkAt,stale.openPosition.openedAt);
+ assert.equal(stale.openPosition.markStatus,"STALE");
+ assert.equal(validateMtfPaperAccount(stale),true);
+});
 test("trailing-stop high-water mark advances only on completed post-entry four-hour closes",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  const entryHigh=a.openPosition.highestPrice;
