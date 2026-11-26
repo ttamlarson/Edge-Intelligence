@@ -31,6 +31,11 @@ test("multi-timeframe breakout requires completed daily and four-hour candles", 
   assert.equal(signal.execution.orderIntent, "NONE");
   assert.equal(signal.execution.liveTradingEnabled, false);
   assert.equal(signal.indicators.breakoutVotes, 3);
+  assert.equal(signal.indicators.dailyClose, dailyCandles.at(-1).close);
+  assert.equal(signal.indicators.fourHourClose, fourHourCandles.at(-1).close);
+  assert.ok(signal.indicators.dailyTrendDistancePct > 0);
+  assert.ok(signal.indicators.fourHourTrendSpreadPct > 0);
+  assert.ok(signal.indicators.longTrendSlopePct > 0);
   assert.equal(signal.entryModel, "DONCHIAN_BREAKOUT");
   assert.equal(signal.checks.entryTrigger, true);
   assert.equal(signal.risk.riskBudgetPct, 0.5);
