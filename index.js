@@ -954,17 +954,49 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
 }
 
 
+function isValidCoinSpotMtfAiReview(review) {
+  const reviewedAt = typeof review?.reviewedAt === "string" ? Date.parse(review.reviewedAt) : NaN;
+  return Boolean(review && typeof review === "object" && !Array.isArray(review) &&
+    review.status === "AI_REVIEW_COMPLETE" &&
+    ["LOW_CONCERN", "CAUTION", "HIGH_CONCERN"].includes(review.assessment) &&
+    typeof review.summary === "string" && review.summary.trim().length > 0 && review.summary.length <= 700 &&
+    Array.isArray(review.riskFlags) && review.riskFlags.length <= 6 &&
+    review.riskFlags.every(flag => typeof flag === "string" && flag.trim().length > 0 && flag.length <= 180) &&
+    review.advisoryOnly === true &&
+    Number.isFinite(reviewedAt) && new Date(reviewedAt).toISOString() === review.reviewedAt);
+}
+
 async function reviewCoinSpotMtfCandidate(env, market) {
-  if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; deterministic risk rules remain in control.", riskFlags: [] };
+  if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; new paper entries fail closed.", riskFlags: [] };
   if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") return null;
-  const cacheKey = "coinspot-mtf-ai-review:" + market.coin + ":" + market.signal.signalAt;
-  const cached = await env.EDGE_KV?.get(cacheKey);
-  if (cached) { try { return JSON.parse(cached); } catch { /* invalid advisory cache is ignored */ } }
+  const signal = market.signal;
+  const spreadBps = Number(market?.quote?.spreadBps);
+  // Bind the review to deterministic signal evidence and spread, but omit
+  // transient absolute prices. The paper execution guard revalidates bid/ask each scan.
   const packet = {
-    pair: market.pair, quote: market.quote, signal: market.signal,
+    pair: market.pair,
+    quote: { pair: market.quote?.pair, spreadBps: Number.isFinite(spreadBps) ? Number(spreadBps.toFixed(2)) : null },
+    signal: {
+      strategy: signal.strategy, status: signal.status,
+      entryModel: signal.entryModel || signal.triggerModel || null,
+      signalAt: signal.signalAt, marketRegime: signal.marketRegime,
+      checks: signal.checks, indicators: signal.indicators, risk: signal.risk,
+      execution: { orderIntent: signal.execution?.orderIntent, paperOnly: signal.execution?.paperOnly,
+        liveTradingEnabled: signal.execution?.liveTradingEnabled }
+    },
     strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; entry trigger is either a 2-of-3 prior 20/55/100-bar Donchian breakout or a bullish 4h EMA20 reclaim after the previous 4h close was at/below its EMA20. Spread, liquidity, volatility and paper risk gates remain mandatory.",
     constraints: { spotOnly: true, paperOnly: true, maximumAllocationPct: 25, riskBudgetPct: 0.5, initialStopAtr: 2.5, trailingStopAtr: 3, maxHoldingDays: 30 }
   };
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(packet)));
+  const fingerprint = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
+  const cacheKey = "coinspot-mtf-ai-review:" + market.coin + ":" + signal.signalAt + ":" + fingerprint;
+  const cached = await env.EDGE_KV?.get(cacheKey);
+  if (cached) {
+    try {
+      const cachedReview = JSON.parse(cached);
+      if (isValidCoinSpotMtfAiReview(cachedReview)) return cachedReview;
+    } catch { /* invalid advisory cache is ignored and refreshed */ }
+  }
   const schema = { type:"object", additionalProperties:false, properties:{
     assessment:{type:"string",enum:["LOW_CONCERN","CAUTION","HIGH_CONCERN"]},
     summary:{type:"string",maxLength:700},
@@ -976,7 +1008,7 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
       body:JSON.stringify({model:env.OPENAI_MODEL||"gpt-6.2-astra",max_output_tokens:500,
-        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote, spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
+        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
           {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
         text:{format:{type:"json_schema",name:"edge_coinspot_signal_review",strict:true,schema}}
       }), redirect:"error", signal:controller.signal
@@ -986,13 +1018,41 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     let output=payload.output_text||"";
     if(!output) for(const item of payload.output||[]) for(const part of item.content||[]) if(part.text) output=part.text;
     const parsed=JSON.parse(output);
-    if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||typeof parsed.summary!=="string"||!Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6) throw new Error("AI response schema mismatch");
-    const review = {status:"AI_REVIEW_COMPLETE",...parsed,reviewedAt:isoNow(),advisoryOnly:true};
-    await env.EDGE_KV?.put(cacheKey, JSON.stringify(review), {expirationTtl: 86400});
+    if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||
+       typeof parsed.summary!=="string"||!parsed.summary.trim()||parsed.summary.length>700||
+       !Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6||
+       parsed.riskFlags.some(flag=>typeof flag!=="string"||!flag.trim()||flag.length>180)) throw new Error("AI response schema mismatch");
+    const review={status:"AI_REVIEW_COMPLETE",assessment:parsed.assessment,summary:parsed.summary.trim(),
+      riskFlags:parsed.riskFlags.map(flag=>flag.trim()),reviewedAt:isoNow(),advisoryOnly:true};
+    if(!isValidCoinSpotMtfAiReview(review)) throw new Error("AI response failed local validation");
+    await env.EDGE_KV?.put(cacheKey,JSON.stringify(review),{expirationTtl:86400});
     return review;
   } catch {
-    return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; deterministic safeguards remain authoritative.",riskFlags:[]};
+    return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; new paper entries fail closed.",riskFlags:[]};
   } finally { clearTimeout(timeout); }
+}
+
+function applyCoinSpotMtfAiGate(markets = [], aiReviews = []) {
+  const reviews = new Map((Array.isArray(aiReviews) ? aiReviews : [])
+    .filter(item => item && typeof item.coin === "string")
+    .map(item => [item.coin, item.review]));
+  const gates = {};
+  const gatedMarkets = (Array.isArray(markets) ? markets : []).map(market => {
+    const coin = market?.coin;
+    if (!["BTC", "ETH"].includes(coin) || market?.pair !== coin + "/AUD") return market;
+    if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") {
+      gates[coin] = "NOT_REQUIRED";
+      return market;
+    }
+    const review = reviews.get(coin);
+    const approved = isValidCoinSpotMtfAiReview(review) && review.assessment === "LOW_CONCERN";
+    gates[coin] = approved ? "AI_APPROVED" : "AI_BLOCKED";
+    if (approved) return market;
+    // AI may veto a new entry, but cannot create or modify a signal.
+    // Existing positions retain deterministic quote/stop/trend management.
+    return { ...market, signal: { ...market.signal, status: "AI_REVIEW_BLOCKED" } };
+  });
+  return { markets: gatedMarkets, gates };
 }
 
 async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
@@ -1033,14 +1093,16 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
     coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market)
   })));
-  account = processMtfPaperAccount(account, { markets: strategy.markets || [], now: nowIso });
+  const aiGate = applyCoinSpotMtfAiGate(strategy.markets || [], aiReviews);
+  account = processMtfPaperAccount(account, { markets: aiGate.markets, now: nowIso });
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
     ...account, performance: calculateMtfPaperPerformance(account, nowIso), status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
     strategyStatus: strategy.status || "UNKNOWN", historySync,
     backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
-      coin: m.coin, pair: m.pair, signalStatus: m.signalStatus || "NO_SIGNAL",
+      coin: m.coin, pair: m.pair,
+      signalStatus: aiGate.gates[m.coin] === "AI_BLOCKED" ? "AI_REVIEW_BLOCKED" : m.signalStatus || "NO_SIGNAL",
       signalAt: m.signal?.signalAt || null, bid: m.quote?.bid || null, ask: m.quote?.ask || null,
       spreadBps: m.quote?.spreadBps ?? null, dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0,
@@ -1069,7 +1131,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       failedChecks: m.signal?.failedChecks || [],
       tradesFetched: m.history?.tradesFetched || 0,
       checks: m.signal?.checks || null, signalError: m.signalError || null,
-      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null
+      aiReview: aiReviews.find(x => x.coin === m.coin)?.review || null,
+      aiGateStatus: aiGate.gates[m.coin] || "NOT_REQUIRED"
     })),
     paperOnly: true, liveTradingEnabled: false
   };
@@ -1626,7 +1689,8 @@ export default {
             lastCompletedFourHourClose: market.lastCompletedFourHourClose,
             entryModel: market.entryModel,
             spreadBps: market.spreadBps,
-            aiReviewStatus: market.aiReview?.status || "NOT_RUN"
+            aiReviewStatus: market.aiReview?.status || "NOT_RUN",
+            aiGateStatus: market.aiGateStatus || "NOT_REQUIRED"
           })),
           ledger: {
             equityAud: snapshot.equityAud,
@@ -1654,5 +1718,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
