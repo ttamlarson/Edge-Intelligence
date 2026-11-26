@@ -215,7 +215,7 @@ Because early legacy batches may have advanced with incomplete history, the firs
 
 ## CoinSpot MTF AUD pair validation
 
-The automated paper engine accepts an entry only when both the market and its quote identify the exact `BTC/AUD` or `ETH/AUD` pair. Persisted open positions and closed trades must keep the same pair identity. Any mismatch is rejected without changing the paper ledger. This remains a simulated AUD 100 paper system; no live CoinSpot trading capability is enabled.
+The automated paper engine accepts an entry only when both the market and its quote identify the exact `BTC/AUD` or `ETH/AUD` pair. Persisted open positions and closed trades must keep the same pair identity. Any mismatch is rejected without changing the paper ledger. Missing candle intervals are never filled: the strategy evaluates only the latest genuinely contiguous run, and still requires 110 daily and 210 four-hour candles in that run. Older isolated gaps therefore do not invalidate a later warmed-up run, while a recent gap exposes its exact timestamps and blocks entries until enough new contiguous data exists. This remains a simulated AUD 100 paper system; no live CoinSpot trading capability is enabled.
 
 ## AI research and paper-ledger hardening — 2026-11-26
 
