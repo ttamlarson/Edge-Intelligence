@@ -241,3 +241,6 @@ The automated paper engine accepts an entry only when both the market and its qu
 - The paper execution layer independently recomputes the bid/ask spread from the quote midpoint and rejects candidates whose reported spread is missing, inconsistent or understated, even if the signal payload claims the spread is within the configured limit.
 - Persisted open positions now require finite entry cost, notional, fee, stop, ATR and timestamp accounting. Closed trades require finite net P&L, fees, prices, quantity and chronological timestamps before the daily-loss circuit can use them. Invalid stored ledgers fail closed and are preserved rather than silently reset.
 - The A$50 bps spread ceiling, A$100 starting capital, 25% allocation ceiling, 0.5% risk budget, 0.1% fee, 15 bps slippage, A$3 daily-loss limit, stop rules and all live-trading safety flags are unchanged. No real exchange orders, withdrawals or transfers are added.
+
+
+- Closed-trade net P&L is also reconciled against quantity, executable entry/exit prices and recorded fees. The ledger rejects a finite but arithmetically inconsistent P&L, and the daily-loss field cannot be lower than the current UTC day's realized closed-trade losses.
