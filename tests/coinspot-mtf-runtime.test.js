@@ -663,10 +663,20 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   apiCallsTotal:0,emptyPrimaryResponses:0,emptyHistoryWindows:0,dateFormatFallbackHits:0,
   queryFormatsAttempted:[],marketsSeen:[],sampleOrderAt:null,saturatedWindows:0,complete:true,tradeCount:0
  });
- const probeMarket=coin=>({coin,pair:coin+"/AUD",readOnlyHistory:{partitionHistory:[
-  {variants:[{format:"date"},{format:"epoch"},{format:"epoch-ms"}]},
-  {variants:[{format:"date"},{format:"epoch"},{format:"epoch-ms"}]}
- ]}});
+ const probeMarket=coin=>{
+  const tradeCount=coin==="BTC"?606:112;
+  return {
+   coin,pair:coin+"/AUD",
+   readOnlyHistory:{
+    validAudTrades:tradeCount,outOfRangeTrades:0,
+    partitionValidation:{
+     version:1,status:"VALIDATED",reason:"FULL_DAY_AND_PARTITIONS_RECONCILED",
+     fullDayTradeCount:tradeCount,partitionTradeCount:tradeCount,
+     fullDayOutOfRangeTrades:0,partitionOutOfRangeTrades:0
+    }
+   }
+  };
+ };
  const daily=Array.from({length:122},(_,index)=>{
   const close=150-index*0.3;
   return {
@@ -685,7 +695,12 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
   nextDate:targetDate,lastProcessedDate:"2026-11-25",lastBatchDate:"2026-11-25",
   lastProviderProbeAt:"2026-11-26T20:00:00.000Z",
-  providerProbe:{readOnlyStatus:"AUTHENTICATED",markets:[probeMarket("BTC"),probeMarket("ETH")]},
+  providerProbe:{
+   checkedAt:"2026-11-26T20:00:00.000Z",
+   readOnlyStatus:"AUTHENTICATED",
+   partitionValidationComputedAt:"2026-11-26T20:00:00.000Z",
+   markets:[probeMarket("BTC"),probeMarket("ETH")]
+  },
   pendingHistorySync:{targetDate,coins:{BTC:completeMarket(),ETH:completeMarket()}},
   liveTradingEnabled:false,
   markets:{
@@ -730,6 +745,27 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   assert.equal(summary.lastError,null);
   assert.equal(summary.historySync.status,"COLLECTING_LIVE_DAY");
   assert.equal(summary.historySync.dateComplete,true);
+  assert.equal(summary.historySync.progress,null);
+  assert.deepEqual(summary.historySync.lastBatch.map(market=>({
+   coin:market.coin,tradeCount:market.tradeCount,partialTradeCount:market.partialTradeCount,
+   complete:market.complete,apiCalls:market.apiCalls,pendingWindows:market.pendingWindows
+  })),[
+   {coin:"BTC",tradeCount:0,partialTradeCount:0,complete:true,apiCalls:0,pendingWindows:0},
+   {coin:"ETH",tradeCount:0,partialTradeCount:0,complete:true,apiCalls:0,pendingWindows:0}
+  ]);
+  assert.equal(summary.historySync.providerProbe.readOnlyStatus,"AUTHENTICATED");
+  assert.equal(summary.historySync.providerProbe.checkedAt,"2026-11-26T20:00:00.000Z");
+  assert.equal(summary.historySync.providerProbe.partitionValidationComputedAt,"2026-11-26T20:00:00.000Z");
+  assert.deepEqual(summary.historySync.providerProbe.markets.map(market=>({
+   pair:market.pair,status:market.partitionValidation.status,reason:market.partitionValidation.reason,
+   fullDayTradeCount:market.partitionValidation.fullDayTradeCount,
+   partitionTradeCount:market.partitionValidation.partitionTradeCount,
+   outOfRangeTrades:market.partitionValidation.partitionOutOfRangeTrades
+  })),[
+   {pair:"BTC/AUD",status:"VALIDATED",reason:"FULL_DAY_AND_PARTITIONS_RECONCILED",fullDayTradeCount:606,partitionTradeCount:606,outOfRangeTrades:0},
+   {pair:"ETH/AUD",status:"VALIDATED",reason:"FULL_DAY_AND_PARTITIONS_RECONCILED",fullDayTradeCount:112,partitionTradeCount:112,outOfRangeTrades:0}
+  ]);
+  assert.equal(JSON.stringify(summary).includes("test-readonly-key"),false);
   assert.equal(summary.historyRequestsThisScan,0);
   assert.equal(summary.paperOnly,true);
   assert.equal(summary.liveTradingEnabled,false);
