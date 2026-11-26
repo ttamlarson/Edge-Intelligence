@@ -215,3 +215,10 @@
 - [ ] Confirm closed-trade P&L reconciles to quantity, entry/exit prices and recorded fees within rounding tolerance, and current-day realized losses cannot be understated in the daily-loss field.
 
 - [ ] Confirm the ledger UTC day matches the persisted update timestamp so a malformed future/stale day cannot reset the current-day loss calculation.
+
+
+## CoinSpot MTF open-position mark freshness
+- [ ] Confirm each new paper position records the timestamp of its last valid executable bid/ask mark and reports `CURRENT`.
+- [ ] Confirm a missing or crossed exit quote reports `UNAVAILABLE`, then `STALE` after 20 minutes, without inventing a price, changing the last mark timestamp, or overwriting stored equity/P&L.
+- [ ] Confirm the next valid quote restores `CURRENT` and refreshes the mark timestamp; protective stops and all existing fee, slippage, sizing and loss controls remain unchanged.
+- [ ] Confirm legacy open positions without mark metadata are conservatively marked stale when their original opening timestamp exceeds the freshness window.
