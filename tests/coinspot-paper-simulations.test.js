@@ -50,43 +50,67 @@ test("controlled simulation completes a full paper buy-to-stop-exit lifecycle wi
   assert.ok(account.dailyLossAud < MTF_PAPER_CONFIG.maxDailyLossAud);
 });
 
-test("AI advisory simulation reviews a deterministic paper candidate but cannot authorise exchange orders", async () => {
-  const candidate = validCandidate(), previousFetch = globalThis.fetch, writes = [];
-  const kv = { get: async () => null, put: async (key, value) => writes.push({ key, value }) };
-  let requestBody;
-  globalThis.fetch = async (url, options = {}) => {
-    assert.equal(String(url), "https://api.openai.com/v1/responses");
-    requestBody = JSON.parse(options.body);
-    return new Response(JSON.stringify({ output_text: JSON.stringify({
-      assessment: "CAUTION",
-      summary: "Synthetic test response: verify market context and execution assumptions; deterministic safeguards remain authoritative.",
-      riskFlags: ["Synthetic fixture only; not a live market assessment."]
-    }) }), { status: 200, headers: { "Content-Type": "application/json" } });
-  };
+test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; existing positions remain managed", async () => {
+  const candidate = validCandidate(), previousFetch = globalThis.fetch;
+  const cache = new Map(), writes = [];
+  const kv = { get: async key => cache.get(key) ?? null,
+    put: async (key, value) => { cache.set(key, value); writes.push({ key, value }); } };
+  const env = { OPENAI_API_KEY: "test-only-placeholder", OPENAI_MODEL: "test-model", EDGE_KV: kv };
+  const response = assessment => new Response(JSON.stringify({ output_text: JSON.stringify({
+    assessment, summary: "Synthetic test response: review only the supplied deterministic signal and risk constraints.",
+    riskFlags: ["Synthetic fixture only; not a live market assessment."]
+  }) }), { status: 200, headers: { "Content-Type": "application/json" } });
   try {
-    const review = await __test.reviewCoinSpotMtfCandidate({
-      OPENAI_API_KEY: "test-only-placeholder", OPENAI_MODEL: "test-model", EDGE_KV: kv
-    }, candidate);
-    assert.equal(review.status, "AI_REVIEW_COMPLETE");
-    assert.equal(review.assessment, "CAUTION");
-    assert.equal(review.advisoryOnly, true);
+    let aiCalls = 0, requestBody;
+    globalThis.fetch = async (url, options = {}) => {
+      aiCalls++; assert.equal(String(url), "https://api.openai.com/v1/responses");
+      requestBody = JSON.parse(options.body); return response("CAUTION");
+    };
+    const cautious = await __test.reviewCoinSpotMtfCandidate(env, candidate);
+    assert.equal(cautious.status, "AI_REVIEW_COMPLETE");
+    assert.equal(cautious.assessment, "CAUTION");
+    assert.equal(cautious.advisoryOnly, true);
     assert.equal(requestBody.text.format.name, "edge_coinspot_signal_review");
     assert.match(requestBody.input[0].content, /do not authorise execution/i);
     assert.equal(writes.length, 1);
-    assert.equal(candidate.signal.execution.orderIntent, "NONE");
-    const account = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: [candidate], now: openedAt });
+    assert.equal(requestBody.input[1].content.includes("100000"), false);
+    const blocked = __test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: cautious }]);
+    assert.equal(blocked.gates.BTC, "AI_BLOCKED");
+    const blockedAccount = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: blocked.markets, now: openedAt });
+    assert.equal(blockedAccount.openPosition, null);
+    assert.equal(blockedAccount.cashAud, 100);
+    assert.equal(blockedAccount.liveTradingEnabled, false);
+    assert.equal(blockedAccount.paperOnly, true);
+    const cached = await __test.reviewCoinSpotMtfCandidate(env, candidate);
+    assert.equal(cached.assessment, "CAUTION");
+    assert.equal(aiCalls, 1);
+
+    const changed = validCandidate();
+    changed.quote.ask = 100200; changed.quote.last = 100100;
+    changed.quote.spreadBps = (changed.quote.ask - changed.quote.bid) / ((changed.quote.ask + changed.quote.bid) / 2) * 10000;
+    globalThis.fetch = async (url, options = {}) => {
+      aiCalls++; requestBody = JSON.parse(options.body); return response("LOW_CONCERN");
+    };
+    const approvedReview = await __test.reviewCoinSpotMtfCandidate(env, changed);
+    assert.equal(aiCalls, 2, "a changed spread must receive a fresh review");
+    assert.equal(__test.isValidCoinSpotMtfAiReview(approvedReview), true);
+    const approved = __test.applyCoinSpotMtfAiGate([changed], [{ coin: "BTC", review: approvedReview }]);
+    assert.equal(approved.gates.BTC, "AI_APPROVED");
+    const account = processMtfPaperAccount(createMtfPaperAccount(openedAt), { markets: approved.markets, now: openedAt });
     assert.ok(account.openPosition);
     assert.equal(account.openPosition.pair, "BTC/AUD");
     assert.equal(account.liveTradingEnabled, false);
     assert.equal(account.paperOnly, true);
-    assert.equal(candidate.signal.execution.orderIntent, "NONE");
-    const bid = account.openPosition.stopPrice * 0.99, ask = bid * 1.001;
-    const exitMarket = { ...candidate, quote: {
-      pair: "BTC/AUD", bid, ask, last: bid,
-      spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000
-    }, signal: { ...candidate.signal, status: "NO_TRADE" } };
+    assert.equal(changed.signal.execution.orderIntent, "NONE");
+
+    const blockedExisting = __test.applyCoinSpotMtfAiGate([changed], [{ coin: "BTC", review: { ...approvedReview, assessment: "CAUTION" } }]);
+    assert.equal(blockedExisting.gates.BTC, "AI_BLOCKED");
+    const stop = account.openPosition.stopPrice, bid = stop * 0.99, ask = bid * 1.001;
+    const exitMarket = { ...blockedExisting.markets[0], quote: {
+      pair: "BTC/AUD", bid, ask, last: bid, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000
+    } };
     const closed = processMtfPaperAccount(account, { markets: [exitMarket], now });
-    assert.equal(closed.openPosition, null);
+    assert.equal(closed.openPosition, null, "AI veto must not disable existing-position stop management");
     assert.equal(closed.closedTrades.length, 1);
     assert.equal(closed.closedTrades[0].reason, "TRAILING_STOP");
     assert.ok(closed.closedTrades[0].entryFeeAud > 0 && closed.closedTrades[0].exitFeeAud > 0);
@@ -94,5 +118,27 @@ test("AI advisory simulation reviews a deterministic paper candidate but cannot 
     assert.equal(closed.paperOnly, true);
     assert.equal(closed.liveTradingEnabled, false);
     assert.equal(validateMtfPaperAccount(closed), true);
+
+    const notConfigured = await __test.reviewCoinSpotMtfCandidate({ EDGE_KV: kv }, candidate);
+    assert.equal(notConfigured.status, "AI_REVIEW_NOT_CONFIGURED");
+    assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: notConfigured }]).gates.BTC, "AI_BLOCKED");
+    assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: { ...approvedReview, assessment: "HIGH_CONCERN" } }]).gates.BTC, "AI_BLOCKED");
+    assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: { ...approvedReview, riskFlags: [123] } }]).gates.BTC, "AI_BLOCKED");
+
+    globalThis.fetch = async () => new Response("{}", { status: 503 });
+    const providerError = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate);
+    assert.equal(providerError.status, "AI_REVIEW_PROVIDER_ERROR");
+    assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: providerError }]).gates.BTC, "AI_BLOCKED");
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ output_text: "not valid JSON" }), { status: 200 });
+    const malformedResponse = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate);
+    assert.equal(malformedResponse.status, "AI_REVIEW_UNAVAILABLE");
+    assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: malformedResponse }]).gates.BTC, "AI_BLOCKED");
+
+    const noSignal = { ...candidate, signal: { ...candidate.signal, status: "NO_TRADE" } };
+    const notRequired = __test.applyCoinSpotMtfAiGate([noSignal], []);
+    assert.equal(notRequired.gates.BTC, "NOT_REQUIRED");
+    assert.equal(notRequired.markets[0], noSignal);
+    assert.equal(candidate.signal.execution.orderIntent, "NONE");
   } finally { globalThis.fetch = previousFetch; }
 });
