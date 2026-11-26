@@ -168,7 +168,7 @@ test("accepts one reconciled zero-trade interval without fabricating a candle an
   const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
   const signal = evaluateEdgeBreakoutSignal({
     dailyCandles, fourHourCandles: gapBars,
-    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES" }],
+    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 }],
     asOf: Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000,
     spreadBps: 10
   });
@@ -194,7 +194,7 @@ test("does not treat a candle after a confirmed zero-trade gap as an adjacent pu
   const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
   const signal = evaluateEdgeBreakoutSignal({
     dailyCandles, fourHourCandles,
-    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES" }],
+    confirmedZeroTradeIntervals: [{ startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 }],
     asOf: Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000,
     spreadBps: 10
   });
@@ -211,11 +211,14 @@ test("rejects unverified, unused and excessive zero-trade gap metadata", () => {
   }));
   const startAt = new Date(Date.parse(fourHourCandles[99].timestamp) + 4 * 3600000).toISOString();
   const endAt = new Date(Date.parse(startAt) + 4 * 3600000).toISOString();
-  const gap = { startAt, endAt, status: "CONFIRMED_NO_TRADES" };
+  const gap = { startAt, endAt, status: "CONFIRMED_NO_TRADES", dailyTradeCount: 5, observedFourHourTradeCount: 5 };
   const args = { dailyCandles, fourHourCandles: gapBars, asOf: Date.parse(gapBars.at(-1).timestamp) + 4 * 3600000 };
   assert.throws(() => evaluateEdgeBreakoutSignal(args), /unverified or unapproved missing interval/i);
   assert.throws(() => evaluateEdgeBreakoutSignal({
     ...args, confirmedZeroTradeIntervals: [{ ...gap, status: "UNVERIFIED_GAP" }]
+  }), /unverified or malformed zero-trade interval/i);
+  assert.throws(() => evaluateEdgeBreakoutSignal({
+    ...args, confirmedZeroTradeIntervals: [{ ...gap, observedFourHourTradeCount: 4 }]
   }), /unverified or malformed zero-trade interval/i);
   assert.throws(() => evaluateEdgeBreakoutSignal({
     ...args, confirmedZeroTradeIntervals: [gap, { ...gap, startAt: new Date(Date.parse(startAt) + 4 * 3600000).toISOString(),
