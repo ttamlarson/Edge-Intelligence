@@ -963,11 +963,20 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     // Persist provider diagnostics before backfill work so a later history
     // failure cannot erase evidence from the live read-only/public probes.
     await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
-  } else if (Array.isArray(state.providerProbe?.markets)) {
-    // Older probes may already contain all three timestamp-format variants but
-    // predate the persisted reconciliation summary. Recompute that summary from
-    // the stored full-day and epoch-ms partition counts without spending more
-    // authenticated requests or changing the provider-probe checkedAt time.
+  }
+  const targetDate=state.nextDate<=today?state.nextDate:today;
+  const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;
+  if (!Number.isFinite(startMs) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+    return { status:"INVALID_HISTORY_CURSOR", liveTradingEnabled:false };
+  }
+  const pending = state.pendingHistorySync
+    ? structuredClone(state.pendingHistorySync)
+    : createCoinSpotHistoryProgress(targetDate, startMs, endMs);
+  validateCoinSpotHistoryProgress(pending, targetDate, startMs, endMs);
+
+  // Only persist a derived validation summary after the resumable cursor passes
+  // validation. Corrupt pending windows must leave the original KV value intact.
+  if (Array.isArray(state.providerProbe?.markets)) {
     let validationChanged = false;
     const markets = state.providerProbe.markets.map(market => {
       const readOnlyHistory = market?.readOnlyHistory;
@@ -986,15 +995,6 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
     }
   }
-  const targetDate=state.nextDate<=today?state.nextDate:today;
-  const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;
-  if (!Number.isFinite(startMs) || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-    return { status:"INVALID_HISTORY_CURSOR", liveTradingEnabled:false };
-  }
-  const pending = state.pendingHistorySync
-    ? structuredClone(state.pendingHistorySync)
-    : createCoinSpotHistoryProgress(targetDate, startMs, endMs);
-  validateCoinSpotHistoryProgress(pending, targetDate, startMs, endMs);
 
   const updatedMarkets={...state.markets};
   const outcomes=[];
