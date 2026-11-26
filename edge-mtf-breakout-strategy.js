@@ -85,9 +85,12 @@ function validateCandles(candles, interval, label, minimum, confirmedZeroTradeIn
   for (const gap of confirmedZeroTradeIntervals) {
     const start = Date.parse(gap?.startAt || "");
     const end = Date.parse(gap?.endAt || "");
-    if (gap?.status !== "CONFIRMED_NO_TRADES" || !Number.isFinite(start) ||
-        !Number.isFinite(end) || start % interval !== 0 || end - start !== interval ||
-        confirmed.has(start)) {
+    if (gap?.status !== "CONFIRMED_NO_TRADES" ||
+        typeof gap.dailyTradeCount !== "number" || !Number.isSafeInteger(gap.dailyTradeCount) || gap.dailyTradeCount < 0 ||
+        typeof gap.observedFourHourTradeCount !== "number" || !Number.isSafeInteger(gap.observedFourHourTradeCount) ||
+        gap.observedFourHourTradeCount !== gap.dailyTradeCount ||
+        !Number.isFinite(start) || !Number.isFinite(end) || start % interval !== 0 ||
+        end - start !== interval || confirmed.has(start)) {
       throw new Error(`${label} includes an unverified or malformed zero-trade interval.`);
     }
     confirmed.set(start, end);
