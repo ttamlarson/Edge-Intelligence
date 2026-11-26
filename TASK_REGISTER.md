@@ -258,3 +258,15 @@ Updated after local implementation and automated verification on `edge-productio
 - Legacy accounts with no marker remain readable and are upgraded on the next scan; an explicit false marker is rejected without resetting the ledger.
 - The existing `liveTradingEnabled: false` requirement is unchanged. No CoinSpot order, withdrawal or transfer route, credential or safety flag was added or enabled.
 - Regression coverage verifies account creation, legacy migration and rejection of a false paper-only marker.
+ 
+
+## 2026-11-26 — ASX/crypto research and paper-ledger hardening
+
+- Added explicit paper-only markers to ASX and automated crypto paper ledgers. Legacy missing markers are upgraded additively without resetting portfolio state; explicit false markers are rejected without overwriting the stored ledger.
+- Bound ASX AI review fingerprints to candidate metrics plus reviewed daily bars, and made review IDs model-version-specific to prevent calibration samples from being merged across model versions.
+- Added Wilson 95% uncertainty intervals to ASX probability calibration and descriptive subjective-confidence bands. Confidence bands are not treated as probability calibration.
+- Added a consolidated out-of-sample strategy comparison for the existing crypto EMA, adaptive-regime, breakout and trend-following variants. The common screen is a research filter, not a profitability claim; timeframes and risk settings differ.
+- Reworked automated USDT paper candidate ranking to use modeled net stop risk and net target reward after fees, spread and slippage, with sizing constrained by both per-trade risk and remaining daily-loss capacity.
+- Missing candidate prices now remain retryable; valid priced candidates blocked by an existing position or daily-loss stop are consumed to prevent stale entry. Added closed-trade feedback metrics and surfaced ranking/feedback in the crypto panel.
+- Added regression tests for migration safety, model-version identity, calibration uncertainty, strategy comparison, risk sizing, missing-price retries, feedback metrics and the Worker API/asset paths.
+- Production merge/deploy remains gated on the full GitHub CI test, syntax and Pages build checks.
