@@ -1085,10 +1085,10 @@ function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
   const dailyTradeCounts = new Map();
   for (const candle of dailyCandles) {
     const timestamp = Date.parse(candle?.timestamp || "");
-    const count = Number(candle?.tradeCount);
+    const rawCount = candle?.tradeCount;
     if (!Number.isFinite(timestamp)) continue;
     const day = new Date(timestamp).toISOString().slice(0, 10);
-    dailyTradeCounts.set(day, Number.isSafeInteger(count) && count >= 0 ? count : null);
+    dailyTradeCounts.set(day, typeof rawCount === "number" && Number.isSafeInteger(rawCount) && rawCount >= 0 ? rawCount : null);
   }
 
   // Reconcile every retained four-hour trade count against its UTC daily
@@ -1100,9 +1100,9 @@ function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
     if (!Number.isFinite(timestamp)) continue;
     const day = new Date(timestamp).toISOString().slice(0, 10);
     const aggregate = fourHourTradeCounts.get(day) || { count: 0, valid: true };
-    const count = Number(candle?.tradeCount);
-    if (!Number.isSafeInteger(count) || count < 0) aggregate.valid = false;
-    else aggregate.count += count;
+    const rawCount = candle?.tradeCount;
+    if (typeof rawCount !== "number" || !Number.isSafeInteger(rawCount) || rawCount < 0) aggregate.valid = false;
+    else aggregate.count += rawCount;
     fourHourTradeCounts.set(day, aggregate);
   }
 

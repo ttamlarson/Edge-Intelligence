@@ -596,5 +596,18 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   assert.match(eth.signalError,/confirmed zero-trade interval 2026-11-22T16:00:00.000Z/);
   assert.equal(eth.history.fourHourCandles,419);
   assert.equal(eth.history.storedFourHourCandles,420);
+
+  const storedState=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
+  const invalidDaily=structuredClone(storedState);
+  invalidDaily.markets.ETH.dailyCandles.find(c=>c.timestamp==="2026-11-22T00:00:00.000Z").tradeCount=null;
+  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(invalidDaily));
+  const dailyCountUnknown=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
+  assert.equal(dailyCountUnknown.markets.find(m=>m.coin==="ETH").history.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
+
+  const invalidFourHour=structuredClone(storedState);
+  invalidFourHour.markets.ETH.fourHourCandles.find(c=>c.timestamp==="2026-11-22T12:00:00.000Z").tradeCount=null;
+  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(invalidFourHour));
+  const fourHourCountUnknown=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
+  assert.equal(fourHourCountUnknown.markets.find(m=>m.coin==="ETH").history.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
  }finally{globalThis.fetch=originalFetch;}
 });
