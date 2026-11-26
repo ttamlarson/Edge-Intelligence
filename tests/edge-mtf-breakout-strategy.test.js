@@ -69,6 +69,32 @@ test("a bullish regime without a breakout or pullback reclaim does not create an
   assert.equal(signal.status, "NO_TRADE");
 });
 
+
+test("pullback trigger diagnostics do not imply an entry when the daily regime is bearish", () => {
+  const { dailyCandles, fourHourCandles } = fixtures();
+  const daily = dailyCandles.map(candle => ({ ...candle }));
+  const lastDaily = daily.at(-1);
+  lastDaily.open = 1;
+  lastDaily.high = 1.1;
+  lastDaily.low = 0.9;
+  lastDaily.close = 1;
+  fourHourCandles[218] = {
+    ...fourHourCandles[218], open: 221.7, high: 221.8, low: 219.8, close: 220
+  };
+  fourHourCandles[219] = {
+    ...fourHourCandles[219], open: 220.1, high: 221.3, low: 220, close: 221.2
+  };
+  const asOf = Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000;
+  const signal = evaluateEdgeBreakoutSignal({ dailyCandles: daily, fourHourCandles, asOf, spreadBps: 10 });
+  assert.equal(signal.checks.pullbackReclaim, true);
+  assert.equal(signal.checks.entryTrigger, true);
+  assert.equal(signal.checks.dailyTrend, false);
+  assert.equal(signal.status, "NO_TRADE");
+  assert.equal(signal.entryModel, null);
+  assert.equal(signal.triggerModel, "PULLBACK_RECLAIM");
+  assert.ok(signal.failedChecks.includes("dailyTrend"));
+});
+
 test("signal rejects incomplete candles and broken chronological series", () => {
   const { dailyCandles, fourHourCandles } = fixtures();
   const latest = Date.parse(fourHourCandles.at(-1).timestamp);
@@ -97,6 +123,9 @@ test("spread, liquidity and bearish regime filters fail closed", () => {
   const noTrend = evaluateEdgeBreakoutSignal({ dailyCandles: bearish, fourHourCandles, asOf });
   assert.equal(noTrend.checks.dailyTrend, false);
   assert.equal(noTrend.status, "NO_TRADE");
+  assert.equal(noTrend.entryModel, null, "a blocked trigger must not be labelled as an entry");
+  assert.equal(noTrend.triggerModel, "DONCHIAN_BREAKOUT", "retain the trigger for diagnostics");
+  assert.ok(noTrend.failedChecks.includes("dailyTrend"));
 });
 
 test("position sizing obeys both risk and allocation caps", () => {
