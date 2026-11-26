@@ -49,9 +49,8 @@ test("crypto AI review is structured, provenance-bound and cannot override deter
   assert.ok(result.reviewId.endsWith(result.inputProvenance.fingerprint.slice(0, 16)));
   assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
   assert.equal(result.inputProvenance.barsReviewed, 50);
-  assert.ok(result.research.strategyComparison.strategyCount >= 2);
-  assert.equal(result.research.strategyComparison.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
-  assert.match(requestBody.input[1].content, /strategyComparison/);
+  assert.equal(result.research.summary.assessment, "INSUFFICIENT_OUT_OF_SAMPLE_TRADES");
+  assert.doesNotMatch(requestBody.input[1].content, /strategyComparison/);
 });
 
 test("crypto AI review fails closed when the model key is missing", async () => {
