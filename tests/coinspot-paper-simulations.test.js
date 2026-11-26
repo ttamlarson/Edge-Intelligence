@@ -79,5 +79,20 @@ test("AI advisory simulation reviews a deterministic paper candidate but cannot 
     assert.equal(account.openPosition.pair, "BTC/AUD");
     assert.equal(account.liveTradingEnabled, false);
     assert.equal(account.paperOnly, true);
+    assert.equal(candidate.signal.execution.orderIntent, "NONE");
+    const bid = account.openPosition.stopPrice * 0.99, ask = bid * 1.001;
+    const exitMarket = { ...candidate, quote: {
+      pair: "BTC/AUD", bid, ask, last: bid,
+      spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000
+    }, signal: { ...candidate.signal, status: "NO_TRADE" } };
+    const closed = processMtfPaperAccount(account, { markets: [exitMarket], now });
+    assert.equal(closed.openPosition, null);
+    assert.equal(closed.closedTrades.length, 1);
+    assert.equal(closed.closedTrades[0].reason, "TRAILING_STOP");
+    assert.ok(closed.closedTrades[0].entryFeeAud > 0 && closed.closedTrades[0].exitFeeAud > 0);
+    assert.ok(closed.closedTrades[0].pnlAud < 0);
+    assert.equal(closed.paperOnly, true);
+    assert.equal(closed.liveTradingEnabled, false);
+    assert.equal(validateMtfPaperAccount(closed), true);
   } finally { globalThis.fetch = previousFetch; }
 });
