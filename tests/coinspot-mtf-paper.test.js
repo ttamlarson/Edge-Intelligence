@@ -65,6 +65,7 @@ test("daily loss circuit includes open mark-to-market loss and closes at the lim
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
  a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
+ a.dailyLossAud=2.9+Math.max(0,-a.unrealizedPnlAud);
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
  const market={...candidate(),signalAt:p.signalAt,quote:{pair:"BTC/AUD",bid,ask:bid+10,last:bid}};
