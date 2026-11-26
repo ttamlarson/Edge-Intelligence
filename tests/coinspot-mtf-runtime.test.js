@@ -628,6 +628,11 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   const multiGapEth=multiGapResult.markets.find(m=>m.coin==="ETH");
   assert.equal(multiGapEth.history.fourHourGapDiagnostics.length,2);
   assert.ok(multiGapEth.history.fourHourGapDiagnostics.every(item=>item.status==="CONFIRMED_NO_TRADES"));
+  assert.equal(multiGapEth.history.signalWindowMissingIntervals,2);
+  assert.equal(multiGapEth.history.signalWindowConfirmedZeroTradeIntervals,2);
+  assert.equal(multiGapEth.history.signalWindowStatus,"BLOCKED_EXCESSIVE_ZERO_TRADE_GAPS");
+  assert.equal(multiGapEth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
+  assert.equal(multiGapEth.signal,null);
   assert.match(multiGapEth.signalError,/confirmed zero-trade intervals 2026-11-22T16:00:00.000Z -> 2026-11-23T00:00:00.000Z/);
  }finally{globalThis.fetch=originalFetch;}
 });
