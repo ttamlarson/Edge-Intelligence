@@ -13,16 +13,23 @@ function ema(values, period, timestamps = null, interval = null) {
     throw new Error("EMA elapsed-time inputs are invalid.");
   }
   const baseAlpha = 2 / (period + 1);
-  let result = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
-  for (let index = period; index < values.length; index++) {
-    let alpha = baseAlpha;
-    if (timestamped) {
+  // A confirmed zero-trade interval carries the previous last-traded close.
+  // Expand that value for indicator arithmetic only; never persist a synthetic candle.
+  const elapsedValues = [];
+  for (let index = 0; index < values.length; index++) {
+    if (timestamped && index > 0) {
       const elapsed = Date.parse(timestamps[index]) - Date.parse(timestamps[index - 1]);
       const steps = elapsed / interval;
-      if (!Number.isSafeInteger(steps) || steps < 1) throw new Error("EMA candles contain invalid elapsed intervals.");
-      alpha = 1 - Math.pow(1 - baseAlpha, steps);
+      if (!Number.isSafeInteger(steps) || steps < 1 || steps > 2) {
+        throw new Error("EMA candles contain invalid elapsed intervals.");
+      }
+      for (let missing = 1; missing < steps; missing++) elapsedValues.push(values[index - 1]);
     }
-    result = values[index] * alpha + result * (1 - alpha);
+    elapsedValues.push(values[index]);
+  }
+  let result = elapsedValues.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  for (let index = period; index < elapsedValues.length; index++) {
+    result = elapsedValues[index] * baseAlpha + result * (1 - baseAlpha);
   }
   return result;
 }
