@@ -59,7 +59,7 @@ export function validateMtfPaperAccount(a) {
       !Number.isFinite(a.cashAud) || a.cashAud<0 || !Number.isFinite(a.realizedPnlAud) ||
       !Number.isFinite(a.unrealizedPnlAud) || !Number.isFinite(a.equityAud) || a.equityAud<0 ||
       !Number.isFinite(a.dailyLossAud) || a.dailyLossAud<0 ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(ledgerDay) || !validTimestamp(a.updatedAt) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(ledgerDay) || !validTimestamp(a.updatedAt) || a.day !== a.updatedAt.slice(0, 10) ||
       !Number.isFinite(realizedLossForLedgerDay) || a.dailyLossAud + 0.02 < realizedLossForLedgerDay ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||

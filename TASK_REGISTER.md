@@ -307,3 +307,5 @@ Updated after local implementation and automated verification on `edge-productio
 - Closed-trade net P&L must reconcile to quantity, executable entry/exit prices and recorded fees within cent-rounding tolerance. Finite but inconsistent ledger values fail closed.
 - The persisted daily-loss value must cover all realized losses from the ledger's current UTC day, preventing a malformed KV record from understating the daily-loss circuit.
 - No strategy thresholds, simulated capital, fees, slippage, allocation, stops, loss limit or live-trading safety flags were changed.
+
+- The ledger UTC day must match its update timestamp before daily-loss reconciliation; mismatched day metadata fails closed.

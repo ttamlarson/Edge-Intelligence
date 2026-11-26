@@ -156,6 +156,7 @@ test("reconciles closed-trade P&L to modeled prices and fees and prevents realiz
  assert.equal(validateMtfPaperAccount(valid),true);
  assert.throws(()=>validateMtfPaperAccount({...valid,closedTrades:[{...trade,pnlAud:-1}]}),/ledger failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...valid,dailyLossAud:0}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...valid,day:"2026-11-26"}),/ledger failed validation/);
 });
 
 test("rejects closed trades with non-finite P&L or fee accounting before daily-loss calculation",()=>{

@@ -213,3 +213,5 @@
 - [ ] Confirm invalid KV ledger data is rejected without resetting or overwriting the existing record; paper-only and live-trading safety flags remain unchanged.
 
 - [ ] Confirm closed-trade P&L reconciles to quantity, entry/exit prices and recorded fees within rounding tolerance, and current-day realized losses cannot be understated in the daily-loss field.
+
+- [ ] Confirm the ledger UTC day matches the persisted update timestamp so a malformed future/stale day cannot reset the current-day loss calculation.
