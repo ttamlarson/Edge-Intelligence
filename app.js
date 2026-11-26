@@ -269,6 +269,14 @@ async function loadCoinSpotMtfPaper(runNow=false){
   const fmt=v=>money(Number(v)||0,"AUD");
   $("mtfPaperEquity").textContent=fmt(a.equityAud);$("mtfPaperCash").textContent=fmt(a.cashAud);
   $("mtfPaperRealized").textContent=fmt(a.realizedPnlAud);$("mtfPaperDailyLoss").textContent=fmt(a.dailyLossAud);
+  const perf=a.performance||{};
+  $("mtfPaperNetPnl").textContent=fmt(perf.netPnlAud);
+  $("mtfPaperReturn").textContent=Number.isFinite(perf.returnPct)?Number(perf.returnPct).toFixed(2)+"%":"—";
+  $("mtfPaperWinRate").textContent=Number.isFinite(perf.winRatePct)?Number(perf.winRatePct).toFixed(1)+"%":"—";
+  $("mtfPaperClosedTrades").textContent=String(perf.closedTrades??0);
+  $("mtfPaperFees").textContent=fmt(perf.feesPaidAud);
+  $("mtfPaperWeekPnl").textContent=fmt(perf.rolling7dPnlAud);
+
   const when=a.lastScanAt?" · Last scan "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth"):"";
   $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
   $("mtfPaperPositionTitle").textContent=a.openPosition?"OPEN · "+a.openPosition.pair:"No open paper position";
