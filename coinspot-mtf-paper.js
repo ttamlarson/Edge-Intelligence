@@ -12,6 +12,14 @@ const validTimestamp = value => typeof value === "string" && Number.isFinite(Dat
   new Date(Date.parse(value)).toISOString() === value;
 const positiveFinite = value => Number.isFinite(value) && value > 0;
 const nonNegativeFinite = value => Number.isFinite(value) && value >= 0;
+function validPaperExitQuote(market) {
+  if (!validAudMarket(market)) return false;
+  const quote = market.quote;
+  // Exits must use a coherent executable bid/ask, but the entry spread ceiling
+  // must not prevent a protective stop from closing into a temporarily wide market.
+  return [quote.bid, quote.ask, quote.last].every(Number.isFinite) &&
+    quote.bid > 0 && quote.ask >= quote.bid && quote.last > 0;
+}
 function validPaperQuote(market) {
   if (!validAudMarket(market)) return false;
   const quote = market.quote;
@@ -116,7 +124,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   const p = a.openPosition;
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;
-    if (q && Number.isFinite(q.bid) && q.bid > 0) {
+    if (validPaperExitQuote(m)) {
       // The trailing-stop high-water mark advances only on a completed four-hour
       // close that occurred after this position was opened. Intrabar quotes still
       // trigger an existing stop, but cannot tighten it using an unfinished candle.
