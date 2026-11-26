@@ -609,5 +609,19 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(invalidFourHour));
   const fourHourCountUnknown=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
   assert.equal(fourHourCountUnknown.markets.find(m=>m.coin==="ETH").history.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
+
+  const multipleGaps=structuredClone(storedState);
+  multipleGaps.markets.ETH.fourHourCandles=multiplegapsBars(multipleGaps.markets.ETH.fourHourCandles);
+  multipleGaps.markets.ETH.dailyCandles.find(c=>c.timestamp==="2026-11-22T00:00:00.000Z").tradeCount=126;
+  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(multipleGaps));
+  const multiGapResult=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
+  const multiGapEth=multiGapResult.markets.find(m=>m.coin==="ETH");
+  assert.equal(multiGapEth.history.fourHourGapDiagnostics.length,2);
+  assert.ok(multiGapEth.history.fourHourGapDiagnostics.every(item=>item.status==="CONFIRMED_NO_TRADES"));
+  assert.match(multiGapEth.signalError,/confirmed zero-trade intervals 2026-11-22T16:00:00.000Z -> 2026-11-23T00:00:00.000Z/);
  }finally{globalThis.fetch=originalFetch;}
 });
+
+function multiplegapsBars(bars) {
+ return bars.filter(c=>c.timestamp!=="2026-11-22T20:00:00.000Z");
+}
