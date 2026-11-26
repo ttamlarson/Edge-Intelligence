@@ -48,6 +48,9 @@ test("CoinSpot MTF paper panel distinguishes an eligible entry from a blocked tr
   const app = await readFile(resolve(root, "app.js"), "utf8");
   assert.match(app, /m\.triggerModel/);
   assert.match(app, /m\.failedChecks/);
+  assert.match(app, /m\.aiGateStatus/);
+  assert.match(app, /AI GATE APPROVED/);
+  assert.match(app, /AI GATE BLOCKED/);
   assert.match(app, /Trigger only/);
   assert.match(app, /Blocked by/);
 });
