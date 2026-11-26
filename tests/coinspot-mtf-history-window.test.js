@@ -59,6 +59,37 @@ async function readStrategy(gaps) {
   }
 }
 
+async function readPaperSnapshot(gaps) {
+  const history = buildHistory(gaps);
+  const state = {
+    mode: "COINSPOT_AUD_RESEARCH_ONLY",
+    status: "COLLECTING_LIVE_DAY",
+    nextDate: "2026-11-26",
+    lastSyncAt: NOW,
+    lastBatch: [],
+    liveTradingEnabled: false,
+    markets: {
+      BTC: { ...history, tradesFetched: 1000, lastHistoryDate: "2026-11-26" },
+      ETH: { ...history, tradesFetched: 1000, lastHistoryDate: "2026-11-26" }
+    }
+  };
+  const cache = new Map();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    status: "ok", prices: { bid: 61400, ask: 61460, last: 61430 }
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    return await __test.runCoinSpotMtfPaper({
+      EDGE_KV: {
+        get: async key => key === "coinspot-mtf-history-global-v1" ? JSON.stringify(state) : cache.get(key) || null,
+        put: async (key, value) => { cache.set(key, value); }
+      }
+    }, new Date(NOW), 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
 test("warms EMA indicators with all validated four-hour history while keeping a separate 240-bar signal window", async () => {
   const snapshot = await readStrategy([100]);
   const btc = snapshot.markets.find(market => market.coin === "BTC");
@@ -85,4 +116,19 @@ test("falls back to the clean 240-bar signal window when older indicator history
   assert.equal(btc.signal.indicators.fourHourActualCandles, 240);
   assert.equal(btc.signal.status, "BUY_CANDIDATE_PAPER_ONLY");
   assert.equal(btc.liveTradingEnabled, false);
+});
+
+
+test("persists indicator warm-up diagnostics in the paper snapshot without enabling execution", async () => {
+  const snapshot = await readPaperSnapshot([100]);
+  const btc = snapshot.markets.find(market => market.pair === "BTC/AUD");
+  assert.equal(btc.signalStatus, "AI_REVIEW_BLOCKED", "unconfigured AI must fail closed on a synthetic candidate");
+  assert.equal(btc.signalWindowFourHourCandles, 240);
+  assert.equal(btc.indicatorFourHourCandles, 419);
+  assert.equal(btc.indicatorFourHourGapCount, 1);
+  assert.equal(btc.indicatorFourHourHistoryMode, "FULL_VALIDATED_HISTORY");
+  assert.equal(snapshot.paperOnly, true);
+  assert.equal(snapshot.liveTradingEnabled, false);
+  assert.equal(snapshot.openPosition, null);
+  assert.equal(snapshot.cashAud, 100);
 });
