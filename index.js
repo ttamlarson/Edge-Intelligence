@@ -1738,6 +1738,14 @@ export default {
             processedDate: snapshot.historySync?.processedDate || null,
             nextDate: snapshot.historySync?.nextDate || null
           },
+          historySync: snapshot.historySync ? {
+            status: snapshot.historySync.status || null,
+            processedDate: snapshot.historySync.processedDate || null,
+            nextDate: snapshot.historySync.nextDate || null,
+            dateComplete: snapshot.historySync.dateComplete === true
+          } : null,
+          historyRequestsThisScan: snapshot.historyRequestsThisScan || 0,
+          lastError: snapshot.lastError || null,
           markets: (snapshot.markets || []).map(market => ({
             pair: market.pair,
             signalStatus: market.signalStatus,
@@ -1752,6 +1760,24 @@ export default {
             lastCompletedFourHourAt: market.lastCompletedFourHourAt,
             lastCompletedFourHourClose: market.lastCompletedFourHourClose,
             entryModel: market.entryModel,
+            triggerModel: market.triggerModel,
+            marketRegime: market.marketRegime,
+            signalAt: market.signalAt,
+            failedChecks: market.failedChecks || [],
+            checks: market.checks || null,
+            signalError: market.signalError || null,
+            signalWindowStatus: market.signalWindowStatus || "UNKNOWN",
+            signalWindowMissingIntervals: market.signalWindowMissingIntervals || 0,
+            signalWindowConfirmedZeroTradeIntervals: market.signalWindowConfirmedZeroTradeIntervals || 0,
+            fourHourGapCount: market.fourHourGapCount || 0,
+            latestFourHourGap: market.latestFourHourGap || null,
+            signalMetrics: market.indicators ? {
+              dailyTrendDistancePct: market.indicators.dailyTrendDistancePct,
+              fourHourTrendSpreadPct: market.indicators.fourHourTrendSpreadPct,
+              longTrendSlopePct: market.indicators.longTrendSlopePct,
+              atrPct: market.indicators.atrPct,
+              breakoutVotes: market.indicators.breakoutVotes
+            } : null,
             spreadBps: market.spreadBps,
             aiReviewStatus: market.aiReview?.status || "NOT_RUN",
             aiGateStatus: market.aiGateStatus || "NOT_REQUIRED"
