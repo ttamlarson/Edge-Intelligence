@@ -2,13 +2,52 @@
 // This is a chronological audit only: it does not train, tune or recalibrate a model.
 const round4 = value => Math.round((value + Number.EPSILON) * 10000) / 10000;
 
+function wilsonInterval(successes, sampleCount) {
+  if (!Number.isInteger(sampleCount) || sampleCount < 1) return null;
+  const z = 1.96;
+  const probability = successes / sampleCount;
+  const denominator = 1 + z * z / sampleCount;
+  const center = (probability + z * z / (2 * sampleCount)) / denominator;
+  const margin = z * Math.sqrt(
+    probability * (1 - probability) / sampleCount +
+    z * z / (4 * sampleCount * sampleCount)
+  ) / denominator;
+  return {
+    lower: round4(Math.max(0, center - margin)),
+    upper: round4(Math.min(1, center + margin)),
+    confidenceLevel: 0.95
+  };
+}
+
+function confidenceBandDiagnostics(rows) {
+  const bands = [
+    { label: "75–79", lower: 75, upper: 80 },
+    { label: "80–89", lower: 80, upper: 90 },
+    { label: "90–100", lower: 90, upper: 101 }
+  ];
+  return bands.map(band => {
+    const selected = rows.filter(row => row.confidence >= band.lower && row.confidence < band.upper);
+    if (!selected.length) return null;
+    const wins = selected.reduce((sum, row) => sum + row.outcome, 0);
+    return {
+      band: band.label,
+      sampleCount: selected.length,
+      meanSubjectiveConfidencePct: round4(selected.reduce((sum, row) => sum + row.confidence, 0) / selected.length),
+      observedWinRate: round4(wins / selected.length),
+      observedWinRateInterval95: wilsonInterval(wins, selected.length),
+      interpretation: "DESCRIPTIVE_OUTCOME_RATE_NOT_PROBABILITY_CALIBRATION"
+    };
+  }).filter(Boolean);
+}
+
 function scoreRows(rows, baselineProbability = null) {
   if (!rows.length) return {
-    sampleCount: 0, observedWinRate: null, brierScore: null,
+    sampleCount: 0, observedWinRate: null, observedWinRateInterval95: null, brierScore: null,
     baselineProbability, baselineBrierScore: null, brierSkillScore: null,
     expectedCalibrationError: null, reliabilityBins: []
   };
-  const observedWinRate = rows.reduce((sum, row) => sum + row.outcome, 0) / rows.length;
+  const wins = rows.reduce((sum, row) => sum + row.outcome, 0);
+  const observedWinRate = wins / rows.length;
   const brierScore = rows.reduce((sum, row) => sum + Math.pow(row.predictedWinProbability - row.outcome, 2), 0) / rows.length;
   // The benchmark probability is estimated only from earlier reference outcomes.
   // Never use the holdout's own win rate to construct its comparison forecast.
@@ -26,7 +65,8 @@ function scoreRows(rows, baselineProbability = null) {
   let weightedGap = 0;
   const reliabilityBins = bins.filter(bin => bin.rows.length).map(bin => {
     const meanPredicted = bin.rows.reduce((sum, row) => sum + row.predictedWinProbability, 0) / bin.rows.length;
-    const observed = bin.rows.reduce((sum, row) => sum + row.outcome, 0) / bin.rows.length;
+    const binWins = bin.rows.reduce((sum, row) => sum + row.outcome, 0);
+    const observed = binWins / bin.rows.length;
     const absoluteGap = Math.abs(meanPredicted - observed);
     weightedGap += absoluteGap * bin.rows.length / rows.length;
     return {
@@ -34,12 +74,14 @@ function scoreRows(rows, baselineProbability = null) {
       count: bin.rows.length,
       meanPredictedWinProbability: round4(meanPredicted),
       observedWinRate: round4(observed),
+      observedWinRateInterval95: wilsonInterval(binWins, bin.rows.length),
       absoluteCalibrationGap: round4(absoluteGap)
     };
   });
   return {
     sampleCount: rows.length,
     observedWinRate: round4(observedWinRate),
+    observedWinRateInterval95: wilsonInterval(wins, rows.length),
     brierScore: round4(brierScore),
     baselineProbability: Number.isFinite(baselineProbability) ? round4(baselineProbability) : null,
     baselineBrierScore: baselineBrierScore === null ? null : round4(baselineBrierScore),
@@ -142,6 +184,8 @@ export function calculateAsxAiCalibration(closedTrades, {
       meanSubjectiveConfidencePct: outOfSampleRows.length
         ? round4(outOfSampleRows.reduce((sum, row) => sum + row.confidence, 0) / outOfSampleRows.length)
         : null,
+      confidenceBandDiagnostics: confidenceBandDiagnostics(outOfSampleRows),
+      confidenceInterpretation: "Subjective model confidence is grouped descriptively against observed outcomes; it is not a probability and these bands do not establish calibration.",
       referenceWindow: referenceRows.length ? {
         firstClosedAt: new Date(referenceRows[0].closedAt).toISOString(),
         lastClosedAt: new Date(referenceRows.at(-1).closedAt).toISOString()
@@ -177,6 +221,8 @@ export function calculateAsxAiCalibration(closedTrades, {
     outOfSample: mixedModels ? null : single?.outOfSample || scoreRows([]),
     modelDiagnostics,
     meanSubjectiveConfidencePct: mixedModels ? null : single?.meanSubjectiveConfidencePct ?? null,
+    confidenceBandDiagnostics: mixedModels ? [] : single?.confidenceBandDiagnostics || [],
+    confidenceInterpretation: "Subjective confidence bands are descriptive only and are not calibrated probabilities.",
     modelVersions,
     sourceLabels: [...new Set(rows.map(row => row.source))].sort(),
     manualExitExcludedCount,
