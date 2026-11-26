@@ -664,11 +664,21 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   queryFormatsAttempted:[],marketsSeen:[],sampleOrderAt:null,saturatedWindows:0,complete:true,tradeCount:0
  });
  const probeMarket=coin=>{
-  const tradeCount=coin==="BTC"?606:112;
+  const tradeCount=coin==="BTC"?606:112,half=tradeCount/2;
+  const variants=(buy,sell,count)=>[
+   {format:"date",rawBuyOrders:0,rawSellOrders:0,validAudTrades:0,outOfRangeTrades:0},
+   {format:"epoch",rawBuyOrders:0,rawSellOrders:0,validAudTrades:0,outOfRangeTrades:0},
+   {format:"epoch-ms",rawBuyOrders:buy,rawSellOrders:sell,validAudTrades:count,outOfRangeTrades:0}
+  ];
   return {
    coin,pair:coin+"/AUD",
    readOnlyHistory:{
+    date:targetDate,rawBuyOrders:half,rawSellOrders:half,
     validAudTrades:tradeCount,outOfRangeTrades:0,
+    partitionHistory:[
+     {startAt:new Date(startMs).toISOString(),endAt:new Date(startMs+12*60*60*1000).toISOString(),variants:variants(half,0,half)},
+     {startAt:new Date(startMs+12*60*60*1000).toISOString(),endAt:new Date(endMs).toISOString(),variants:variants(0,half,half)}
+    ],
     partitionValidation:{
      version:1,status:"VALIDATED",reason:"FULL_DAY_AND_PARTITIONS_RECONCILED",
      fullDayTradeCount:tradeCount,partitionTradeCount:tradeCount,
