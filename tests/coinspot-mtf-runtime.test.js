@@ -539,11 +539,62 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
   assert.equal(eth.fourHourGapCount,1);
   assert.equal(eth.latestFourHourGap.previousAt,"2026-11-22T12:00:00.000Z");
   assert.equal(eth.latestFourHourGap.nextAt,"2026-11-22T20:00:00.000Z");
+  assert.equal(eth.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
   assert.equal(eth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
   assert.match(eth.signalError,/20\/210/);
   assert.equal(result.paperOnly,true);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.cashAud,100);
   assert.equal(result.openPosition,null);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("CoinSpot MTF identifies a verified zero-trade interval without fabricating a four-hour candle", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const now="2026-11-26T01:45:00.000Z";
+ const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const gapAt=Date.parse("2026-11-22T16:00:00.000Z");
+ const daily=Array.from({length:122},(_,index)=>{
+  const timestamp=new Date(Date.parse("2026-07-28T00:00:00.000Z")+index*day).toISOString();
+  return {timestamp,open:100,high:101,low:99,close:100,volume:1,tradeCount:timestamp.startsWith("2026-11-22")?144:6};
+ });
+ const fourHourBars=[];
+ const firstFourHour=Date.parse("2026-09-17T00:00:00.000Z");
+ const finalFourHour=Date.parse("2026-11-26T00:00:00.000Z");
+ const countsOnGapDay={0:44,4:32,8:38,12:12,20:18};
+ for(let timestamp=firstFourHour;timestamp<=finalFourHour;timestamp+=fourHours){
+  if(timestamp===gapAt) continue;
+  const date=new Date(timestamp).toISOString().slice(0,10);
+  const hour=new Date(timestamp).getUTCHours();
+  const tradeCount=date==="2026-11-22"?countsOnGapDay[hour]:1;
+  fourHourBars.push({
+   timestamp:new Date(timestamp).toISOString(),open:100,high:101,low:99,close:100,volume:1,tradeCount
+  });
+ }
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-11-26",liveTradingEnabled:false,
+  markets:{
+   BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},
+   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:1000}
+  }
+ }));
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
+  const eth=result.markets.find(m=>m.coin==="ETH");
+  assert.equal(eth.history.contiguousFourHourCandles,19);
+  assert.equal(eth.history.fourHourGapCount,1);
+  assert.deepEqual(eth.history.fourHourGapDiagnostics,[{
+   startAt:"2026-11-22T16:00:00.000Z",
+   endAt:"2026-11-22T20:00:00.000Z",
+   status:"CONFIRMED_NO_TRADES",
+   dailyTradeCount:144,
+   observedFourHourTradeCount:144
+  }]);
+  assert.equal(eth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
+  assert.match(eth.signalError,/confirmed zero-trade interval 2026-11-22T16:00:00.000Z/);
+  assert.equal(eth.history.fourHourCandles,419);
+  assert.equal(eth.history.storedFourHourCandles,420);
  }finally{globalThis.fetch=originalFetch;}
 });
