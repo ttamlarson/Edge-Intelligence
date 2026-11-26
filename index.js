@@ -963,6 +963,28 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     // Persist provider diagnostics before backfill work so a later history
     // failure cannot erase evidence from the live read-only/public probes.
     await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+  } else if (Array.isArray(state.providerProbe?.markets)) {
+    // Older probes may already contain all three timestamp-format variants but
+    // predate the persisted reconciliation summary. Recompute that summary from
+    // the stored full-day and epoch-ms partition counts without spending more
+    // authenticated requests or changing the provider-probe checkedAt time.
+    let validationChanged = false;
+    const markets = state.providerProbe.markets.map(market => {
+      const readOnlyHistory = market?.readOnlyHistory;
+      if (!readOnlyHistory || !Array.isArray(readOnlyHistory.partitionHistory)) return market;
+      const partitionValidation = validateCoinSpotSubdayEpochMsProbe(readOnlyHistory);
+      if (JSON.stringify(readOnlyHistory.partitionValidation) === JSON.stringify(partitionValidation)) return market;
+      validationChanged = true;
+      return { ...market, readOnlyHistory: { ...readOnlyHistory, partitionValidation } };
+    });
+    if (validationChanged) {
+      state.providerProbe = {
+        ...state.providerProbe,
+        markets,
+        partitionValidationComputedAt: new Date(clock).toISOString()
+      };
+      await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+    }
   }
   const targetDate=state.nextDate<=today?state.nextDate:today;
   const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;

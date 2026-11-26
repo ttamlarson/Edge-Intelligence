@@ -89,6 +89,89 @@ test("CoinSpot resumable history rejects completed or non-contiguous windows bef
   }
 });
 
+test("CoinSpot sync persists legacy partition reconciliation without repeating provider probes", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = "2026-11-26T22:00:00.000Z";
+  const date = "2026-11-26";
+  const dayStart = Date.parse(date + "T00:00:00.000Z");
+  const midpoint = dayStart + 12 * 60 * 60 * 1000;
+  const variants = count => [
+    { format: "epoch", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-string", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0 },
+    { format: "epoch-ms", rawBuyOrders: count, rawSellOrders: 0, validAudTrades: count, outOfRangeTrades: 0 }
+  ];
+  const probeMarket = coin => ({
+    coin, pair: coin + "/AUD",
+    readOnlyHistory: {
+      date, queryFormat: "date", rawBuyOrders: 2, rawSellOrders: 0,
+      validAudTrades: 2, outOfRangeTrades: 0,
+      partitionHistory: [
+        { startAt: new Date(dayStart).toISOString(), endAt: new Date(midpoint).toISOString(), variants: variants(1) },
+        { startAt: new Date(midpoint).toISOString(), endAt: new Date(dayStart + 86400000).toISOString(), variants: variants(1) }
+      ]
+    }
+  });
+  const store = new Map();
+  store.set("coinspot-mtf-history-global-v1", JSON.stringify({
+    mode: "COINSPOT_AUD_RESEARCH_ONLY", status: "COLLECTING_LIVE_DAY",
+    startedAt: now, nextDate: date, lastProcessedDate: "2026-11-25",
+    lastProviderProbeAt: now,
+    providerProbe: {
+      checkedAt: now, readOnlyStatus: "AUTHENTICATED",
+      markets: [probeMarket("BTC"), probeMarket("ETH")]
+    },
+    markets: {
+      BTC: { dailyCandles: [], fourHourCandles: [], tradesFetched: 0 },
+      ETH: { dailyCandles: [], fourHourCandles: [], tradesFetched: 0 }
+    },
+    liveTradingEnabled: false
+  }));
+  const historyRequests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (!target.endsWith("/orders/market/completed")) {
+      throw new Error("Unexpected provider-probe request; stored partition evidence should be reused: " + target);
+    }
+    const body = JSON.parse(options.body || "{}");
+    historyRequests.push({ target, body });
+    const coin = body.cointype;
+    const row = {
+      market: coin + "/AUD", solddate: date + "T10:00:00.000Z",
+      rate: coin === "BTC" ? 90000 : 2500,
+      amount: 0.01, total: coin === "BTC" ? 900 : 25
+    };
+    return new Response(JSON.stringify({ status: "ok", buyorders: [row], sellorders: [] }), { status: 200 });
+  };
+  try {
+    const env = {
+      COINSPOT_READONLY_KEY: "test-readonly-key",
+      COINSPOT_READONLY_SECRET: "test-readonly-secret",
+      EDGE_KV: {
+        get: async key => store.get(key) ?? null,
+        put: async (key, value) => { store.set(key, value); }
+      }
+    };
+    const result = await __test.syncCoinSpotMtfHistory(env, now);
+    const saved = JSON.parse(store.get("coinspot-mtf-history-global-v1"));
+    assert.equal(result.status, "COLLECTING_LIVE_DAY");
+    assert.equal(historyRequests.length, 2, "only the two normal full-day history requests should run");
+    assert.ok(historyRequests.every(request => request.body.startdate === date));
+    assert.equal(saved.lastProviderProbeAt, now, "the stored provider probe must not be falsely refreshed");
+    assert.equal(saved.providerProbe.checkedAt, now);
+    assert.equal(saved.providerProbe.partitionValidationComputedAt, now);
+    for (const market of saved.providerProbe.markets) {
+      assert.equal(market.readOnlyHistory.partitionValidation.status, "VALIDATED");
+      assert.equal(market.readOnlyHistory.partitionValidation.reason, "FULL_DAY_AND_PARTITIONS_RECONCILED");
+      assert.equal(market.readOnlyHistory.partitionValidation.fullDayTradeCount, 2);
+      assert.equal(market.readOnlyHistory.partitionValidation.partitionTradeCount, 2);
+    }
+    assert.equal(saved.liveTradingEnabled, false);
+    assert.equal(saved.pendingHistorySync, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("CoinSpot sync retries empty full-day history with epoch seconds and records provider probes", async t => {
   const originalFetch = globalThis.fetch;
   const requests = [];
