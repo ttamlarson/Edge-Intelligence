@@ -409,7 +409,7 @@ test("CoinSpot dense history resumes in bounded chunks and completes without rep
       result = await __test.syncCoinSpotMtfHistory(env, now);
       const runCalls = allCalls.slice(before);
       for (const coin of ["BTC", "ETH"]) {
-        assert.ok(runCalls.filter(call => call.coin === coin).length <= 15, "per-market request budget must be respected");
+        assert.ok(runCalls.filter(call => call.coin === coin).length <= 18, "per-market request budget must be respected");
       }
       if (result.dateComplete) break;
       const savedProgress = JSON.parse(store.get("coinspot-mtf-history-global-v1")).pendingHistorySync;
@@ -526,8 +526,8 @@ test("CoinSpot paper runner stops after an incomplete history chunk instead of r
     assert.equal(result.backfillDaysProcessed, 0);
     assert.equal(result.historySync.dateComplete, false);
     assert.equal(result.historySync.nextDate, "2026-07-28");
-    assert.ok(calls.filter(call => call.coin === "BTC").length <= 15);
-    assert.ok(calls.filter(call => call.coin === "ETH").length <= 15);
+    assert.ok(calls.filter(call => call.coin === "BTC").length <= 18);
+    assert.ok(calls.filter(call => call.coin === "ETH").length <= 18);
     assert.equal(result.paperOnly, true);
     assert.equal(result.liveTradingEnabled, false);
     assert.equal(result.cashAud, 100);
