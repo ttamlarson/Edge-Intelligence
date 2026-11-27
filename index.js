@@ -7,6 +7,7 @@ import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS, COINSPOT_FOUR_HOUR_HISTORY_LIMIT } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { evaluateEarlyReversalShadow } from "./early-reversal-shadow.js";
+import { walkForwardEarlyReversalShadow } from "./early-reversal-walk-forward.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
 import { calculateMtfPaperPerformance } from "./coinspot-mtf-performance.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
@@ -1504,6 +1505,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       lastCompletedFourHourClose: m.history?.lastCompletedFourHourClose ?? null,
       shadowSignal: m.shadowSignal || null,
       shadowSignalError: m.shadowSignalError || null,
+      shadowBacktest: m.shadowBacktest || null,
+      shadowBacktestError: m.shadowBacktestError || null,
       entryModel: m.signal?.entryModel || null,
       triggerModel: m.signal?.triggerModel || null,
       marketRegime: m.signal?.marketRegime || null,
@@ -1618,7 +1621,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
-    let quote=null,signal=null,signalError=null,shadowSignal=null,shadowSignalError=null;
+    let quote=null,signal=null,signalError=null,shadowSignal=null,shadowSignalError=null,shadowBacktest=null,shadowBacktestError=null;
     const storedDaily=Array.isArray(history.dailyCandles)?history.dailyCandles:[];
     const storedFourHour=Array.isArray(history.fourHourCandles)?history.fourHourCandles:[];
     const daily=storedDaily.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
@@ -1672,9 +1675,19 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
     }
 
+    // Re-run a fixed, chronological, cost-adjusted walk-forward against the latest
+    // actual contiguous history. This result is research-only and never reaches the ledger.
+    try {
+      shadowBacktest=walkForwardEarlyReversalShadow({
+        dailyCandles:daily,fourHourCandles:fourHour,market:coin+"/AUD",now:clock
+      });
+    } catch(error) {
+      shadowBacktestError=String(error?.message||"EARLY_REVERSAL_WALK_FORWARD_UNAVAILABLE").slice(0,180);
+    }
+
     if(candleValidationError){
       signalError = [signalError,candleValidationError].filter(Boolean).join("; ");
-      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     const fourHourSignalWindow=fourHour.slice(-240);
@@ -1749,13 +1762,13 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
         (dailyContinuity.gapCount>0&&dailyContinuity.contiguousCandles<110) ||
         unverifiedSignalWindowGaps.length>0 || confirmedSignalWindowGaps.length>1;
       signalError=[signalError,...readiness].filter(Boolean).join("; ");
-      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,
         signalStatus:blockedByGap?"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP":"WARMUP_REQUIRED",
         signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     if(!quote){
-      markets.push({coin,pair:coin+"/AUD",quote:null,history:historySummary,signal:null,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
@@ -1786,7 +1799,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
         shadowSignalError=String(error?.message||"EARLY_REVERSAL_SHADOW_UNAVAILABLE").slice(0,180);
       }
     }
-    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,shadowSignal,shadowSignalError,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,shadowSignal,shadowSignalError,shadowBacktest,shadowBacktestError,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
 }
