@@ -308,8 +308,23 @@ function rankMtfEntryCandidate(m, account, now) {
   };
 }
 
+function uniqueCoinSpotMtfMarkets(markets) {
+  const list = Array.isArray(markets) ? markets : [];
+  const counts = new Map();
+  // Count every BTC/ETH record before validating its pair/quote. A malformed
+  // duplicate must not be silently ignored while another record for that coin
+  // is used to open or manage a position.
+  for (const market of list) {
+    if (validCoin(market?.coin)) counts.set(market.coin, (counts.get(market.coin) || 0) + 1);
+  }
+  return list.filter(market =>
+    validCoin(market?.coin) &&
+    counts.get(market.coin) === 1 &&
+    validAudMarket(market));
+}
+
 function buildMtfCandidateRanking(markets, account, now) {
-  const ranked = markets.filter(m => isMtfEntryCandidate(m, now))
+  const ranked = uniqueCoinSpotMtfMarkets(markets).filter(m => isMtfEntryCandidate(m, now))
     .map(m => rankMtfEntryCandidate(m, account, now))
     .sort((a, b) =>
       Number(a.status !== "ELIGIBLE") - Number(b.status !== "ELIGIBLE") ||
@@ -343,7 +358,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
     a.dailyLossAud = Math.max(a.dailyLossAud, minimumCurrentDailyLoss);
   }
 
-  const byCoin = new Map(markets.filter(validAudMarket).map(m => [m.coin, m]));
+  const byCoin = new Map(uniqueCoinSpotMtfMarkets(markets).map(m => [m.coin, m]));
   const p = a.openPosition;
   if (p) {
     const m = byCoin.get(p.coin), q = m?.quote, s = m?.signal;

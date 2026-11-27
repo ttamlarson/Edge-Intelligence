@@ -451,3 +451,45 @@ test("validates MTF signal idempotency state and prevents re-entry after a close
  assert.throws(()=>validateMtfPaperAccount({...closed,lastProcessed:{}}),/ledger failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...closed,lastProcessed:{BTC:"2026-11-25T03:59:59.999Z"}}),/ledger failed validation/);
 });
+
+
+test("duplicate BTC market snapshots fail closed for entries and protective position marks",()=>{
+ const first=candidate("BTC","2026-11-25T04:00:00.000Z",100000);
+ const duplicate=candidate("BTC","2026-11-25T04:00:00.000Z",100100);
+ const ambiguous=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[first,duplicate],now});
+ assert.equal(ambiguous.openPosition,null);
+ assert.equal(ambiguous.cashAud,100);
+ assert.deepEqual(ambiguous.lastProcessed,{});
+ assert.deepEqual(ambiguous.lastCandidateRanking,[]);
+
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[first],now});
+ assert.ok(opened.openPosition);
+ const stop=opened.openPosition.stopPrice;
+ const stopQuote={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const conflictingQuote=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T09:00:00.000Z");
+ const held=processMtfPaperAccount(opened,{markets:[stopQuote,conflictingQuote],now:"2026-11-25T09:00:00.000Z"});
+ assert.ok(held.openPosition,"ambiguous duplicate market data must not select either exit quote");
+ assert.equal(held.closedTrades.length,0);
+ assert.equal(held.openPosition.lastMarkAt,now);
+ assert.equal(held.openPosition.markStatus,"STALE");
+
+ const recovered=processMtfPaperAccount(held,{markets:[stopQuote],now:"2026-11-25T09:15:00.000Z"});
+ assert.equal(recovered.openPosition,null);
+ assert.equal(recovered.closedTrades.at(-1).reason,"TRAILING_STOP");
+ assert.equal(recovered.paperOnly,true);
+ assert.equal(recovered.liveTradingEnabled,false);
+ assert.equal(validateMtfPaperAccount(recovered),true);
+});
+
+test("a malformed duplicate BTC market record also invalidates the otherwise valid candidate",()=>{
+ const valid=candidate();
+ const malformed={coin:"BTC",pair:"BTC/USD",quote:{pair:"BTC/USD"},signal:valid.signal};
+ const result=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[valid,malformed],now});
+ assert.equal(result.openPosition,null);
+ assert.deepEqual(result.lastProcessed,{});
+ assert.deepEqual(result.lastCandidateRanking,[]);
+});
