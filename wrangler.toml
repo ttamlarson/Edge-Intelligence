@@ -2,6 +2,11 @@ name = "edge-intelligence-api"
 main = "index.js"
 compatibility_date = "2026-11-01"
 
+[limits]
+# CoinSpot history validation and signal evaluation run on Cron; 10s is a
+# bounded ceiling with headroom for the scheduled multi-timeframe scan.
+cpu_ms = 10000
+
 [observability]
 enabled = true
 redact_query_string = true

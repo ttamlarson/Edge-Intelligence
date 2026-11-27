@@ -689,6 +689,7 @@ test("CoinSpot MTF scheduled success emits a structured paper-only runtime summa
   assert.equal(summary.backfill.requested,4);
   assert.equal(summary.backfill.processed,4);
   assert.deepEqual(summary.markets.map(m=>m.pair),["BTC/AUD","ETH/AUD"]);
+  assert.ok(summary.markets.every(m=>m.shadowBacktestStatus==="DEFERRED_ON_SCHEDULED_SCAN"),"five-minute paper scans must defer CPU-heavy walk-forward research");
    assert.ok(summary.markets.every(m=>Number.isFinite(Date.parse(m.quoteRetrievedAt))));
   assert.equal(summary.ledger.equityAud,100);
   assert.equal(summary.ledger.openPosition,null);
@@ -1111,5 +1112,25 @@ test("CoinSpot MTF allows validated signal history while excluding stale unverif
   assert.equal(btc.history.unverifiedDailyDays,13);
   assert.equal(btc.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
   assert.notEqual(btc.signalStatus,"WARMUP_REQUIRED");
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("scheduled strategy defers the CPU-heavy walk-forward while the read-only research path remains available", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const now="2026-11-27T12:00:00.000Z";
+ const state={
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-27",liveTradingEnabled:false,
+  markets:{BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}}
+ };
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const deferred=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now,state,{includeShadowBacktest:false});
+  assert.equal(deferred.markets.length,2);
+  assert.ok(deferred.markets.every(m=>m.shadowBacktest===null));
+  assert.ok(deferred.markets.every(m=>m.shadowBacktestStatus==="DEFERRED_ON_SCHEDULED_SCAN"));
+  const research=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now,state);
+  assert.ok(research.markets.every(m=>m.shadowBacktest?.status==="INSUFFICIENT_HISTORY"));
+  assert.ok(research.markets.every(m=>m.shadowBacktestStatus==="INSUFFICIENT_HISTORY"));
  }finally{globalThis.fetch=originalFetch;}
 });

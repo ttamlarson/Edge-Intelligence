@@ -20,3 +20,10 @@ test("Worker deploy workflow watches every directly imported runtime module", as
     assert.match(workflow, new RegExp('      - "' + file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"'), `Worker deployment must trigger when ${file} changes`);
   }
 });
+
+
+test("Worker configuration provides a bounded CPU budget for scheduled MTF scans", async () => {
+  const config = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
+  assert.match(config, /\[limits\][\s\S]*?cpu_ms\s*=\s*10000/m,
+    "the scheduled Worker must have an explicit 10-second CPU ceiling");
+});

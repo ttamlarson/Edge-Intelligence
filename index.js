@@ -1595,7 +1595,7 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
   };
   const strategyHistoryState = syncError ? emptyHistoryState : syncedHistoryState;
   let strategy;
-  try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock), strategyHistoryState); }
+  try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock), strategyHistoryState, { includeShadowBacktest: false }); }
   catch (error) {
     strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false };
     syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220);
@@ -1690,6 +1690,7 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
       shadowSignalError: m.shadowSignalError || null,
       shadowBacktest: m.shadowBacktest || null,
       shadowBacktestError: m.shadowBacktestError || null,
+      shadowBacktestStatus: m.shadowBacktestStatus || (m.shadowBacktest?.status || "NOT_RUN"),
       entryModel: m.signal?.entryModel || null,
       triggerModel: m.signal?.triggerModel || null,
       marketRegime: m.signal?.marketRegime || null,
@@ -1957,7 +1958,8 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
   };
 }
 
-async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
+async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null,options={}) {
+  const includeShadowBacktest = options.includeShadowBacktest !== false;
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
   let state;
   if (stateOverride && typeof stateOverride === "object" && !Array.isArray(stateOverride)) {
@@ -1971,6 +1973,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
     let quote=null,signal=null,signalError=null,shadowSignal=null,shadowSignalError=null,shadowBacktest=null,shadowBacktestError=null;
+    let shadowBacktestStatus = includeShadowBacktest ? "NOT_RUN" : "DEFERRED_ON_SCHEDULED_SCAN";
     const storedDaily=Array.isArray(history.dailyCandles)?history.dailyCandles:[];
     const storedFourHour=Array.isArray(history.fourHourCandles)?history.fourHourCandles:[];
     const provenance=validateCoinSpotMtfMarketHistory(history);
@@ -2038,30 +2041,34 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
     }
 
-    // Re-run a fixed, chronological, cost-adjusted walk-forward against the latest
-    // actual contiguous history. This result is research-only and never reaches the ledger.
-    try {
-      const firstFourHourAt = Date.parse(fourHour[0]?.timestamp || "");
-      const lastFourHourAt = Date.parse(fourHour.at(-1)?.timestamp || "");
-      const confirmedWalkForwardGaps = (historySummary.fourHourGapDiagnostics || []).filter(item =>
-        item.status === "CONFIRMED_NO_TRADES" &&
-        Date.parse(item.startAt) >= firstFourHourAt &&
-        Date.parse(item.endAt) <= lastFourHourAt
-      );
-      shadowBacktest=walkForwardEarlyReversalShadow({
-        dailyCandles:daily,
-        fourHourCandles:fourHour,
-        confirmedZeroTradeIntervals:confirmedWalkForwardGaps,
-        market:coin+"/AUD",
-        now:clock
-      });
-    } catch(error) {
-      shadowBacktestError=String(error?.message||"EARLY_REVERSAL_WALK_FORWARD_UNAVAILABLE").slice(0,180);
+    // The full three-fold walk-forward re-evaluates hundreds of historical bars.
+    // Keep it on the read-only research route, not the five-minute paper scheduler.
+    if (includeShadowBacktest) {
+      try {
+        const firstFourHourAt = Date.parse(fourHour[0]?.timestamp || "");
+        const lastFourHourAt = Date.parse(fourHour.at(-1)?.timestamp || "");
+        const confirmedWalkForwardGaps = (historySummary.fourHourGapDiagnostics || []).filter(item =>
+          item.status === "CONFIRMED_NO_TRADES" &&
+          Date.parse(item.startAt) >= firstFourHourAt &&
+          Date.parse(item.endAt) <= lastFourHourAt
+        );
+        shadowBacktest=walkForwardEarlyReversalShadow({
+          dailyCandles:daily,
+          fourHourCandles:fourHour,
+          confirmedZeroTradeIntervals:confirmedWalkForwardGaps,
+          market:coin+"/AUD",
+          now:clock
+        });
+        shadowBacktestStatus = shadowBacktest?.status || "COMPLETED";
+      } catch(error) {
+        shadowBacktestError=String(error?.message||"EARLY_REVERSAL_WALK_FORWARD_UNAVAILABLE").slice(0,180);
+        shadowBacktestStatus = "ERROR";
+      }
     }
 
     if(candleValidationError){
       signalError = [signalError,candleValidationError].filter(Boolean).join("; ");
-      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,shadowBacktestStatus,signalStatus:"INVALID_COINSPOT_CANDLE_DATA",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     const fourHourSignalWindow=fourHour.slice(-240);
@@ -2146,13 +2153,13 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
         (dailyContinuity.gapCount>0&&dailyContinuity.contiguousCandles<110) ||
         unverifiedSignalWindowGaps.length>0 || confirmedSignalWindowGaps.length>1;
       signalError=[signalError,...readiness].filter(Boolean).join("; ");
-      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,
+      markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,shadowBacktestStatus,
         signalStatus:blockedByGap?"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP":"WARMUP_REQUIRED",
         signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     if(!quote){
-      markets.push({coin,pair:coin+"/AUD",quote:null,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+      markets.push({coin,pair:coin+"/AUD",quote:null,history:historySummary,signal:null,shadowBacktest,shadowBacktestError,shadowBacktestStatus,signalStatus:signalError||"COINSPOT_QUOTE_UNAVAILABLE",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
       continue;
     }
     const dailyAge=daily.length?clock-(Date.parse(daily.at(-1).timestamp)+COINSPOT_INTERVALS.daily):Infinity;
@@ -2183,7 +2190,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
         shadowSignalError=String(error?.message||"EARLY_REVERSAL_SHADOW_UNAVAILABLE").slice(0,180);
       }
     }
-    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,shadowSignal,shadowSignalError,shadowBacktest,shadowBacktestError,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,shadowSignal,shadowSignalError,shadowBacktest,shadowBacktestError,shadowBacktestStatus,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
 }
@@ -2617,6 +2624,7 @@ export default {
             } : null,
             spreadBps: market.spreadBps,
             quoteRetrievedAt: market.quoteRetrievedAt || null,
+            shadowBacktestStatus: market.shadowBacktestStatus || "NOT_RUN",
             aiReviewStatus: market.aiReview?.status || "NOT_RUN",
             aiGateStatus: market.aiGateStatus || "NOT_REQUIRED"
           })),
