@@ -119,7 +119,24 @@ export function calculateAsxAiCalibration(closedTrades, {
     const probability = review.predictedWinProbability;
     const provenance = review.inputProvenance;
     const fingerprint = provenance?.fingerprint;
+    const policyVersion = typeof review.reviewPolicyVersion === "string" && review.reviewPolicyVersion.trim() && review.reviewPolicyVersion.length <= 80
+      ? review.reviewPolicyVersion
+      : "LEGACY_UNVERSIONED";
+    let sourceUrl = null;
+    try { sourceUrl = provenance?.sourceUrl ? new URL(provenance.sourceUrl) : null; } catch { sourceUrl = null; }
+    const sourceMetadataValid = provenance?.sourceMetadataVersion === undefined ||
+      (provenance.sourceMetadataVersion === 1 &&
+        sourceUrl?.protocol === "https:" &&
+        ["datacedar.com", "www.datacedar.com"].includes(sourceUrl.hostname) &&
+        Number.isFinite(Date.parse(provenance.retrievedAt || "")) &&
+        Date.parse(provenance.retrievedAt) >= Date.parse(provenance.observedAt || "") &&
+        provenance.exchange === "ASX" && provenance.timeframe === "1d" &&
+        provenance.adjustment === "raw" &&
+        provenance.dataClass === "historical_market_data_not_realtime" &&
+        Number.isInteger(provenance.providerRowsForSymbol) &&
+        provenance.providerRowsForSymbol >= provenance.barsProvided);
     const valid = review.status === "AI_APPROVED_PAPER_CANDIDATE" &&
+      (review.reviewPolicyVersion === undefined || (review.reviewPolicyVersion === policyVersion && sourceMetadataValid)) &&
       review.decision === "APPROVE" && typeof review.reviewId === "string" &&
       review.reviewId.length > 0 && review.reviewId.length <= 200 &&
       typeof review.model === "string" && review.model.length > 0 &&
@@ -134,6 +151,8 @@ export function calculateAsxAiCalibration(closedTrades, {
       /^[a-f0-9]{64}$/i.test(fingerprint || "") &&
       review.reviewId.endsWith(String(fingerprint).slice(0, 16)) &&
       Date.parse(provenance.observedAt || "") <= reviewedAt &&
+      (review.requestStartedAt === undefined ||
+        (Number.isFinite(Date.parse(review.requestStartedAt)) && Date.parse(review.requestStartedAt) <= reviewedAt)) &&
       Number.isFinite(reviewedAt) && Number.isFinite(openedAt) && Number.isFinite(closedAt) &&
       reviewedAt <= openedAt && openedAt <= closedAt &&
       Number.isFinite(trade.profitLossAud);
@@ -149,6 +168,7 @@ export function calculateAsxAiCalibration(closedTrades, {
     rows.push({
       reviewId: review.reviewId,
       model: review.model,
+      policyVersion,
       source: provenance.source,
       reviewedAt,
       closedAt,
@@ -160,6 +180,8 @@ export function calculateAsxAiCalibration(closedTrades, {
 
   rows.sort((a, b) => a.closedAt - b.closedAt || a.reviewedAt - b.reviewedAt);
   const modelVersions = [...new Set(rows.map(row => row.model))].sort();
+  const reviewPolicyVersions = [...new Set(rows.map(row => row.policyVersion))].sort();
+  const modelGroups = [...new Set(rows.map(row => row.model + "\u0000" + row.policyVersion))].sort();
   const diagnoseModel = modelRows => {
     const splitIndex = Math.floor(modelRows.length * (1 - holdoutFraction));
     const referenceRows = modelRows.slice(0, splitIndex);
@@ -176,6 +198,7 @@ export function calculateAsxAiCalibration(closedTrades, {
         : "CALIBRATION_MONITORING_ONLY";
     return {
       model: modelRows[0]?.model || null,
+      reviewPolicyVersion: modelRows[0]?.policyVersion || "LEGACY_UNVERSIONED",
       status,
       referenceSampleCount: referenceRows.length,
       outOfSampleSampleCount: outOfSampleRows.length,
@@ -196,13 +219,14 @@ export function calculateAsxAiCalibration(closedTrades, {
       } : null
     };
   };
-  const modelDiagnostics = modelVersions.map(model =>
-    diagnoseModel(rows.filter(row => row.model === model))
-  );
-  const mixedModels = modelVersions.length > 1;
+  const modelDiagnostics = modelGroups.map(group => {
+    const [model, policyVersion] = group.split("\u0000");
+    return diagnoseModel(rows.filter(row => row.model === model && row.policyVersion === policyVersion));
+  });
+  const mixedModels = modelGroups.length > 1;
   const single = modelDiagnostics[0] || null;
   const status = mixedModels
-    ? "MIXED_MODEL_VERSIONS_SEPARATE_DIAGNOSTICS"
+    ? "MIXED_MODEL_OR_REVIEW_POLICY_VERSIONS_SEPARATE_DIAGNOSTICS"
     : single?.status || "INSUFFICIENT_OUT_OF_SAMPLE_SAMPLE";
 
   return {
@@ -224,6 +248,7 @@ export function calculateAsxAiCalibration(closedTrades, {
     confidenceBandDiagnostics: mixedModels ? [] : single?.confidenceBandDiagnostics || [],
     confidenceInterpretation: "Subjective confidence bands are descriptive only and are not calibrated probabilities.",
     modelVersions,
+    reviewPolicyVersions,
     sourceLabels: [...new Set(rows.map(row => row.source))].sort(),
     manualExitExcludedCount,
     invalidReviewCount,
@@ -231,7 +256,7 @@ export function calculateAsxAiCalibration(closedTrades, {
     referenceWindow: mixedModels ? null : single?.referenceWindow || null,
     outOfSampleWindow: mixedModels ? null : single?.outOfSampleWindow || null,
     interpretation: mixedModels
-      ? "Multiple model versions are present. No pooled calibration metric is reported because their predictions must not be mixed; inspect the separate chronological diagnostics for each version. These are outcome diagnostics, not model training, probability correction or evidence of future profitability."
+      ? "Multiple model or review-policy versions are present. No pooled calibration metric is reported because their predictions must not be mixed; inspect the separate chronological diagnostics for each version. These are outcome diagnostics, not model training, probability correction or evidence of future profitability."
       : "Predicted win probability is an uncalibrated model estimate. The earlier chronological reference sample supplies the fixed baseline probability for the later holdout; the holdout is never used to set that baseline. These are outcome diagnostics, not model training, probability correction or evidence of future profitability. Only approved reviews with automated daily-bar exits are included; manual exits are excluded.",
     liveTradingEnabled: false
   };
