@@ -1096,28 +1096,95 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
 }
 
 
+const COINSPOT_MTF_AI_REVIEW_POLICY_VERSION = "COINSPOT_MTF_AI_REVIEW_V2";
+const COINSPOT_MTF_AI_REVIEW_MAX_RESPONSE_CHARS = 8000;
+
+function isCanonicalCoinSpotIso(value) {
+  if (typeof value !== "string") return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
+
+async function coinSpotMtfSha256Hex(value) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder !== "function") {
+    throw new Error("SHA-256 review provenance is unavailable.");
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function isValidCoinSpotMtfAiReview(review) {
+  const requestStartedAt = typeof review?.requestStartedAt === "string" ? Date.parse(review.requestStartedAt) : NaN;
   const reviewedAt = typeof review?.reviewedAt === "string" ? Date.parse(review.reviewedAt) : NaN;
+  const provenance = review?.inputProvenance;
+  const validProviderResponseId = review?.providerResponseId === null ||
+    (typeof review?.providerResponseId === "string" && review.providerResponseId.length > 0 && review.providerResponseId.length <= 120);
   return Boolean(review && typeof review === "object" && !Array.isArray(review) &&
     review.status === "AI_REVIEW_COMPLETE" &&
     ["LOW_CONCERN", "CAUTION", "HIGH_CONCERN"].includes(review.assessment) &&
-    typeof review.summary === "string" && review.summary.trim().length > 0 && review.summary.length <= 700 &&
+    typeof review.summary === "string" && review.summary.trim().length >= 20 && review.summary.length <= 700 &&
     Array.isArray(review.riskFlags) && review.riskFlags.length <= 6 &&
     review.riskFlags.every(flag => typeof flag === "string" && flag.trim().length > 0 && flag.length <= 180) &&
-    review.advisoryOnly === true &&
-    Number.isFinite(reviewedAt) && new Date(reviewedAt).toISOString() === review.reviewedAt);
+    review.advisoryOnly === true && review.liveTradingEnabled === false &&
+    review.reviewPolicyVersion === COINSPOT_MTF_AI_REVIEW_POLICY_VERSION &&
+    typeof review.model === "string" && review.model.trim().length > 0 && review.model.length <= 120 &&
+    typeof review.requestedModel === "string" && review.requestedModel.trim().length > 0 && review.requestedModel.length <= 120 &&
+    ["PROVIDER_REPORTED", "REQUESTED_MODEL_FALLBACK"].includes(review.modelIdentitySource) &&
+    validProviderResponseId &&
+    isCanonicalCoinSpotIso(review.requestStartedAt) && isCanonicalCoinSpotIso(review.reviewedAt) &&
+    Number.isFinite(requestStartedAt) && Number.isFinite(reviewedAt) && reviewedAt >= requestStartedAt &&
+    typeof review.reviewId === "string" && review.reviewId.length > 0 && review.reviewId.length <= 300 &&
+    provenance && provenance.source === "CoinSpot read-only completed-order history and public AUD quote" &&
+    provenance.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" &&
+    provenance.pair === review.pair && ["BTC/AUD", "ETH/AUD"].includes(provenance.pair) &&
+    isCanonicalCoinSpotIso(provenance.signalAt) && isCanonicalCoinSpotIso(provenance.quoteRetrievedAt) &&
+    Number.isFinite(provenance.spreadBps) && provenance.spreadBps >= 0 && provenance.spreadBps <= 50 &&
+    provenance.fingerprintAlgorithm === "SHA-256" &&
+    provenance.fingerprintScope === "COINSPOT_MTF_SIGNAL_EVIDENCE_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY" &&
+    /^[a-f0-9]{64}$/.test(provenance.fingerprint || "") &&
+    /^[a-f0-9]{64}$/.test(provenance.modelFingerprint || "") &&
+    review.reviewId.includes(provenance.modelFingerprint) && review.reviewId.endsWith(provenance.fingerprint));
 }
 
-async function reviewCoinSpotMtfCandidate(env, market) {
-  if (!env.OPENAI_API_KEY) return { status: "AI_REVIEW_NOT_CONFIGURED", summary: "AI review is unavailable; new paper entries fail closed.", riskFlags: [] };
+async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOString()) {
+  const blocked = (status, summary) => ({
+    status, summary, riskFlags: [], advisoryOnly: true, liveTradingEnabled: false
+  });
+  if (!env.OPENAI_API_KEY) return blocked("AI_REVIEW_NOT_CONFIGURED", "AI review is unavailable; new paper entries fail closed.");
   if (market?.signal?.status !== "BUY_CANDIDATE_PAPER_ONLY") return null;
+
   const signal = market.signal;
+  const nowMs = Date.parse(now);
+  const signalMs = Date.parse(signal.signalAt || "");
+  const quoteRetrievedAt = market?.quote?.retrievedAt;
+  const quoteMs = Date.parse(quoteRetrievedAt || "");
   const spreadBps = Number(market?.quote?.spreadBps);
-  // Bind the review to deterministic signal evidence and spread, but omit
-  // transient absolute prices. The paper execution guard revalidates bid/ask each scan.
+  const ageAfterSignalClose = nowMs - (signalMs + 4 * 60 * 60 * 1000);
+  const requestedModel = typeof env.OPENAI_MODEL === "string"
+    ? env.OPENAI_MODEL.trim() : env.OPENAI_MODEL === undefined ? "gpt-6.2-astra" : "";
+  if (!isCanonicalCoinSpotIso(now) || !["BTC", "ETH"].includes(market?.coin) ||
+      market.pair !== market.coin + "/AUD" || market?.quote?.pair !== market.pair ||
+      !isCanonicalCoinSpotIso(signal.signalAt) || !isCanonicalCoinSpotIso(quoteRetrievedAt) ||
+      !Number.isFinite(nowMs) || !Number.isFinite(signalMs) || !Number.isFinite(quoteMs) ||
+      quoteMs > nowMs || nowMs - quoteMs > 20 * 60 * 1000 ||
+      ageAfterSignalClose < 0 || ageAfterSignalClose > 8 * 60 * 60 * 1000 ||
+      !Number.isFinite(spreadBps) || spreadBps < 0 || spreadBps > 50 ||
+      signal.strategy !== "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" ||
+      signal.execution?.orderIntent !== "NONE" || signal.execution?.paperOnly !== true ||
+      signal.execution?.liveTradingEnabled !== false ||
+      typeof requestedModel !== "string" || !requestedModel || requestedModel.length > 120) {
+    return blocked("AI_REVIEW_INVALID_INPUT", "The candidate, quote freshness, model or provenance clock is invalid; new paper entries fail closed.");
+  }
+
+  // Absolute bid/ask prices are intentionally excluded. The deterministic paper
+  // engine revalidates executable quotes; the review is bound to signal evidence
+  // and spread, while quoteRetrievedAt records the original observation time.
   const packet = {
+    reviewPolicyVersion: COINSPOT_MTF_AI_REVIEW_POLICY_VERSION,
+    requestedModel,
     pair: market.pair,
-    quote: { pair: market.quote?.pair, spreadBps: Number.isFinite(spreadBps) ? Number(spreadBps.toFixed(2)) : null },
+    quote: { pair: market.quote.pair, spreadBps: Number(spreadBps.toFixed(2)) },
     signal: {
       strategy: signal.strategy, status: signal.status,
       entryModel: signal.entryModel || signal.triggerModel || null,
@@ -1129,48 +1196,135 @@ async function reviewCoinSpotMtfCandidate(env, market) {
     strategy: "Daily close above EMA100; 4h EMA50 above EMA200 with positive slope; entry trigger is either a 2-of-3 prior 20/55/100-bar Donchian breakout or a bullish 4h EMA20 reclaim after the previous 4h close was at/below its EMA20. Spread, liquidity, volatility and paper risk gates remain mandatory.",
     constraints: { spotOnly: true, paperOnly: true, maximumAllocationPct: 25, riskBudgetPct: 0.5, initialStopAtr: 2.5, trailingStopAtr: 3, maxHoldingDays: 30 }
   };
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(packet)));
-  const fingerprint = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 24);
-  const cacheKey = "coinspot-mtf-ai-review:" + market.coin + ":" + signal.signalAt + ":" + fingerprint;
-  const cached = await env.EDGE_KV?.get(cacheKey);
-  if (cached) {
-    try {
-      const cachedReview = JSON.parse(cached);
-      if (isValidCoinSpotMtfAiReview(cachedReview)) return cachedReview;
-    } catch { /* invalid advisory cache is ignored and refreshed */ }
+
+  let fingerprint, modelFingerprint;
+  try {
+    modelFingerprint = await coinSpotMtfSha256Hex({
+      requestedModel, reviewPolicyVersion: COINSPOT_MTF_AI_REVIEW_POLICY_VERSION
+    });
+    fingerprint = await coinSpotMtfSha256Hex(packet);
+  } catch {
+    return blocked("AI_REVIEW_PROVENANCE_ERROR", "SHA-256 review provenance could not be generated; new paper entries fail closed.");
   }
+  const cacheKey = "coinspot-mtf-ai-review:" + COINSPOT_MTF_AI_REVIEW_POLICY_VERSION +
+    ":" + market.coin + ":" + modelFingerprint + ":" + fingerprint;
+  if (env.EDGE_KV?.get) {
+    let cached;
+    try { cached = await env.EDGE_KV.get(cacheKey); }
+    catch { return blocked("AI_REVIEW_CACHE_UNAVAILABLE", "The AI review cache could not be read; new paper entries fail closed."); }
+    if (cached) {
+      try {
+        const cachedReview = JSON.parse(cached);
+        if (isValidCoinSpotMtfAiReview(cachedReview)) return cachedReview;
+      } catch { /* invalid advisory cache is ignored and refreshed */ }
+    }
+  }
+
   const schema = { type:"object", additionalProperties:false, properties:{
     assessment:{type:"string",enum:["LOW_CONCERN","CAUTION","HIGH_CONCERN"]},
-    summary:{type:"string",maxLength:700},
-    riskFlags:{type:"array",maxItems:6,items:{type:"string",maxLength:180}}
+    summary:{type:"string",minLength:20,maxLength:700},
+    riskFlags:{type:"array",maxItems:6,items:{type:"string",minLength:1,maxLength:180}}
   }, required:["assessment","summary","riskFlags"] };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
+  const requestStartedAtMs = Date.now();
+  const requestStartedAt = new Date(requestStartedAtMs).toISOString();
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
-      body:JSON.stringify({model:env.OPENAI_MODEL||"gpt-6.2-astra",max_output_tokens:500,
-        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Return only the requested JSON."},
+      body:JSON.stringify({model:requestedModel,max_output_tokens:700,
+        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Your assessment is a qualitative risk review, not a prediction or calibrated probability. Return only the requested JSON."},
           {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
-        text:{format:{type:"json_schema",name:"edge_coinspot_signal_review",strict:true,schema}}
+        text:{format:{type:"json_schema",name:"edge_coinspot_mtf_risk_review",strict:true,schema}}
       }), redirect:"error", signal:controller.signal
     });
-    if (!response.ok) return {status:"AI_REVIEW_PROVIDER_ERROR",summary:"AI review provider returned HTTP "+response.status+".",riskFlags:[]};
-    const payload=await response.json();
-    let output=payload.output_text||"";
-    if(!output) for(const item of payload.output||[]) for(const part of item.content||[]) if(part.text) output=part.text;
-    const parsed=JSON.parse(output);
-    if(!["LOW_CONCERN","CAUTION","HIGH_CONCERN"].includes(parsed.assessment)||
-       typeof parsed.summary!=="string"||!parsed.summary.trim()||parsed.summary.length>700||
-       !Array.isArray(parsed.riskFlags)||parsed.riskFlags.length>6||
-       parsed.riskFlags.some(flag=>typeof flag!=="string"||!flag.trim()||flag.length>180)) throw new Error("AI response schema mismatch");
-    const review={status:"AI_REVIEW_COMPLETE",assessment:parsed.assessment,summary:parsed.summary.trim(),
-      riskFlags:parsed.riskFlags.map(flag=>flag.trim()),reviewedAt:isoNow(),advisoryOnly:true};
-    if(!isValidCoinSpotMtfAiReview(review)) throw new Error("AI response failed local validation");
-    await env.EDGE_KV?.put(cacheKey,JSON.stringify(review),{expirationTtl:86400});
+    if (response.url) {
+      let responseHost = "";
+      try { responseHost = new URL(response.url).hostname; } catch { responseHost = ""; }
+      if (responseHost !== "api.openai.com") {
+        return blocked("AI_REVIEW_PROVIDER_REDIRECT", "The AI provider redirected to an unexpected host; new paper entries fail closed.");
+      }
+    }
+    if (!response.ok) return blocked("AI_REVIEW_PROVIDER_ERROR", "AI review provider returned HTTP " + response.status + ".");
+    const contentLength = Number(response.headers?.get?.("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > COINSPOT_MTF_AI_REVIEW_MAX_RESPONSE_CHARS) {
+      return blocked("AI_REVIEW_RESPONSE_TOO_LARGE", "The AI review response exceeded the size limit.");
+    }
+    const raw = await response.text();
+    if (raw.length > COINSPOT_MTF_AI_REVIEW_MAX_RESPONSE_CHARS) {
+      return blocked("AI_REVIEW_RESPONSE_TOO_LARGE", "The AI review response exceeded the size limit.");
+    }
+    let payload;
+    try { payload = JSON.parse(raw); }
+    catch { return blocked("AI_REVIEW_INVALID_RESPONSE", "The AI provider returned invalid JSON."); }
+    let output = payload.output_text || "";
+    if (!output) for (const item of payload.output || []) {
+      for (const part of item?.content || []) if (typeof part?.text === "string") output = part.text;
+    }
+    let parsed;
+    try { parsed = JSON.parse(output); }
+    catch { return blocked("AI_REVIEW_INVALID_DECISION", "The AI provider returned an invalid structured review."); }
+    if (!["LOW_CONCERN", "CAUTION", "HIGH_CONCERN"].includes(parsed.assessment) ||
+        typeof parsed.summary !== "string" || parsed.summary.trim().length < 20 || parsed.summary.length > 700 ||
+        !Array.isArray(parsed.riskFlags) || parsed.riskFlags.length > 6 ||
+        parsed.riskFlags.some(flag => typeof flag !== "string" || !flag.trim() || flag.length > 180)) {
+      return blocked("AI_REVIEW_INVALID_DECISION", "The AI review did not match the required structured schema.");
+    }
+    const actualModel = typeof payload.model === "string" && payload.model.trim()
+      ? payload.model.trim() : requestedModel;
+    if (!actualModel || actualModel.length > 120) {
+      return blocked("AI_REVIEW_INVALID_RESPONSE", "The AI provider returned an invalid model identifier.");
+    }
+    const completedAtMs = Date.now();
+    if (!Number.isFinite(requestStartedAtMs) || !Number.isFinite(completedAtMs) || completedAtMs < requestStartedAtMs) {
+      return blocked("AI_REVIEW_PROVENANCE_ERROR", "AI review completion time was invalid; new paper entries fail closed.");
+    }
+    const reviewedAt = new Date(completedAtMs).toISOString();
+    const reviewId = "coinspot-mtf-" + market.coin + "-" + signal.signalAt.slice(0, 10) +
+      "-" + modelFingerprint + "-" + fingerprint;
+    const review = {
+      status:"AI_REVIEW_COMPLETE",
+      assessment:parsed.assessment,
+      summary:parsed.summary.trim(),
+      riskFlags:parsed.riskFlags.map(flag=>flag.trim()),
+      model:actualModel,
+      requestedModel,
+      modelIdentitySource:typeof payload.model === "string" && payload.model.trim()
+        ? "PROVIDER_REPORTED" : "REQUESTED_MODEL_FALLBACK",
+      reviewPolicyVersion:COINSPOT_MTF_AI_REVIEW_POLICY_VERSION,
+      requestStartedAt,
+      reviewedAt,
+      providerResponseId:typeof payload.id === "string" && payload.id.length <= 120 ? payload.id : null,
+      reviewId,
+      pair:market.pair,
+      inputProvenance:{
+        source:"CoinSpot read-only completed-order history and public AUD quote",
+        sourceVerification:"NOT_INDEPENDENTLY_VERIFIED",
+        pair:market.pair,
+        signalAt:signal.signalAt,
+        quoteRetrievedAt,
+        spreadBps:Number(spreadBps.toFixed(2)),
+        fingerprintAlgorithm:"SHA-256",
+        fingerprintScope:"COINSPOT_MTF_SIGNAL_EVIDENCE_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY",
+        fingerprint,
+        modelFingerprint
+      },
+      advisoryOnly:true,
+      liveTradingEnabled:false
+    };
+    if (!isValidCoinSpotMtfAiReview(review)) {
+      return blocked("AI_REVIEW_PROVENANCE_ERROR", "The AI review failed local provenance validation; new paper entries fail closed.");
+    }
+    if (env.EDGE_KV?.put) {
+      try { await env.EDGE_KV.put(cacheKey,JSON.stringify(review),{expirationTtl:86400}); }
+      catch { return blocked("AI_REVIEW_CACHE_UNAVAILABLE", "The validated AI review could not be persisted; new paper entries fail closed."); }
+    }
     return review;
-  } catch {
-    return {status:"AI_REVIEW_UNAVAILABLE",summary:"AI review could not be completed; new paper entries fail closed.",riskFlags:[]};
+  } catch (error) {
+    return blocked(error?.name === "AbortError" ? "AI_REVIEW_TIMEOUT" : "AI_REVIEW_UNAVAILABLE",
+      error?.name === "AbortError"
+        ? "AI review timed out; new paper entries fail closed."
+        : "AI review could not be completed; new paper entries fail closed.");
   } finally { clearTimeout(timeout); }
 }
 
@@ -1238,7 +1392,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock)); }
   catch (error) { strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false }; syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220); }
   const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
-    coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market)
+    coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market, nowIso)
   })));
   const aiGate = applyCoinSpotMtfAiGate(strategy.markets || [], aiReviews);
   account = processMtfPaperAccount(account, { markets: aiGate.markets, now: nowIso });
