@@ -18,3 +18,13 @@ test("closed MTF trades must not predate the completed four-hour signal close",(
  assert.equal(validateMtfPaperAccount({...staleAccount,closedTrades:[maxAgeTrade]}),true,"the exact eight-hour post-close freshness boundary remains valid");
  assert.throws(()=>validateMtfPaperAccount({...staleAccount,closedTrades:[{...maxAgeTrade,openedAt:"2026-11-25T14:00:00.001Z"}]}),/ledger failed validation/);
 });
+
+test("closed trades cannot be dated after their persisted ledger snapshot",()=>{
+ const trade={id:"BTC-future-close",coin:"BTC",pair:"BTC/AUD",
+  openedAt:"2026-11-25T06:00:00.000Z",closedAt:"2026-11-25T07:00:00.000Z",
+  signalAt:"2026-11-25T02:00:00.000Z",entryPrice:100000,exitPrice:99000,quantity:0.0005,
+  entryFeeAud:0.05,exitFeeAud:0.0495,pnlAud:-0.6,reason:"TRAILING_STOP"};
+ const account={...createMtfPaperAccount(now),cashAud:99.4,equityAud:99.4,realizedPnlAud:-0.6,dailyLossAud:0.6,closedTrades:[trade]};
+ assert.equal(validateMtfPaperAccount(account),true);
+ assert.throws(()=>validateMtfPaperAccount({...account,updatedAt:"2026-11-25T06:59:59.999Z"}),/ledger failed validation/);
+});

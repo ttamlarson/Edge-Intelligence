@@ -409,3 +409,12 @@ test("sync-warning scans block new MTF entries while preserving protective stop 
  assert.equal(closed.paperOnly,true);
  assert.equal(closed.liveTradingEnabled,false);
 });
+
+test("open positions cannot be dated after their persisted ledger snapshot",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const invalid={...opened,updatedAt:"2026-11-25T07:59:59.999Z",openPosition:{...opened.openPosition}};
+ delete invalid.openPosition.lastMarkAt;
+ delete invalid.openPosition.markStatus;
+ assert.throws(()=>validateMtfPaperAccount(invalid),/position failed validation/);
+});

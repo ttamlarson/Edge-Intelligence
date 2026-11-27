@@ -55,6 +55,7 @@ export function validateMtfPaperAccount(a) {
     if (!trade || !validCoin(trade.coin) || trade.pair !== trade.coin + "/AUD" ||
         !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
         !validTimestamp(trade.signalAt) || Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
+        Date.parse(trade.closedAt) > Date.parse(a.updatedAt) ||
         Date.parse(trade.openedAt) < Date.parse(trade.signalAt) + FOUR_HOUR_MS ||
         Date.parse(trade.openedAt) > Date.parse(trade.signalAt) + FOUR_HOUR_MS + MAX_SIGNAL_AGE_AFTER_CLOSE_MS ||
         !positiveFinite(trade.entryPrice) || !positiveFinite(trade.exitPrice) ||
@@ -128,6 +129,7 @@ export function validateMtfPaperAccount(a) {
         !positiveFinite(p.atr) || !positiveFinite(p.highestPrice) || p.highestPrice < p.entryPrice ||
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
         !validTimestamp(p.openedAt) || !validTimestamp(p.signalAt) ||
+        Date.parse(p.openedAt) > Date.parse(a.updatedAt) ||
         Date.parse(p.openedAt) < Date.parse(p.signalAt) + FOUR_HOUR_MS ||
         Date.parse(p.openedAt) > Date.parse(p.signalAt) + FOUR_HOUR_MS + MAX_SIGNAL_AGE_AFTER_CLOSE_MS ||
         (p.lastMarkAt !== undefined && (!validTimestamp(p.lastMarkAt) ||
