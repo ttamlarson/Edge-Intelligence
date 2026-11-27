@@ -104,7 +104,8 @@ test("AI review records provider model identity and completion time rather than 
   const completedAt = startedAt + 5000;
   const result = await evaluateAsxAiDecision({
     candidate, bars, sourceMetadata, apiKey: "test",
-    model: "requested-model-alias", now: startedAt, clock: () => completedAt,
+    model: "requested-model-alias", now: startedAt,
+    clock: (() => { const values = [startedAt, completedAt]; return () => values.shift(); })(),
     fetchImpl: async () => aiResponse(approve, { model: "provider-resolved-model-v2", id: "resp_asx_audit" })
   });
   assert.equal(result.model, "provider-resolved-model-v2");
