@@ -1096,7 +1096,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
 }
 
 
-const COINSPOT_MTF_AI_REVIEW_POLICY_VERSION = "COINSPOT_MTF_AI_REVIEW_V2";
+const COINSPOT_MTF_AI_REVIEW_POLICY_VERSION = "COINSPOT_MTF_AI_REVIEW_V3";
 const COINSPOT_MTF_AI_REVIEW_MAX_RESPONSE_CHARS = 8000;
 
 function isCanonicalCoinSpotIso(value) {
@@ -1118,6 +1118,13 @@ function isValidCoinSpotMtfAiReview(review) {
   const requestStartedAt = typeof review?.requestStartedAt === "string" ? Date.parse(review.requestStartedAt) : NaN;
   const reviewedAt = typeof review?.reviewedAt === "string" ? Date.parse(review.reviewedAt) : NaN;
   const provenance = review?.inputProvenance;
+  const history = provenance?.history;
+  const validHistory = Boolean(history &&
+    ["dailyCandles", "fourHourCandles", "contiguousDailyCandles", "contiguousFourHourCandles",
+      "dailyGapCount", "fourHourGapCount", "signalWindowMissingIntervals", "signalWindowConfirmedZeroTradeIntervals"]
+      .every(key => history[key] === null || (Number.isInteger(history[key]) && history[key] >= 0)) &&
+    typeof history.signalWindowStatus === "string" && history.signalWindowStatus.length > 0 && history.signalWindowStatus.length <= 60 &&
+    typeof history.indicatorFourHourHistoryMode === "string" && history.indicatorFourHourHistoryMode.length > 0 && history.indicatorFourHourHistoryMode.length <= 60);
   const validProviderResponseId = review?.providerResponseId === null ||
     (typeof review?.providerResponseId === "string" && review.providerResponseId.length > 0 && review.providerResponseId.length <= 120);
   return Boolean(review && typeof review === "object" && !Array.isArray(review) &&
@@ -1136,7 +1143,7 @@ function isValidCoinSpotMtfAiReview(review) {
     Number.isFinite(requestStartedAt) && Number.isFinite(reviewedAt) && reviewedAt >= requestStartedAt &&
     typeof review.reviewId === "string" && review.reviewId.length > 0 && review.reviewId.length <= 300 &&
     provenance && provenance.source === "CoinSpot read-only completed-order history and public AUD quote" &&
-    provenance.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" &&
+    provenance.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" && validHistory &&
     provenance.pair === review.pair && ["BTC/AUD", "ETH/AUD"].includes(provenance.pair) &&
     isCanonicalCoinSpotIso(provenance.signalAt) && isCanonicalCoinSpotIso(provenance.quoteRetrievedAt) &&
     Number.isFinite(provenance.spreadBps) && provenance.spreadBps >= 0 && provenance.spreadBps <= 50 &&
@@ -1161,6 +1168,24 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
   const quoteMs = Date.parse(quoteRetrievedAt || "");
   const spreadBps = Number(market?.quote?.spreadBps);
   const ageAfterSignalClose = nowMs - (signalMs + 4 * 60 * 60 * 1000);
+  const history = market?.history || {};
+  const historyCount = value => {
+    const count = Number(value);
+    return Number.isInteger(count) && count >= 0 ? count : null;
+  };
+  const historyEvidence = {
+    dailyCandles: historyCount(history.dailyCandles),
+    fourHourCandles: historyCount(history.fourHourCandles),
+    contiguousDailyCandles: historyCount(history.contiguousDailyCandles ?? history.dailyCandles),
+    contiguousFourHourCandles: historyCount(history.contiguousFourHourCandles ?? history.fourHourCandles),
+    dailyGapCount: historyCount(history.dailyGapCount),
+    fourHourGapCount: historyCount(history.fourHourGapCount),
+    signalWindowMissingIntervals: historyCount(history.signalWindowMissingIntervals),
+    signalWindowConfirmedZeroTradeIntervals: historyCount(history.signalWindowConfirmedZeroTradeIntervals),
+    signalWindowStatus: typeof history.signalWindowStatus === "string" ? history.signalWindowStatus.slice(0, 60) : "UNKNOWN",
+    indicatorFourHourHistoryMode: typeof history.indicatorFourHourHistoryMode === "string"
+      ? history.indicatorFourHourHistoryMode.slice(0, 60) : "UNKNOWN"
+  };
   const requestedModel = typeof env.OPENAI_MODEL === "string"
     ? env.OPENAI_MODEL.trim() : env.OPENAI_MODEL === undefined ? "gpt-6.2-astra" : "";
   if (!isCanonicalCoinSpotIso(now) || !["BTC", "ETH"].includes(market?.coin) ||
@@ -1173,6 +1198,7 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
       signal.strategy !== "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" ||
       signal.execution?.orderIntent !== "NONE" || signal.execution?.paperOnly !== true ||
       signal.execution?.liveTradingEnabled !== false ||
+      historyEvidence.contiguousDailyCandles === null || historyEvidence.contiguousFourHourCandles === null ||
       typeof requestedModel !== "string" || !requestedModel || requestedModel.length > 120) {
     return blocked("AI_REVIEW_INVALID_INPUT", "The candidate, quote freshness, model or provenance clock is invalid; new paper entries fail closed.");
   }
@@ -1185,6 +1211,7 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
     requestedModel,
     pair: market.pair,
     quote: { pair: market.quote.pair, spreadBps: Number(spreadBps.toFixed(2)) },
+    history: historyEvidence,
     signal: {
       strategy: signal.strategy, status: signal.status,
       entryModel: signal.entryModel || signal.triggerModel || null,
@@ -1241,7 +1268,7 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
     const response = await fetch("https://api.openai.com/v1/responses", {
       method:"POST", headers:{Authorization:"Bearer "+env.OPENAI_API_KEY,"Content-Type":"application/json"},
       body:JSON.stringify({model:requestedModel,max_output_tokens:700,
-        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote spread and risk constraints. Do not invent market facts, news or data. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration and data limitations. Your assessment is a qualitative risk review, not a prediction or calibrated probability. Return only the requested JSON."},
+        input:[{role:"system",content:"You are EDGE's conservative crypto paper-trading risk analyst. Review only the supplied deterministic signal, quote spread, history completeness metrics and risk constraints. Do not invent market facts, news or data. Treat source completeness as unverified unless explicitly proven. Do not change any strategy, position size, fee or risk rule. Do not issue buy/sell instructions and do not authorise execution. Identify uncertainty, spread, volatility, concentration, data gaps and source limitations. Your assessment is a qualitative risk review, not a prediction or calibrated probability. Return only the requested JSON."},
           {role:"user",content:"Review this paper-only candidate. This review is advisory and cannot override deterministic strategy/risk controls.\n"+JSON.stringify(packet)}],
         text:{format:{type:"json_schema",name:"edge_coinspot_mtf_risk_review",strict:true,schema}}
       }), redirect:"error", signal:controller.signal
@@ -1311,11 +1338,12 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
         source:"CoinSpot read-only completed-order history and public AUD quote",
         sourceVerification:"NOT_INDEPENDENTLY_VERIFIED",
         pair:market.pair,
+        history:historyEvidence,
         signalAt:signal.signalAt,
         quoteRetrievedAt,
         spreadBps:Number(spreadBps.toFixed(2)),
         fingerprintAlgorithm:"SHA-256",
-        fingerprintScope:"COINSPOT_MTF_SIGNAL_EVIDENCE_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY",
+        fingerprintScope:"COINSPOT_MTF_SIGNAL_HISTORY_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY",
         fingerprint,
         modelFingerprint
       },
