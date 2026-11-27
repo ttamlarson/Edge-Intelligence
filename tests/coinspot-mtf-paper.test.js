@@ -418,3 +418,30 @@ test("open positions cannot be dated after their persisted ledger snapshot",()=>
  delete invalid.openPosition.markStatus;
  assert.throws(()=>validateMtfPaperAccount(invalid),/position failed validation/);
 });
+
+
+test("validates MTF signal idempotency state and prevents re-entry after a closed signal",()=>{
+ const empty=createMtfPaperAccount(now);
+ assert.equal(validateMtfPaperAccount(empty),true);
+ assert.throws(()=>validateMtfPaperAccount({...empty,lastProcessed:{DOGE:now}}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...empty,lastProcessed:{BTC:"not-a-date"}}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...empty,lastProcessed:{BTC:"2026-11-25T08:00:00.001Z"}}),/ledger failed validation/);
+
+ const opened=processMtfPaperAccount(empty,{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ assert.equal(opened.lastProcessed.BTC,opened.openPosition.signalAt);
+ assert.equal(validateMtfPaperAccount(opened),true);
+ assert.throws(()=>validateMtfPaperAccount({...opened,lastProcessed:{}}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...opened,lastProcessed:{BTC:"2026-11-25T04:00:00.001Z"}}),/ledger failed validation/);
+
+ const p=opened.openPosition;
+ const stopped={...candidate("BTC",p.signalAt),quote:{
+  pair:"BTC/AUD",bid:p.stopPrice*.9,ask:p.stopPrice,last:p.stopPrice,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[stopped],now:"2026-11-25T09:00:00.000Z"});
+ assert.equal(closed.openPosition,null);
+ assert.equal(closed.closedTrades.length,1);
+ assert.equal(closed.lastProcessed.BTC,p.signalAt);
+ assert.equal(validateMtfPaperAccount(closed),true);
+});
