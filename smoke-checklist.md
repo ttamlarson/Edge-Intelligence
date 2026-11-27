@@ -263,3 +263,13 @@
 ## CoinSpot MTF KV write-throttle regression
 - [ ] Simulate two consecutive transient 429 responses on the history KV key; confirm bounded exponential backoff with jitter recovers and the history cursor advances only after the validated checkpoint is persisted.
 - [ ] Simulate persistent 429 responses beyond the retry budget; confirm the scan fails closed, new entries and AI review are blocked, and existing history, paper ledger and risk settings are not reset.
+
+
+## CoinSpot MTF stale-cache and backfill-budget regression
+
+- [ ] Confirm a normal paper scan reports a maximum history request budget of 30, with no more than 15 requests per AUD market.
+- [ ] Confirm a provider-probe scan applies its reduced history budget and preserves quote/position-management headroom.
+- [ ] Confirm unverified cached daily/four-hour candles remain excluded from signal calculations and remain visible in diagnostics.
+- [ ] Confirm 110 validated daily candles and 210 validated four-hour candles can pass warm-up despite stale unverified cache tails.
+- [ ] Confirm 109 daily candles, fewer than 210 four-hour candles, invalid ledgers, unverified signal-window gaps, and excessive confirmed zero-trade gaps remain blocked.
+- [ ] Confirm the paper ledger remains simulated and `liveTradingEnabled` remains `false`.
