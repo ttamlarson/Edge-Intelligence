@@ -138,7 +138,7 @@ test("CoinSpot MTF paper runner backfills after a validated provider probe and c
   assert.equal(result.cashAud,100);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.paperOnly,true);
-  assert.equal(result.historyRequestBudgetThisScan,30);
+  assert.equal(result.historyRequestBudgetThisScan,36);
   assert.equal(result.providerProbeBudgetGuardApplied,false);
   assert.equal(result.historyRequestsThisScan,4);
   assert.equal(result.markets.length,2);
