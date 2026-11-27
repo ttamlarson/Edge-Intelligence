@@ -41,14 +41,20 @@ test("CoinSpot MTF walk-forward reconciles ETH zero-trade gaps and remains ledge
     candle.timestamp.slice(0, 10) === missingDay ? { ...candle, tradeCount: 50 } : candle
   );
   const ethFourHour = fourHourCandles.filter((_, index) => index !== missingIndex);
+  const btcTradesFetchedByDate = Object.fromEntries(dailyCandles.map(candle => [
+    candle.timestamp.slice(0, 10), candle.tradeCount
+  ]));
+  const ethTradesFetchedByDate = Object.fromEntries(ethDaily.map(candle => [
+    candle.timestamp.slice(0, 10), candle.tradeCount
+  ]));
   const state = {
     mode: "COINSPOT_AUD_RESEARCH_ONLY",
     status: "COLLECTING_LIVE_DAY",
     nextDate: "2026-05-01",
     liveTradingEnabled: false,
     markets: {
-      BTC: { dailyCandles, fourHourCandles, tradesFetched: 1000 },
-      ETH: { dailyCandles: ethDaily, fourHourCandles: ethFourHour, tradesFetched: 500 }
+      BTC: { dailyCandles, fourHourCandles, tradesFetched: 1000, tradesFetchedByDate: btcTradesFetchedByDate },
+      ETH: { dailyCandles: ethDaily, fourHourCandles: ethFourHour, tradesFetched: 500, tradesFetchedByDate: ethTradesFetchedByDate }
     }
   };
   let writes = 0;
