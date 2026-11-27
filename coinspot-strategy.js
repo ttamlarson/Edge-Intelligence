@@ -241,7 +241,7 @@ export function walkForwardCoinSpotTrend({
     methodology: "Fixed EMA20/EMA50 trend and RSI 50–68 pullback screen; next-hour-open entries; 1% equity risk budget, 50% allocation ceiling, daily realised-loss pause, 0.1% fee, configured slippage and spread; stop-first hourly OHLC exits with worse-open gap handling; fold-end liquidation.",
     comparison: "Each fold resets the same configured virtual quote-currency capital. The buy-and-hold reference uses a separate 50% starting-capital allocation; it is a benchmark, not a risk-matched strategy.",
     parameterPolicy: "FIXED_RULES_NO_FITTING",
-    startingCapital: 100,
+    startingCapital,
     costs,
     folds,
     summary: {
