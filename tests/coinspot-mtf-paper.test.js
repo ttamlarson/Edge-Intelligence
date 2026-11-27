@@ -78,6 +78,18 @@ test("risk-aware MTF ranking prefers lower executable spread and persists the en
  assert.equal(validateMtfPaperAccount(opened),true);
 });
 
+test("MTF candidate ranking prioritises lower fee-adjusted stop-risk budget use",()=>{
+ const riskLimited=candidate("BTC");
+ const allocationLimited=candidate("ETH");
+ allocationLimited.signal.indicators.atr20=100;
+ allocationLimited.signal.risk.initialStopDistance=250;
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[riskLimited,allocationLimited],now});
+ assert.equal(opened.openPosition.coin,"ETH");
+ assert.ok(opened.lastCandidateRanking[0].riskBudgetUsePct<opened.lastCandidateRanking[1].riskBudgetUsePct);
+ assert.equal(opened.openPosition.candidateRank,1);
+ assert.equal(validateMtfPaperAccount(opened),true);
+});
+
 test("MTF entry risk is capped by remaining daily-loss headroom before minimum-notional sizing",()=>{
  const account=createMtfPaperAccount(now);
  account.cashAud=97.08;
