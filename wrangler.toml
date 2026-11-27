@@ -54,7 +54,7 @@ tag = "v1"
 new_sqlite_classes = ["CoinSpotExecutionCoordinator"]
 
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/5 * * * *"]
 
 # Staging uses isolated KV and rate-limit namespaces. Replace all placeholders before `--env staging`.
 [env.staging]
