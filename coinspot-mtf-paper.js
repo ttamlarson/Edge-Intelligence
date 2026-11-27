@@ -54,6 +54,7 @@ export function validateMtfPaperAccount(a) {
     if (!trade || !validCoin(trade.coin) || trade.pair !== trade.coin + "/AUD" ||
         !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
         !validTimestamp(trade.signalAt) || Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
+        Date.parse(trade.openedAt) < Date.parse(trade.signalAt) + FOUR_HOUR_MS ||
         !positiveFinite(trade.entryPrice) || !positiveFinite(trade.exitPrice) ||
         !positiveFinite(trade.quantity) || !nonNegativeFinite(trade.entryFeeAud) ||
         !nonNegativeFinite(trade.exitFeeAud) || !Number.isFinite(trade.pnlAud) ||
