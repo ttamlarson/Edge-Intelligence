@@ -49,4 +49,26 @@ test("uses cumulative ledger realized P&L when the retained trade history reache
   assert.equal(p.rollingWindowsComplete,false);
   assert.equal(p.feesPaidAud,40);
 });
+test("reports descriptive MTF paper-trade feedback by entry model and captured risk/cost metrics",()=>{
+ const account={...base,closedTrades:[
+  {closedAt:"2026-11-26T07:00:00.000Z",pnlAud:2,entryFeeAud:.1,exitFeeAud:.1,
+   entryModel:"DONCHIAN_BREAKOUT",candidateRank:1,spreadBps:10,riskBudgetUsePct:80},
+  {closedAt:"2026-11-26T07:30:00.000Z",pnlAud:-1,entryFeeAud:.1,exitFeeAud:.1,
+   entryModel:"PULLBACK_RECLAIM",candidateRank:1,spreadBps:30,riskBudgetUsePct:95}
+ ]};
+ const p=calculateMtfPaperPerformance(account,now);
+ assert.equal(p.paperTradeFeedback.status,"INSUFFICIENT_SAMPLE");
+ assert.equal(p.paperTradeFeedback.sampleCount,2);
+ assert.equal(p.paperTradeFeedback.sampleBasis,"ALL_RETAINED_CLOSED_TRADES");
+ assert.equal(p.paperTradeFeedback.sampleComplete,true);
+ assert.equal(p.paperTradeFeedback.byEntryModel.length,2);
+ assert.equal(p.paperTradeFeedback.byEntryModel[0].entryModel,"DONCHIAN_BREAKOUT");
+ assert.equal(p.paperTradeFeedback.byEntryModel[0].winRatePct,100);
+ assert.equal(p.paperTradeFeedback.byEntryModel[0].averageEntrySpreadBps,10);
+ assert.equal(p.paperTradeFeedback.byEntryModel[1].entryModel,"PULLBACK_RECLAIM");
+ assert.equal(p.paperTradeFeedback.byEntryModel[1].winRatePct,0);
+ assert.equal(p.paperTradeFeedback.byEntryModel[1].averageRiskBudgetUsePct,95);
+ assert.match(p.paperTradeFeedback.interpretation,/descriptive paper-trade feedback only/i);
+});
+
 test("rejects an invalid calculation clock", () => assert.throws(() => calculateMtfPaperPerformance(base, "not-a-date"), /Invalid performance/));

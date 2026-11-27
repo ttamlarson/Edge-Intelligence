@@ -289,7 +289,7 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   const fetchImpl = async (url, options) => {
     if (new URL(url).hostname === "api.datacedar.com") return provider(now, [])(url, options);
     if (new URL(url).hostname === "api.openai.com") return new Response(JSON.stringify({
-      output_text: JSON.stringify(decision)
+      output_text: JSON.stringify(decision), model: "provider-resolved-asx-model", id: "resp_asx_paper_test"
     }), { status: 200, headers: { "Content-Type": "application/json" } });
     throw new Error("Unexpected provider host.");
   };
@@ -305,6 +305,13 @@ test("ASX autopilot opens only after deterministic screening and a valid AI appr
   assert.equal(opened.ai.predictedWinProbability, 0.62);
   const openPosition = result.portfolio.positions.find(position => position.status === "OPEN_PAPER");
   assert.equal(openPosition.aiReview.reviewId, opened.ai.reviewId);
+  assert.equal(openPosition.aiReview.model, "provider-resolved-asx-model");
+  assert.equal(openPosition.aiReview.reviewPolicyVersion, "ASX_AI_REVIEW_V2");
+  assert.ok(Date.parse(openPosition.aiReview.requestStartedAt) <= Date.parse(openPosition.aiReview.reviewedAt));
+  assert.equal(openPosition.openedAt, openPosition.aiReview.reviewedAt);
+  assert.equal(openPosition.aiReview.inputProvenance.sourceUrl, "https://datacedar.com/markets/australia");
+  assert.equal(openPosition.aiReview.inputProvenance.retrievedAt, new Date(now).toISOString());
+  assert.equal(openPosition.aiReview.inputProvenance.providerRowsForSymbol, 55);
   assert.match(openPosition.aiReview.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
 });
 

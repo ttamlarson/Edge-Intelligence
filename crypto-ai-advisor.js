@@ -4,6 +4,7 @@ import { validateCoinSpotCandles, walkForwardCoinSpotTrend } from "./coinspot-st
 const MAX_RESPONSE_CHARS = 12000;
 const MAX_INPUT_BARS = 5000;
 const MAX_REVIEW_BARS = 50;
+const REVIEW_POLICY_VERSION = "CRYPTO_RESEARCH_REVIEW_V2";
 
 function responseText(payload) {
   if (typeof payload?.output_text === "string") return payload.output_text;
@@ -29,12 +30,12 @@ function validateDecision(value) {
   if (!["ADVANCE_TO_FORWARD_PAPER_REVIEW", "HOLD_FOR_MORE_DATA", "REJECT"].includes(decision) ||
       typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 100 ||
       !["LOW", "MODERATE", "HIGH"].includes(evidenceQuality) ||
-      typeof thesis !== "string" || thesis.length > 1600 ||
-      typeof counterThesis !== "string" || counterThesis.length > 1600 ||
+      typeof thesis !== "string" || thesis.trim().length < 20 || thesis.length > 1600 ||
+      typeof counterThesis !== "string" || counterThesis.trim().length < 20 || counterThesis.length > 1600 ||
       !Array.isArray(riskFlags) || riskFlags.length > 10 ||
-      riskFlags.some(flag => typeof flag !== "string" || flag.length > 300) ||
+      riskFlags.some(flag => typeof flag !== "string" || !flag.trim() || flag.length > 300) ||
       !Array.isArray(limitations) || limitations.length > 10 ||
-      limitations.some(item => typeof item !== "string" || item.length > 300)) {
+      limitations.some(item => typeof item !== "string" || !item.trim() || item.length > 300)) {
     throw new Error("AI research review did not match the required structured schema.");
   }
   return { decision, confidence, evidenceQuality, thesis, counterThesis, riskFlags, limitations };
@@ -56,25 +57,25 @@ const REVIEW_SCHEMA = {
     decision: { type: "string", enum: ["ADVANCE_TO_FORWARD_PAPER_REVIEW", "HOLD_FOR_MORE_DATA", "REJECT"] },
     confidence: { type: "number", minimum: 0, maximum: 100 },
     evidence_quality: { type: "string", enum: ["LOW", "MODERATE", "HIGH"] },
-    thesis: { type: "string", maxLength: 1600 },
-    counter_thesis: { type: "string", maxLength: 1600 },
-    risk_flags: { type: "array", maxItems: 10, items: { type: "string", maxLength: 300 } },
-    limitations: { type: "array", maxItems: 10, items: { type: "string", maxLength: 300 } }
+    thesis: { type: "string", minLength: 20, maxLength: 1600 },
+    counter_thesis: { type: "string", minLength: 20, maxLength: 1600 },
+    risk_flags: { type: "array", maxItems: 10, items: { type: "string", minLength: 1, maxLength: 300 } },
+    limitations: { type: "array", maxItems: 10, items: { type: "string", minLength: 1, maxLength: 300 } }
   },
   required: ["decision", "confidence", "evidence_quality", "thesis", "counter_thesis", "risk_flags", "limitations"]
 };
 
 export async function reviewCryptoWalkForward({
   market, quoteCurrency = "USDT", source, candles, apiKey,
-  model = "gpt-6.2-astra", fetchImpl = fetch, timeoutMs = 15000, now = Date.now()
+  model = "gpt-6.2-astra", fetchImpl = fetch, timeoutMs = 15000, now = Date.now(), clock = () => Date.now()
 } = {}) {
   if (!apiKey) return {
     status: "AI_BLOCKED_NOT_CONFIGURED", advanceAllowed: false, retryable: true,
     reason: "OPENAI_API_KEY is not configured.", liveTradingEnabled: false
   };
-  const clock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
-  if (!Number.isFinite(clock) || !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-      typeof model !== "string" || !model.trim() || model.length > 120 ||
+  const researchClock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
+  if (!Number.isFinite(researchClock) || !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+      typeof model !== "string" || !model.trim() || model.length > 120 || typeof clock !== "function" ||
       !Array.isArray(candles) || candles.length < 300 || candles.length > MAX_INPUT_BARS ||
       typeof source !== "string" || !source.trim() || source.length > 200) {
     return {
@@ -88,7 +89,7 @@ export async function reviewCryptoWalkForward({
   try {
     data = validateCoinSpotCandles(candles);
     research = walkForwardCoinSpotTrend({
-      candles: data, market, quoteCurrency, source, now: clock,
+      candles: data, market, quoteCurrency, source, now: researchClock,
       initialHistoryFraction: 0.6, foldCount: 3, minimumOutOfSampleTrades: 30,
       startingCapital: 100, feeRate: 0.001, slippageBps: 15, spreadBps: 10
     });
@@ -101,9 +102,10 @@ export async function reviewCryptoWalkForward({
   }
 
   const recentCandles = data.slice(-MAX_REVIEW_BARS);
-  let fingerprint, modelFingerprint;
+  let fingerprint;
   try {
     fingerprint = await sha256({
+      reviewPolicyVersion: REVIEW_POLICY_VERSION,
       market: research.market,
       quoteCurrency: research.quoteCurrency,
       source: research.source,
@@ -114,7 +116,6 @@ export async function reviewCryptoWalkForward({
       data: research.data,
       candles: data
     });
-    modelFingerprint = await sha256({ model });
   } catch {
     return {
       status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true,
@@ -125,16 +126,18 @@ export async function reviewCryptoWalkForward({
   const inputProvenance = {
     source: research.source,
     sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
+    sourceType: "USER_SUPPLIED_OR_EXTERNAL_HISTORICAL_OHLCV",
+    dataClass: "HISTORICAL_OHLCV_NOT_REALTIME",
+    reviewPolicyVersion: REVIEW_POLICY_VERSION,
     quoteCurrency: research.quoteCurrency,
     firstBarAt: research.data.firstBarAt,
     latestBarAt: research.data.lastBarAt,
     barsProvided: data.length,
     barsReviewed: recentCandles.length,
     fingerprintAlgorithm: "SHA-256",
-    fingerprintScope: "FULL_VALIDATED_DATASET_AND_FIXED_RESEARCH_ASSUMPTIONS",
+    fingerprintScope: "FULL_VALIDATED_DATASET_FIXED_RESEARCH_ASSUMPTIONS_AND_REVIEW_POLICY",
     fingerprint
   };
-  const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
   const packet = {
     strategy: research.strategy,
     market: research.market,
@@ -160,6 +163,19 @@ export async function reviewCryptoWalkForward({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    let requestClock;
+    try {
+      const clockValue = clock();
+      requestClock = clockValue instanceof Date ? clockValue.getTime() : Number(clockValue);
+    } catch {
+      requestClock = Number.NaN;
+    }
+    if (!Number.isFinite(requestClock)) {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI request-start timestamp is invalid.", liveTradingEnabled: false };
+    }
+    const requestStartedAtMs = Math.max(researchClock, requestClock);
+    const requestStartedAt = new Date(requestStartedAtMs).toISOString();
+    inputProvenance.reviewRequestStartedAt = requestStartedAt;
     const response = await fetchImpl("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
@@ -184,6 +200,10 @@ export async function reviewCryptoWalkForward({
     }
     if (!response.ok) {
       return { status: "AI_BLOCKED_PROVIDER_ERROR", advanceAllowed: false, retryable: true, reason: "OpenAI returned HTTP " + response.status + ".", liveTradingEnabled: false };
+    }
+    const contentLength = Number(response.headers?.get?.("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_CHARS) {
+      return { status: "AI_BLOCKED_RESPONSE_TOO_LARGE", advanceAllowed: false, retryable: true, reason: "AI response exceeded the size limit.", liveTradingEnabled: false };
     }
     const raw = await response.text();
     if (raw.length > MAX_RESPONSE_CHARS) {
@@ -217,6 +237,34 @@ export async function reviewCryptoWalkForward({
         : !deterministicGateMet && decision.decision === "ADVANCE_TO_FORWARD_PAPER_REVIEW"
           ? "AI_HELD_DETERMINISTIC_GATE_NOT_MET"
           : "AI_HELD_RESEARCH_CANDIDATE";
+    const actualModel = typeof payload.model === "string" && payload.model.trim()
+      ? payload.model.trim()
+      : model;
+    if (actualModel.length > 120) {
+      return { status: "AI_BLOCKED_INVALID_RESPONSE", advanceAllowed: false, retryable: true, reason: "OpenAI returned an invalid model identifier.", liveTradingEnabled: false };
+    }
+    let completedAt;
+    try {
+      const completionValue = clock();
+      completedAt = completionValue instanceof Date ? completionValue.getTime() : Number(completionValue);
+    } catch {
+      completedAt = Number.NaN;
+    }
+    if (!Number.isFinite(completedAt) || completedAt < requestStartedAtMs) {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI review completion timestamp is invalid or predates the request.", liveTradingEnabled: false };
+    }
+    let modelFingerprint;
+    try {
+      modelFingerprint = await sha256({
+        requestedModel: model,
+        actualModel,
+        reviewPolicyVersion: REVIEW_POLICY_VERSION
+      });
+    } catch {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI model-version fingerprinting failed.", liveTradingEnabled: false };
+    }
+    const reviewId = "crypto-" + research.market + "-" + research.data.lastBarAt.slice(0, 10) + "-" + modelFingerprint + "-" + fingerprint;
+    const reviewedAt = new Date(completedAt).toISOString();
     return {
       status, advanceAllowed, retryable: false,
       decision: finalDecision, modelDecision: decision.decision,
@@ -227,7 +275,9 @@ export async function reviewCryptoWalkForward({
       reason: advanceAllowed
         ? "The AI review and independent deterministic walk-forward gates support considering extended forward paper observation only; no observation job was started."
         : "No trade or live execution is authorised. The deterministic research gates and AI review remain advisory safeguards.",
-      model, reviewedAt: new Date(clock).toISOString(), reviewId, inputProvenance,
+      model: actualModel, requestedModel: model, reviewPolicyVersion: REVIEW_POLICY_VERSION,
+      requestStartedAt, reviewedAt, providerResponseId: typeof payload.id === "string" && payload.id.length <= 120 ? payload.id : null,
+      reviewId, inputProvenance,
       research: {
         strategy: research.strategy, market: research.market, quoteCurrency: research.quoteCurrency,
         source: research.source, data: research.data, summary: research.summary,

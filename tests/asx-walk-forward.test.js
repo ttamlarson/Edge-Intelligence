@@ -48,6 +48,15 @@ test("ASX walk-forward rejects invalid, unordered, non-AUD and insufficient hist
   assert.throws(() => walkForwardAsxStrategy({ symbol: "BHP", bars: unordered, source: "fixture" }), /unordered/i);
 });
 
+test("ASX walk-forward rejects two timestamps that map to the same Sydney trading session",()=>{
+ const bars=makeBars();
+ bars[11]={...bars[11],timestamp:new Date(Date.parse(bars[10].timestamp)+60*60*1000).toISOString()};
+ assert.ok(Date.parse(bars[11].timestamp)>Date.parse(bars[10].timestamp));
+ assert.throws(()=>walkForwardAsxStrategy({
+  symbol:"BHP",bars,source:"Synthetic test fixture only"
+ }),/duplicate-session/i);
+});
+
 test("ASX walk-forward uses fee-aware next-open sizing and does not relax deterministic controls", () => {
   const bars = makeBars();
   const noFees = walkForwardAsxStrategy({

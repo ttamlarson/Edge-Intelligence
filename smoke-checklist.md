@@ -99,6 +99,12 @@
 - Close an AI-reviewed position through the automated daily-bar stop/target path and confirm the review metadata survives in trade history. Confirm manual closes are excluded from AI calibration diagnostics.
 - Confirm the AI calibration report uses the latest chronological holdout, reports Brier/reliability diagnostics, and remains explicitly uncalibrated / not model-trained.
 - Confirm all paper controls remain authoritative: 1% risk budget, AUD 200 position cap, AUD 100 cash reserve, fees and no live order route.
+- Confirm each new AI review records the DataCedar source URL, retrieval time, exchange, AUD currency, daily timeframe, raw adjustment mode, historical-data classification, symbol set and per-symbol provider row count.
+- Change one provider metadata field or one reviewed OHLC bar and verify the SHA-256 evidence fingerprint changes; confirm the full digest is embedded in and revalidated against the review ID before paper opening.
+- Confirm the requested model alias and provider-returned model ID are stored separately, with provider response ID, review-policy version, request-start time and completion time.
+- Delay the AI response in a test and verify the paper position opening timestamp is at or after review completion, never the request start.
+- Return empty/boilerplate thesis or counter-thesis, invalid source URL, stale retrieval timestamp, missing symbol coverage or insufficient provider row count; confirm the AI reviewer fails closed and does not consume the completed-bar cursor for retryable provider failures.
+- Seed trades with the same model but different review-policy versions; confirm calibration keeps separate chronological cohorts and does not pool the metrics. Legacy reviews remain grouped as unversioned.
 
 
 ## EDGE MTF Donchian breakout candidate
@@ -233,3 +239,13 @@
 
 
 - [ ] Confirm a legacy open-position ledger with no `riskAccountingVersion` is accepted for one-time migration, its retained unrealized loss is restored to `dailyLossAud`, and version 2 is persisted without resetting cash, position or trade history.
+
+
+## Crypto AI review and strategy-comparison audit
+- [ ] Confirm crypto AI reviews store the full validated-dataset SHA-256, source label, explicit unverified-source status, review-policy version, requested model alias, provider-returned model ID and provider response ID.
+- [ ] Confirm request-start and completion timestamps are distinct, chronological and recorded in both the review and its provenance packet; a completion clock earlier than request start must fail closed.
+- [ ] Return blank/boilerplate thesis or counter-thesis text and verify strict structured-output validation rejects it.
+- [ ] Keep the requested model alias constant while returning two different provider model IDs; confirm the review IDs differ and the actual model IDs are displayed separately.
+- [ ] Confirm strategy comparison reports quote-currency netPnlQuote and percentage returnPct independently; missing percentage metrics remain null and are never copied from currency P&L.
+- [ ] Run the crypto walk-forward with two starting-capital values; confirm the 50% buy-and-hold allocation scales proportionally and benchmark returnPct equals net quote P&L divided by starting account capital, not the raw P&L amount.
+- [ ] Confirm the crypto AI review remains advisory only, no model confidence is presented as calibrated probability, and all paper/live safety controls remain unchanged.

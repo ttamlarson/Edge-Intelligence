@@ -10,7 +10,7 @@ function appendRow(rows, strategy, timeframe, sample, assessment, minimumOutOfSa
   const profitFactor = finite(sample.profitFactor);
   const maxDrawdownPct = finite(sample.maxDrawdownPct);
   const winRatePct = finite(sample.winRatePct);
-  const returnPct = netPnlQuote === null ? null : round2(netPnlQuote);
+  const returnPct = finite(sample.returnPct);
   const commonScreen = trades < minimumOutOfSampleTrades
     ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES"
     : netPnlQuote === null || profitFactor === null || maxDrawdownPct === null
@@ -23,7 +23,7 @@ function appendRow(rows, strategy, timeframe, sample, assessment, minimumOutOfSa
     timeframe,
     outOfSampleTrades: trades,
     netPnlQuote,
-    returnPct,
+    returnPct: returnPct === null ? null : round2(returnPct),
     winRatePct,
     profitFactor,
     maxDrawdownPct,

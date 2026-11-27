@@ -76,7 +76,7 @@ export function parseDataCedarBars(payload, symbols, { retrievedAt = new Date().
   };
 }
 
-export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl = fetch, now = new Date() } = {}) {
+export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl = fetch, now = new Date(), clock = () => new Date() } = {}) {
   const tickers = normalizeDataCedarSymbols(symbols);
   const today = now.toISOString().slice(0, 10);
   const defaultFrom = new Date(now.getTime() - 365 * 86_400_000).toISOString().slice(0, 10);
@@ -111,6 +111,9 @@ export async function fetchDataCedarBars({ symbols, from, to, apiKey, fetchImpl 
     if (response.status === 429) throw new Error("DataCedar rate limit reached. Wait before retrying.");
     throw new Error(`DataCedar request failed with HTTP ${response.status}.`);
   }
-  const retrievedAt = new Date().toISOString();
+  const retrievalClock = clock();
+  const retrievalDate = retrievalClock instanceof Date ? retrievalClock : new Date(retrievalClock);
+  if (!Number.isFinite(retrievalDate.getTime())) throw new Error("DataCedar retrieval timestamp is invalid.");
+  const retrievedAt = retrievalDate.toISOString();
   return parseDataCedarBars(payload, tickers, { retrievedAt, from: start, to: end });
 }

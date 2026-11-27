@@ -162,9 +162,13 @@ export function rankAsxCandidates(items) {
   });
 }
 
-export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch } = {}) {
-  const scannedAt = iso(now);
+export async function runAsxAutopilot(env, { now, fetchImpl = fetch, clock } = {}) {
+  const scanClock = now === undefined ? new Date() : now;
+  const scannedAt = iso(scanClock);
   const nowMs = Date.parse(scannedAt);
+  const completionClock = typeof clock === "function"
+    ? clock
+    : now === undefined ? () => Date.now() : () => nowMs;
   if (env?.ASX_AUTOPILOT_ENABLED !== "true") return { status: "DISABLED", scannedAt, liveTradingEnabled: false, message: "Set ASX_AUTOPILOT_ENABLED=true only after confirming DataCedar access and data-use rights." };
   if (!env?.EDGE_KV) return { status: "BLOCKED_STORAGE_NOT_CONFIGURED", scannedAt, liveTradingEnabled: false };
   if (!env?.DATACEDAR_API_KEY) return { status: "BLOCKED_DATACEDAR_KEY_MISSING", scannedAt, liveTradingEnabled: false };
@@ -189,7 +193,7 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
   }
   let data;
   try {
-    data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt) });
+    data = await fetchDataCedarBars({ symbols, apiKey: env.DATACEDAR_API_KEY, fetchImpl, now: new Date(scannedAt), clock: completionClock });
   } catch (error) {
     const lastError = String(error?.message || "DataCedar request failed.").slice(0, 240);
     const failed = {
@@ -267,12 +271,26 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       if (candidate.status === "PAPER_CANDIDATE") {
         const ai = await evaluateAsxAiDecision({
           candidate, bars: completedBars, apiKey: env.OPENAI_API_KEY,
-          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl, now: nowMs
+          sourceMetadata: {
+            source: data.source,
+            sourceUrl: data.sourceUrl,
+            retrievedAt: data.retrievedAt,
+            currency: data.currency,
+            exchange: data.exchange,
+            timeframe: data.timeframe,
+            adjustment: data.adjustment,
+            dataClass: data.dataClass,
+            symbols: data.symbols || symbols,
+            providerRowsForSymbol: data.rowsBySymbol?.[symbol] ?? null
+          },
+          model: env.OPENAI_MODEL || "gpt-6.2-astra", fetchImpl, now: nowMs, clock: completionClock
         });
         const aiSummary = {
           status: ai.status, decision: ai.decision || null, confidence: ai.confidence ?? null,
           predictedWinProbability: ai.predictedWinProbability ?? null, model: ai.model || null,
-          reviewedAt: ai.reviewedAt || null, reviewId: ai.reviewId || null,
+          requestedModel: ai.requestedModel || null, reviewPolicyVersion: ai.reviewPolicyVersion || null,
+          requestStartedAt: ai.requestStartedAt || null, reviewedAt: ai.reviewedAt || null,
+          providerResponseId: ai.providerResponseId || null, reviewId: ai.reviewId || null,
           inputProvenance: ai.inputProvenance || null,
           thesis: ai.thesis || null, counterThesis: ai.counterThesis || null,
           riskFlags: ai.riskFlags || [], reason: ai.reason
@@ -310,13 +328,16 @@ export async function runAsxAutopilot(env, { now = new Date(), fetchImpl = fetch
       aiReview: {
         status: ai.status, decision: ai.decision, confidence: ai.confidence,
         predictedWinProbability: ai.predictedWinProbability, riskFlags: ai.riskFlags,
-        model: ai.model, reviewedAt: ai.reviewedAt, reviewId: ai.reviewId,
-        inputProvenance: ai.inputProvenance
+        model: ai.model, requestedModel: ai.requestedModel,
+        reviewPolicyVersion: ai.reviewPolicyVersion, requestStartedAt: ai.requestStartedAt,
+        reviewedAt: ai.reviewedAt, providerResponseId: ai.providerResponseId,
+        reviewId: ai.reviewId, inputProvenance: ai.inputProvenance
       }
     };
     const opened = openPaperPosition(portfolio, aiReviewedCandidate, {
       id: "asx-auto-" + symbol + "-" + item.observedAt.slice(0, 10),
-      openedAt: ai.reviewedAt || scannedAt, now: nowMs
+      openedAt: ai.reviewedAt || scannedAt,
+      now: Math.max(nowMs, Date.parse(ai.reviewedAt || scannedAt))
     });
     if (opened.accepted) {
       portfolio = opened.portfolio;
