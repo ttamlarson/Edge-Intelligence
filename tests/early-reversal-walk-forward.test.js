@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { walkForwardEarlyReversalShadow } from "../early-reversal-walk-forward.js";
 
 function fixtures() {
-  const dailyCandles = Array.from({ length: 150 }, (_, i) => {
+  const dailyCandles = Array.from({ length: 121 }, (_, i) => {
     const close = 100 + i * 0.2 + Math.sin(i * 0.4) * 0.1;
     return {
       timestamp: new Date(Date.UTC(2026, 0, 1 + i)).toISOString(),
