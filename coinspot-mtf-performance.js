@@ -27,6 +27,36 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
   }, 0));
   const fees = validTrades.reduce((sum, trade) => sum + finite(trade.entryFeeAud) + finite(trade.exitFeeAud), 0);
   const average = values => values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+  const rankedTrades = validTrades.filter(trade =>
+    Number.isInteger(trade.candidateRank) &&
+    ["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(trade.entryModel));
+  const byEntryModel = ["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].map(entryModel => {
+    const group = rankedTrades.filter(trade => trade.entryModel === entryModel);
+    if (!group.length) return null;
+    const outcomes = group.map(trade => Number(trade.pnlAud));
+    const groupWins = outcomes.filter(value => value > 0);
+    const groupLosses = outcomes.filter(value => value < 0);
+    const grossGroupProfit = groupWins.reduce((sum, value) => sum + value, 0);
+    const grossGroupLoss = -groupLosses.reduce((sum, value) => sum + value, 0);
+    const averageMetric = key => average(group
+      .map(trade => trade[key])
+      .filter(value => typeof value === "number" && Number.isFinite(value)));
+    return {
+      entryModel,
+      tradeCount: group.length,
+      netPnlAud: round(outcomes.reduce((sum, value) => sum + value, 0)),
+      winRatePct: round(groupWins.length / group.length * 100),
+      profitFactor: grossGroupLoss > 0 ? round(grossGroupProfit / grossGroupLoss) : null,
+      averageEntrySpreadBps: averageMetric("spreadBps"),
+      averageRiskBudgetUsePct: averageMetric("riskBudgetUsePct")
+    };
+  }).filter(Boolean);
+  const paperTradeFeedback = {
+    status: rankedTrades.length >= 30 ? "DESCRIPTIVE_ONLY" : "INSUFFICIENT_SAMPLE",
+    sampleCount: rankedTrades.length,
+    byEntryModel,
+    interpretation: "Entry-model outcomes and recorded spread/risk usage are descriptive paper-trade feedback only; they do not establish a causal edge, calibrated prediction or profitability."
+  };
   return {
     currency: "AUD",
     startingCapitalAud: round(startingCapital),
