@@ -493,3 +493,44 @@ test("a malformed duplicate BTC market record also invalidates the otherwise val
  assert.deepEqual(result.lastProcessed,{});
  assert.deepEqual(result.lastCandidateRanking,[]);
 });
+
+test("rejects duplicate closed trade signal identities and duplicate trade IDs",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const stop=opened.openPosition.stopPrice;
+ const stopMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[stopMarket],now:"2026-11-25T09:00:00.000Z"});
+ const trade=closed.closedTrades.at(-1);
+ assert.ok(trade);
+ assert.equal(validateMtfPaperAccount(closed),true);
+
+ const duplicateSignal={...closed,closedTrades:[...closed.closedTrades,{...trade,id:trade.id+"-duplicate"}]};
+ assert.throws(()=>validateMtfPaperAccount(duplicateSignal),/ledger failed validation/);
+
+ const duplicateId={...closed,closedTrades:[...closed.closedTrades,{
+  ...trade,signalAt:"2026-11-25T03:00:00.000Z",openedAt:"2026-11-25T08:00:00.000Z"
+ }]};
+ assert.throws(()=>validateMtfPaperAccount(duplicateId),/ledger failed validation/);
+});
+
+test("an open position cannot reuse a four-hour signal already present in closed history",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const stop=opened.openPosition.stopPrice;
+ const stopMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[stopMarket],now:"2026-11-25T09:00:00.000Z"});
+ const trade=closed.closedTrades.at(-1);
+ const minimumLoss=Math.round((Math.max(0,-trade.pnlAud)+Math.max(0,-opened.unrealizedPnlAud)+Number.EPSILON)*100)/100;
+ const reopenedCorruption={
+  ...opened,
+  updatedAt:closed.updatedAt,
+  dailyLossAud:Math.max(opened.dailyLossAud,minimumLoss),
+  closedTrades:[trade]
+ };
+ assert.throws(()=>validateMtfPaperAccount(reopenedCorruption),/ledger failed validation/);
+});
