@@ -257,3 +257,8 @@
 - [ ] Confirm historySyncConsistency reports CONSISTENT_IN_MEMORY_SNAPSHOT when sync and strategy revisions match, and never includes the internal history arrays in the public status payload.
 - [ ] Simulate an invalid/failed history sync and verify new entries and AI review are blocked for that scan while fresh public BTC/AUD and ETH/AUD quotes remain available for existing-position stop and loss management.
 - [ ] Confirm the paper ledger remains paperOnly: true and liveTradingEnabled: false; fees, slippage, position sizing, stops and loss limits remain unchanged.
+
+
+## CoinSpot MTF KV write-throttle regression
+- [ ] Simulate two consecutive transient 429 responses on the history KV key; confirm bounded exponential backoff with jitter recovers and the history cursor advances only after the validated checkpoint is persisted.
+- [ ] Simulate persistent 429 responses beyond the retry budget; confirm the scan fails closed, new entries and AI review are blocked, and existing history, paper ledger and risk settings are not reset.
