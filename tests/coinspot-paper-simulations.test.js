@@ -76,7 +76,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     assert.equal(cautious.status, "AI_REVIEW_COMPLETE");
     assert.equal(cautious.assessment, "CAUTION");
     assert.equal(cautious.advisoryOnly, true);
-    assert.equal(requestBody.text.format.name, "edge_coinspot_signal_review");
+    assert.equal(requestBody.text.format.name, "edge_coinspot_mtf_risk_review");
     assert.match(requestBody.input[0].content, /do not authorise execution/i);
     assert.equal(writes.length, 1);
     assert.equal(requestBody.input[1].content.includes("100000"), false);
@@ -87,7 +87,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     assert.equal(blockedAccount.cashAud, 100);
     assert.equal(blockedAccount.liveTradingEnabled, false);
     assert.equal(blockedAccount.paperOnly, true);
-    const cached = await __test.reviewCoinSpotMtfCandidate(env, candidate);
+    const cached = await __test.reviewCoinSpotMtfCandidate(env, candidate, openedAt);
     assert.equal(cached.assessment, "CAUTION");
     assert.equal(aiCalls, 1);
 
@@ -137,7 +137,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: providerError }]).gates.BTC, "AI_BLOCKED");
 
     globalThis.fetch = async () => new Response(JSON.stringify({ output_text: "not valid JSON" }), { status: 200 });
-    const malformedResponse = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate);
+    const malformedResponse = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate, openedAt);
     assert.equal(malformedResponse.status, "AI_REVIEW_INVALID_DECISION");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: malformedResponse }]).gates.BTC, "AI_BLOCKED");
 
