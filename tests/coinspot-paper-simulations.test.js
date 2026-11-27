@@ -12,6 +12,12 @@ function validCandidate() {
   return {
     coin: "BTC", pair: "BTC/AUD",
     quote: { pair: "BTC/AUD", bid, ask, last: 100050, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000, retrievedAt: openedAt },
+    history: {
+      dailyCandles: 122, fourHourCandles: 420, contiguousDailyCandles: 120, contiguousFourHourCandles: 418,
+      dailyGapCount: 1, fourHourGapCount: 2, signalWindowMissingIntervals: 0,
+      signalWindowConfirmedZeroTradeIntervals: 3, signalWindowStatus: "COMPLETE",
+      indicatorFourHourHistoryMode: "CONTIGUOUS"
+    },
     signal: {
       strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1", status: "BUY_CANDIDATE_PAPER_ONLY",
       signalAt, entryModel: "DONCHIAN_BREAKOUT",
@@ -66,7 +72,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
       aiCalls++; assert.equal(String(url), "https://api.openai.com/v1/responses");
       requestBody = JSON.parse(options.body); return response("CAUTION");
     };
-    const cautious = await __test.reviewCoinSpotMtfCandidate(env, candidate);
+    const cautious = await __test.reviewCoinSpotMtfCandidate(env, candidate, openedAt);
     assert.equal(cautious.status, "AI_REVIEW_COMPLETE");
     assert.equal(cautious.assessment, "CAUTION");
     assert.equal(cautious.advisoryOnly, true);
@@ -91,7 +97,7 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     globalThis.fetch = async (url, options = {}) => {
       aiCalls++; requestBody = JSON.parse(options.body); return response("LOW_CONCERN");
     };
-    const approvedReview = await __test.reviewCoinSpotMtfCandidate(env, changed);
+    const approvedReview = await __test.reviewCoinSpotMtfCandidate(env, changed, openedAt);
     assert.equal(aiCalls, 2, "a changed spread must receive a fresh review");
     assert.equal(__test.isValidCoinSpotMtfAiReview(approvedReview), true);
     const approved = __test.applyCoinSpotMtfAiGate([changed], [{ coin: "BTC", review: approvedReview }]);
@@ -119,20 +125,20 @@ test("new MTF paper entries fail closed without a valid LOW_CONCERN AI review; e
     assert.equal(closed.liveTradingEnabled, false);
     assert.equal(validateMtfPaperAccount(closed), true);
 
-    const notConfigured = await __test.reviewCoinSpotMtfCandidate({ EDGE_KV: kv }, candidate);
+    const notConfigured = await __test.reviewCoinSpotMtfCandidate({ EDGE_KV: kv }, candidate, openedAt);
     assert.equal(notConfigured.status, "AI_REVIEW_NOT_CONFIGURED");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: notConfigured }]).gates.BTC, "AI_BLOCKED");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: { ...approvedReview, assessment: "HIGH_CONCERN" } }]).gates.BTC, "AI_BLOCKED");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: { ...approvedReview, riskFlags: [123] } }]).gates.BTC, "AI_BLOCKED");
 
     globalThis.fetch = async () => new Response("{}", { status: 503 });
-    const providerError = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate);
+    const providerError = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate, openedAt);
     assert.equal(providerError.status, "AI_REVIEW_PROVIDER_ERROR");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: providerError }]).gates.BTC, "AI_BLOCKED");
 
     globalThis.fetch = async () => new Response(JSON.stringify({ output_text: "not valid JSON" }), { status: 200 });
     const malformedResponse = await __test.reviewCoinSpotMtfCandidate({ ...env, EDGE_KV: { get: async () => null, put: async () => {} } }, candidate);
-    assert.equal(malformedResponse.status, "AI_REVIEW_UNAVAILABLE");
+    assert.equal(malformedResponse.status, "AI_REVIEW_INVALID_DECISION");
     assert.equal(__test.applyCoinSpotMtfAiGate([candidate], [{ coin: "BTC", review: malformedResponse }]).gates.BTC, "AI_BLOCKED");
 
     const noSignal = { ...candidate, signal: { ...candidate.signal, status: "NO_TRADE" } };
