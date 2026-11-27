@@ -38,6 +38,14 @@ test("early-reversal walk-forward uses chronological folds and conservative Coin
   assert.equal(result.parameters.maxDailyLossAud, 3);
   assert.equal(result.folds.length, 3);
   assert.ok(result.folds.every(fold => fold.testBars >= 20));
+  assert.ok(result.summary.signalEvaluations > 0);
+  assert.equal(
+    result.summary.noSetupSignals + result.summary.watchSignals + result.summary.candidateSignals +
+    result.summary.otherSignals + result.summary.signalEvaluationErrors,
+    result.summary.signalEvaluations
+  );
+  assert.equal(result.summary.signalEvaluationErrors, 0);
+  assert.ok(Array.isArray(result.summary.topFailedChecks));
   assert.equal(result.execution.orderIntent, "NONE");
   assert.equal(result.execution.paperOnly, true);
   assert.equal(result.execution.shadowOnly, true);
