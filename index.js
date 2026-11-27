@@ -1873,6 +1873,11 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     firstFourHourTimestamp % COINSPOT_INTERVALS.daily !== 0 &&
     firstFourHourTimestamp % COINSPOT_INTERVALS.fourHour === 0;
   const retentionBoundaryExcludedFourHourDays = new Set();
+  if (hasFullFourHourRetentionWindow && firstFourHourDay) {
+    for (const day of validatedDailyDaySet) {
+      if (day < firstFourHourDay) retentionBoundaryExcludedFourHourDays.add(day);
+    }
+  }
   const fourHourByDay = new Map();
   const unverifiedFourHour = new Set();
   const seenFourHourTimestamps = new Set();
@@ -1915,19 +1920,6 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
       continue;
     }
     validatedFourHour.push(...group.candles);
-  }
-
-  // Older daily dates can legitimately precede the bounded four-hour window.
-  // They are visible as retention exclusions only when the four-hour cache is
-  // exactly at its configured cap; otherwise missing 4h history remains a
-  // validation failure.
-  for (const day of validatedDailyDaySet) {
-    if (fourHourByDay.has(day)) continue;
-    if (hasFullFourHourRetentionWindow && firstFourHourDay && day < firstFourHourDay) {
-      retentionBoundaryExcludedFourHourDays.add(day);
-    } else {
-      unverifiedFourHour.add(day);
-    }
   }
 
   const unverifiedDailyDays = unverifiedDaily.size;
