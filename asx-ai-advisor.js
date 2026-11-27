@@ -287,10 +287,10 @@ export async function evaluateAsxAiDecision({
     } catch {
       completedAt = Number.NaN;
     }
-    if (!Number.isFinite(completedAt)) {
-      return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI review completion timestamp is invalid." };
+    if (!Number.isFinite(completedAt) || completedAt < requestStartedAtMs) {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI review completion timestamp is invalid or predates the request." };
     }
-    const reviewedAt = new Date(Math.max(requestStartedAtMs, completedAt)).toISOString();
+    const reviewedAt = new Date(completedAt).toISOString();
     let modelFingerprint;
     try {
       modelFingerprint = await sha256({
