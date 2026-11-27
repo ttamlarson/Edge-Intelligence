@@ -180,6 +180,8 @@ function isMtfEntryCandidate(m, now) {
   const stopDistance = Number(signal?.risk?.initialStopDistance);
   const expectedStopDistance = atr * MTF_PAPER_CONFIG.initialStopAtr;
   const ageAfterSignalClose = scanAt - (signalAt + FOUR_HOUR_MS);
+  const entryModel = signal?.entryModel ||
+    (checks?.pullbackReclaim === true ? "PULLBACK_RECLAIM" : "DONCHIAN_BREAKOUT");
   const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "entryTrigger", "liquidity", "volatility"];
   return validPaperQuote(m, now) &&
     signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
@@ -189,6 +191,8 @@ function isMtfEntryCandidate(m, now) {
     signal?.execution?.liveTradingEnabled === false &&
     requiredChecks.every(key => checks?.[key] === true) &&
     (checks?.breakoutVotes === true || checks?.pullbackReclaim === true) &&
+    ["DONCHIAN_BREAKOUT", "PULLBACK_RECLAIM"].includes(entryModel) &&
+    validTimestamp(signal?.signalAt) &&
     quote &&
     Number.isFinite(atr) && atr > 0 &&
     Number.isFinite(stopDistance) && stopDistance > 0 &&
