@@ -533,6 +533,44 @@ test("CoinSpot MTF evaluates a fresh contiguous tail after an older historical g
  }finally{globalThis.fetch=originalFetch;}
 });
 
+
+test("CoinSpot MTF excludes an incomplete leading UTC day before warming long four-hour EMAs", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const daily=Array.from({length:123},(_,index)=>{
+  const close=100+index*0.5;
+  return {
+   timestamp:new Date(Date.parse("2026-07-27T00:00:00.000Z")+index*86400000).toISOString(),
+   open:close-0.1,high:close+0.3,low:close-0.3,close,volume:1000,tradeCount:6
+  };
+ });
+ const fourHour=Array.from({length:420},(_,index)=>{
+  const close=200+index*0.1+(index===419?2:0);
+  const timestamp=Date.parse("2026-09-18T04:00:00.000Z")+index*4*3600000;
+  return {
+   timestamp:new Date(timestamp).toISOString(),
+   open:close-0.1,high:close+0.3,low:close-0.3,close,volume:100,tradeCount:1
+  };
+ });
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-27",liveTradingEnabled:false,
+  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500}}
+ }));
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-27T04:00:00.000Z");
+  const btc=result.markets.find(m=>m.coin==="BTC");
+  assert.equal(btc.history.indicatorFourHourBoundaryStatus,"PARTIAL_START_DAYS_EXCLUDED");
+  assert.deepEqual(btc.history.indicatorFourHourExcludedStartDays,["2026-09-18"]);
+  assert.equal(btc.history.indicatorFourHourExcludedCandles,5);
+  assert.equal(btc.history.indicatorFourHourCandles,415);
+  assert.equal(btc.history.indicatorFourHourHistoryMode,"FULL_VALIDATED_HISTORY_START_DAYS_EXCLUDED");
+  assert.equal(btc.signalStatus,"BUY_CANDIDATE_PAPER_ONLY");
+  assert.equal(btc.signal.indicators.fourHourActualCandles,415);
+  assert.equal(btc.signal.execution.orderIntent,"NONE");
+  assert.equal(btc.signal.execution.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
 test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker after a recent gap", async () => {
  const kv=kvStore(),originalFetch=globalThis.fetch;
  const daily=Array.from({length:122},(_,index)=>{
