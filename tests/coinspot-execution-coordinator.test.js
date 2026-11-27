@@ -83,7 +83,7 @@ test("paper sync lease serializes global history/ledger writes and only its owne
 });
 
 
-test("paper sync lease remains exclusive beyond the provider retry envelope and expires after 20 minutes", async () => {
+test("paper sync lease remains exclusive beyond the provider retry envelope and expires before the next 20-minute cron boundary", async () => {
   const originalNow = Date.now;
   let now = Date.parse("2026-11-27T10:00:00.000Z");
   Date.now = () => now;
@@ -94,7 +94,7 @@ test("paper sync lease remains exclusive beyond the provider retry envelope and 
     const acquired = await callInternal("/paper-sync/acquire", { leaseId: leaseA });
     assert.equal(acquired.status, 200);
     const lease = await acquired.json();
-    assert.equal(lease.expiresAt, now + 20 * 60 * 1000);
+    assert.equal(lease.expiresAt, now + 19 * 60 * 1000);
 
     // A slow but bounded scan may still be active at the next 15-minute cron
     // interval; another writer must not take its lease.

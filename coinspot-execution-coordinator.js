@@ -6,8 +6,8 @@ const MAX_BODY_BYTES = 8192;
 // The paper runner caps normal history work at 20 logical requests per scan.
 // A provider-probe scan reduces history work to one request per market; even
 // with two bounded 15-second attempts per read-only call, the retry envelope
-// stays below the 20-minute global lease and cannot admit a competing writer.
-const PAPER_SYNC_LEASE_MS = 20 * 60 * 1000;
+// stays below the 19-minute global lease and cannot admit a competing writer.
+const PAPER_SYNC_LEASE_MS = 19 * 60 * 1000;
 function response(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: JSON_HEADERS });
 }
