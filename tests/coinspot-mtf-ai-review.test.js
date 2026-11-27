@@ -87,12 +87,20 @@ test("CoinSpot MTF AI review is strict, versioned, provenance-bound and cached p
   assert.equal(refreshed.inputProvenance.signalAt,first.inputProvenance.signalAt);
   assert.equal(calls,2,"a cache record with mismatched signal provenance must be refreshed");
 
+  kv.values.set(cacheKey,JSON.stringify({
+   ...refreshed,
+   inputProvenance:{...refreshed.inputProvenance,history:{...refreshed.inputProvenance.history,fourHourGapCount:99}}
+  }));
+  const refreshedHistory=await __test.reviewCoinSpotMtfCandidate(env,marketAt(),baseNow);
+  assert.equal(refreshedHistory.inputProvenance.history.fourHourGapCount,2);
+  assert.equal(calls,3,"a cache record with mismatched history evidence must be refreshed");
+
   const nextNow=new Date(Date.parse(baseNow)+60_000).toISOString();
   const nextMarket=marketAt(nextNow);
   nextMarket.signal.signalAt=first.inputProvenance.signalAt;
   const cached=await __test.reviewCoinSpotMtfCandidate(env,nextMarket,nextNow);
   assert.equal(cached.reviewId,first.reviewId);
-  assert.equal(calls,2,"a refreshed quote timestamp with unchanged signal/spread should reuse the same review evidence");
+  assert.equal(calls,3,"a refreshed quote timestamp with unchanged signal/spread should reuse the same review evidence");
 
   const nextModel=await __test.reviewCoinSpotMtfCandidate(
    {...env,OPENAI_MODEL:"test-model-v2"},marketAt(nextNow),nextNow
@@ -100,7 +108,7 @@ test("CoinSpot MTF AI review is strict, versioned, provenance-bound and cached p
   assert.equal(nextModel.status,"AI_REVIEW_COMPLETE");
   assert.equal(nextModel.requestedModel,"test-model-v2");
   assert.notEqual(nextModel.reviewId,first.reviewId);
-  assert.equal(calls,3,"changing the requested model must bypass the previous model's cache");
+  assert.equal(calls,4,"changing the requested model must bypass the previous model's cache");
   assert.equal(__test.isValidCoinSpotMtfAiReview({
    ...first,inputProvenance:{...first.inputProvenance,modelFingerprint:"0".repeat(64)}
   }),false);
