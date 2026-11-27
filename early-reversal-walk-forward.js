@@ -474,6 +474,7 @@ export function walkForwardEarlyReversalShadow({
       noSetupSignals,
       watchSignals,
       candidateSignals,
+      otherSignals: folds.reduce((sum, fold) => sum + fold.otherSignals, 0),
       signalEvaluationErrors,
       topFailedChecks,
       wins,
