@@ -49,8 +49,7 @@ test("shadow engine rejects incomplete, future, misaligned and gapped candle his
   assert.throws(() => evaluateEarlyReversalShadow({
     dailyCandles, fourHourCandles, asOf: asOf - 1
   }), /closed/i);
-  const gap = fourHourCandles.map(c => ({ ...c }));
-  gap[100].timestamp = new Date(Date.parse(gap[100].timestamp) + 4 * 3600000).toISOString();
+  const gap = fourHourCandles.filter((_, index) => index !== 100);
   assert.throws(() => evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles: gap, asOf }), /contiguous/i);
   const malformed = dailyCandles.map(c => ({ ...c }));
   malformed[10].close = 0;
@@ -66,4 +65,35 @@ test("shadow risk references the same conservative ATR stop envelope and never a
   assert.equal(signal.risk.maximumNotionalAllocationPct, 25);
   assert.equal(signal.execution.orderIntent, "NONE");
   assert.equal(signal.execution.eligibleForPaperLedger, false);
+});
+
+
+test("one reconciled zero-trade interval is time-adjusted without fabricating a candle", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const missing = fourHourCandles[100];
+  const gap = fourHourCandles.filter((_, index) => index !== 100);
+  const evidence = [{
+    startAt: missing.timestamp,
+    endAt: new Date(Date.parse(missing.timestamp) + 4 * 3600000).toISOString(),
+    status: "CONFIRMED_NO_TRADES"
+  }];
+  const signal = evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles: gap, confirmedZeroTradeIntervals: evidence,
+    asOf, spreadBps: 10
+  });
+  assert.equal(signal.history.fourHourActualCandles, 239);
+  assert.equal(signal.history.confirmedZeroTradeIntervals, 1);
+  assert.equal(signal.history.fourHourEmaUsesElapsedTime, true);
+  assert.equal(signal.execution.eligibleForPaperLedger, false);
+  assert.equal(signal.execution.orderIntent, "NONE");
+  assert.throws(() => evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles: gap,
+    confirmedZeroTradeIntervals: [{ ...evidence[0], status: "UNVERIFIED_GAP" }],
+    asOf, spreadBps: 10
+  }), /zero-trade gap evidence/i);
+  assert.throws(() => evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles: gap,
+    confirmedZeroTradeIntervals: [{ ...evidence[0], startAt: new Date(Date.parse(evidence[0].startAt) + 4 * 3600000).toISOString() }],
+    asOf, spreadBps: 10
+  }), /contiguous/i);
 });
