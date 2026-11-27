@@ -302,7 +302,7 @@ export async function evaluateAsxAiDecision({
       return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI model-version fingerprinting failed." };
     }
     const reviewId = "asx-" + candidate.symbol + "-" + observedAt.slice(0, 10) + "-" +
-      modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
+      modelFingerprint + "-" + fingerprint;
     return {
       ...decision,
       model: actualModel,
