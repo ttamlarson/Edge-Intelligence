@@ -375,3 +375,12 @@ Updated after local implementation and automated verification on `edge-productio
 - Validation: GitHub Actions branch CI passed on commit `8e3b144c` (deterministic tests, JavaScript syntax, ASX module checks and Pages build). Production deployment verification pending.
 - Production runtime at 2026-11-27 10:15 UTC: backfill advanced through 2026-10-05, with 70/110 validated daily candles for each market; 53 daily and 54 four-hour cached dates remain unverified. The history/strategy snapshot timestamps and cursors match. BTC spread was 20.45 bps; ETH spread was 64.39 bps, above the unchanged 50 bps entry ceiling. The A$100 ledger remained flat with zero positions and zero completed trades.
 
+
+
+## 2026-11-27 — CoinSpot MTF readiness remediation
+
+- Increase the bounded paper-scan history request allowance from 20 to 30 total requests (still capped at 15 per AUD market) to reduce repeated scans on saturated CoinSpot history days.
+- Keep the provider-probe reduced-budget guard intact.
+- Continue excluding cached candles that do not reconcile to the completed-order date ledger, but do not let excluded stale cache tails block signals built solely from validated contiguous candles.
+- Keep the 110 daily / 210 four-hour warm-up, spread ceiling, sizing, daily loss limit, paper-only ledger and live-order lock unchanged.
+- Regression coverage added for sufficient validated history with stale unverified cache tails.
