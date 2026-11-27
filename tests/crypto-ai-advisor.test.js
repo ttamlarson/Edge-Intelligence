@@ -45,11 +45,48 @@ test("crypto AI review is structured, provenance-bound and cannot override deter
   assert.equal(result.liveTradingEnabled, false);
   assert.equal(result.research.summary.assessment, "INSUFFICIENT_OUT_OF_SAMPLE_TRADES");
   assert.match(result.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
-  assert.equal(result.inputProvenance.fingerprintScope, "FULL_VALIDATED_DATASET_AND_FIXED_RESEARCH_ASSUMPTIONS");
-  assert.ok(result.reviewId.endsWith(result.inputProvenance.fingerprint.slice(0, 16)));
+  assert.equal(result.inputProvenance.fingerprintScope, "FULL_VALIDATED_DATASET_FIXED_RESEARCH_ASSUMPTIONS_AND_REVIEW_POLICY");
+  assert.equal(result.inputProvenance.reviewPolicyVersion, "CRYPTO_RESEARCH_REVIEW_V2");
+  assert.equal(result.inputProvenance.sourceType, "USER_SUPPLIED_OR_EXTERNAL_HISTORICAL_OHLCV");
+  assert.equal(result.inputProvenance.dataClass, "HISTORICAL_OHLCV_NOT_REALTIME");
+  assert.ok(result.reviewId.endsWith(result.inputProvenance.fingerprint));
   assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
   assert.equal(result.inputProvenance.barsReviewed, 50);
   assert.doesNotMatch(requestBody.input[1].content, /strategyComparison/);
+});
+
+
+test("crypto AI review records provider model identity and completion chronology", async () => {
+  const startedAt = now + 1000, completedAt = now + 5000;
+  const times = [startedAt, completedAt];
+  const result = await reviewCryptoWalkForward({
+    ...base, apiKey: "test-only", now,
+    clock: () => times.shift(),
+    fetchImpl: async () => new Response(JSON.stringify({
+      model: "provider-resolved-crypto-model-v3", id: "resp_crypto_audit",
+      output_text: JSON.stringify(decision)
+    }), { status: 200, headers: { "Content-Type": "application/json" } })
+  });
+  assert.equal(result.model, "provider-resolved-crypto-model-v3");
+  assert.equal(result.requestedModel, "gpt-6.2-astra");
+  assert.equal(result.reviewPolicyVersion, "CRYPTO_RESEARCH_REVIEW_V2");
+  assert.equal(result.requestStartedAt, new Date(startedAt).toISOString());
+  assert.equal(result.reviewedAt, new Date(completedAt).toISOString());
+  assert.equal(result.inputProvenance.reviewRequestStartedAt, result.requestStartedAt);
+  assert.equal(result.providerResponseId, "resp_crypto_audit");
+});
+
+test("crypto AI review fails closed on a completion clock earlier than request start", async () => {
+  const times = [now + 5000, now + 1000];
+  const result = await reviewCryptoWalkForward({
+    ...base, apiKey: "test-only", now, clock: () => times.shift(),
+    fetchImpl: async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(decision)
+    }), { status: 200, headers: { "Content-Type": "application/json" } })
+  });
+  assert.equal(result.status, "AI_BLOCKED_PROVENANCE_ERROR");
+  assert.equal(result.advanceAllowed, false);
+  assert.equal(result.retryable, true);
 });
 
 test("crypto AI review fails closed when the model key is missing", async () => {
@@ -108,12 +145,14 @@ test("crypto AI provider and schema failures remain retryable and never advance 
 });
 
 test("crypto review identifiers separate model versions while retaining full-data provenance",async()=>{
- const review=async model=>reviewCryptoWalkForward({
-  ...base,apiKey:"test-only",model,
-  fetchImpl:async()=>new Response(JSON.stringify({output_text:JSON.stringify(decision)}),{status:200,headers:{"Content-Type":"application/json"}})
+ const review=async actualModel=>reviewCryptoWalkForward({
+  ...base,apiKey:"test-only",model:"provider-model-alias",
+  fetchImpl:async()=>new Response(JSON.stringify({model:actualModel,id:"resp_"+actualModel,output_text:JSON.stringify(decision)}),{status:200,headers:{"Content-Type":"application/json"}})
  });
- const first=await review("model-a"),second=await review("model-b");
+ const first=await review("provider-model-v1"),second=await review("provider-model-v2");
  assert.equal(first.inputProvenance.fingerprint,second.inputProvenance.fingerprint);
+ assert.equal(first.requestedModel,second.requestedModel);
+ assert.notEqual(first.model,second.model);
  assert.notEqual(first.reviewId,second.reviewId);
- assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint.slice(0,16)));
+ assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint));
 });
