@@ -13,4 +13,8 @@ test("closed MTF trades must not predate the completed four-hour signal close",(
  assert.equal(validateMtfPaperAccount(valid),true,"the exact four-hour close boundary remains valid");
  assert.throws(()=>validateMtfPaperAccount({...valid,closedTrades:[{...trade,openedAt:"2026-11-25T05:59:59.999Z"}]}),/ledger failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...valid,closedTrades:[{...trade,signalAt:"2026-11-25T02:00:00.001Z"}]}),/ledger failed validation/);
+ const staleAccount={...valid,updatedAt:"2026-11-25T16:00:00.000Z"};
+ const maxAgeTrade={...trade,openedAt:"2026-11-25T14:00:00.000Z",closedAt:"2026-11-25T15:00:00.000Z"};
+ assert.equal(validateMtfPaperAccount({...staleAccount,closedTrades:[maxAgeTrade]}),true,"the exact eight-hour post-close freshness boundary remains valid");
+ assert.throws(()=>validateMtfPaperAccount({...staleAccount,closedTrades:[{...maxAgeTrade,openedAt:"2026-11-25T14:00:00.001Z"}]}),/ledger failed validation/);
 });
