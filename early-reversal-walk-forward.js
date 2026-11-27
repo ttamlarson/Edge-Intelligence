@@ -456,7 +456,9 @@ export function walkForwardEarlyReversalShadow({
   const meanFoldReturnPct = folds.reduce((sum, fold) => sum + fold.returnPct, 0) / folds.length;
   const meanFoldDrawdownPct = folds.reduce((sum, fold) => sum + fold.maxDrawdownPct, 0) / folds.length;
   const positiveFolds = folds.filter(fold => fold.returnPct > 0).length;
-  const assessment = totalTrades < minimumOutOfSampleTrades
+  const assessment = signalEvaluationErrors > 0
+    ? "WALK_FORWARD_EVALUATION_ERRORS"
+    : totalTrades < minimumOutOfSampleTrades
     ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES"
     : meanFoldReturnPct > 0 && positiveFolds >= Math.ceil(foldCount * 2 / 3) &&
       pooledProfitFactor !== null && pooledProfitFactor > 1.2 && meanFoldDrawdownPct < 10
