@@ -1,5 +1,5 @@
-// Durable, per-Access-user CoinSpot execution coordinator.
-// Provides nonce allocation and idempotency only. It never signs or submits orders.
+// Durable CoinSpot coordinator for private paper-sync leases and per-Access-user
+// execution idempotency. It never signs or submits orders.
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 const MAX_KEY_LENGTH = 128;
 const MAX_BODY_BYTES = 8192;
@@ -33,12 +33,44 @@ export class CoinSpotExecutionCoordinator {
 
   async fetch(request) {
     if (request.method !== "POST") return response({ error: "Method not allowed." }, 405);
+    const url = new URL(request.url);
+
+    // Internal Worker-to-DO lease used to serialize MTF history and paper-ledger
+    // writes across scheduled and HTTP invocations. The DO is not exposed by a
+    // public route; the existing execution-coordination routes remain token-gated.
+    if (url.pathname === "/paper-sync/acquire" || url.pathname === "/paper-sync/release") {
+      let input;
+      try { input = await readBoundedJson(request); }
+      catch (error) { return response({ error: error.message === "too_large" ? "Request too large." : "Invalid JSON." }, error.message === "too_large" ? 413 : 400); }
+      const leaseId = String(input?.leaseId || "");
+      if (!/^[a-f0-9-]{36}$/i.test(leaseId)) return response({ error: "Invalid paper sync lease ID." }, 400);
+      const key = "coinspot:paper-sync:lease";
+      if (url.pathname === "/paper-sync/acquire") {
+        const result = await this.ctx.storage.transaction(async txn => {
+          const current = await txn.get(key);
+          const now = Date.now();
+          if (current && Number(current.expiresAt) > now) return { acquired: false, expiresAt: current.expiresAt };
+          const lease = { leaseId, acquiredAt: now, expiresAt: now + 10 * 60 * 1000 };
+          await txn.put(key, lease);
+          return { acquired: true, expiresAt: lease.expiresAt };
+        });
+        return response(result, result.acquired ? 200 : 409);
+      }
+      const result = await this.ctx.storage.transaction(async txn => {
+        const current = await txn.get(key);
+        if (!current) return { released: false };
+        if (current.leaseId !== leaseId) return { released: false, conflict: true, expiresAt: current.expiresAt };
+        await txn.delete(key);
+        return { released: true };
+      });
+      return response(result, result.conflict ? 409 : 200);
+    }
+
     const expected = String(this.env.EDGE_COORDINATOR_TOKEN || "");
     const supplied = request.headers.get("x-edge-coordinator-token") || "";
     if (!expected || supplied.length !== expected.length ||
         await digest(supplied) !== await digest(expected)) return response({ error: "Forbidden." }, 403);
 
-    const url = new URL(request.url);
     if (url.pathname === "/nonce") {
       const nonce = await this.ctx.storage.transaction(async txn => {
         const previous = await txn.get("coinspot:lastNonce") || 0;

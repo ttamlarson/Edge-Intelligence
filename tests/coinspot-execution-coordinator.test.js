@@ -8,7 +8,8 @@ function makeCoordinator() {
     async transaction(fn) {
       return fn({
         get: async key => data.get(key),
-        put: async (key, value) => data.set(key, structuredClone(value))
+        put: async (key, value) => data.set(key, structuredClone(value)),
+        delete: async key => data.delete(key)
       });
     }
   };
@@ -20,7 +21,12 @@ function makeCoordinator() {
     headers: { "content-type": "application/json", "x-edge-coordinator-token": "unit-test-token" },
     body: JSON.stringify(body)
   }));
-  return { call, coordinator };
+  const callInternal = (path, body = {}) => coordinator.fetch(new Request("https://do.internal" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  }));
+  return { call, callInternal, coordinator };
 }
 
 test("coordinator rejects unauthenticated requests and non-POST methods", async () => {
@@ -49,6 +55,31 @@ test("idempotency reservations replay safely and reject key reuse with changed i
   assert.equal(replay.duplicate, true);
   const conflict = await call("/idempotency/reserve", { key: "order-001", intent: { ...intent, rate: 99000 } });
   assert.equal(conflict.status, 409);
+});
+
+test("paper sync lease serializes global history/ledger writes and only its owner can release", async () => {
+  const { callInternal } = makeCoordinator();
+  const leaseA = "11111111-1111-4111-8111-111111111111";
+  const leaseB = "22222222-2222-4222-8222-222222222222";
+  const first = await callInternal("/paper-sync/acquire", { leaseId: leaseA });
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).acquired, true);
+
+  const blocked = await callInternal("/paper-sync/acquire", { leaseId: leaseB });
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).acquired, false);
+
+  const wrongOwner = await callInternal("/paper-sync/release", { leaseId: leaseB });
+  assert.equal(wrongOwner.status, 409);
+  assert.equal((await wrongOwner.json()).conflict, true);
+
+  const released = await callInternal("/paper-sync/release", { leaseId: leaseA });
+  assert.equal(released.status, 200);
+  assert.equal((await released.json()).released, true);
+
+  const retry = await callInternal("/paper-sync/acquire", { leaseId: leaseB });
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).acquired, true);
 });
 
 test("idempotency state transitions are explicit and terminal conflicts fail closed", async () => {
