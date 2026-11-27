@@ -187,6 +187,18 @@ export async function evaluateAsxAiDecision({
     return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "Candidate or source-bar fingerprinting failed; AI review was not attempted." };
   }
   const observedAt = new Date(Date.parse(candidate.observedAt)).toISOString();
+  let requestStartedAtMs;
+  try {
+    const requestClock = clock();
+    const requestClockMs = requestClock instanceof Date ? requestClock.getTime() : Number(requestClock);
+    requestStartedAtMs = Math.max(reviewClock, requestClockMs);
+  } catch {
+    requestStartedAtMs = Number.NaN;
+  }
+  if (!Number.isFinite(requestStartedAtMs)) {
+    return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI request start timestamp is invalid." };
+  }
+  const requestStartedAt = new Date(requestStartedAtMs).toISOString();
   const inputProvenance = {
     source: candidate.source,
     sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
@@ -198,7 +210,7 @@ export async function evaluateAsxAiDecision({
     adjustment: validated.sourceMetadata.adjustment,
     dataClass: validated.sourceMetadata.dataClass,
     providerRowsForSymbol: validated.sourceMetadata.providerRowsForSymbol,
-    reviewRequestStartedAt: new Date(reviewClock).toISOString(),
+    reviewRequestStartedAt: requestStartedAt,
     currency: "AUD",
     observedAt,
     firstBarAt: validated.bars[0].timestamp,
@@ -278,7 +290,7 @@ export async function evaluateAsxAiDecision({
     if (!Number.isFinite(completedAt)) {
       return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI review completion timestamp is invalid." };
     }
-    const reviewedAt = new Date(Math.max(reviewClock, completedAt)).toISOString();
+    const reviewedAt = new Date(Math.max(requestStartedAtMs, completedAt)).toISOString();
     let modelFingerprint;
     try {
       modelFingerprint = await sha256({
@@ -296,7 +308,7 @@ export async function evaluateAsxAiDecision({
       model: actualModel,
       requestedModel: model,
       reviewPolicyVersion: REVIEW_POLICY_VERSION,
-      requestStartedAt: new Date(reviewClock).toISOString(),
+      requestStartedAt,
       reviewedAt,
       providerResponseId: typeof payload.id === "string" && payload.id.length <= 120 ? payload.id : null,
       reviewId,
