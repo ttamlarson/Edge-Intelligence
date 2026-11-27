@@ -49,7 +49,11 @@ test("CoinSpot MTF paper scan fails closed when the global Durable Object sync l
   __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_EXECUTION_COORDINATOR:coordinator},"2026-11-25T06:00:00.000Z",4),
   error=>error?.code==="COINSPOT_MTF_SYNC_LOCKED"
  );
- assert.equal(kv.values.size,0,"a skipped scan must not change history, paper ledger or status");
+ await assert.rejects(
+  __test.syncCoinSpotMtfHistory({EDGE_KV:kv.binding,COINSPOT_EXECUTION_COORDINATOR:coordinator},"2026-11-25T06:00:00.000Z"),
+  error=>error?.code==="COINSPOT_MTF_SYNC_LOCKED"
+ );
+ assert.equal(kv.values.size,0,"a skipped scan or history sync must not change history, paper ledger or status");
 });
 
 test("CoinSpot MTF sync backfills one UTC day per run using read-only historical orders",async()=>{
