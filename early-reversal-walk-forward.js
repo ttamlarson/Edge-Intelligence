@@ -174,7 +174,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
           .filter(candle => Date.parse(candle.timestamp) + DAY <= signalAsOf)
           .slice(-120);
         const signalHistory = candles.slice(0, signalIndex + 1);
-        if (signalHistory.length === MINIMUM_HISTORY && completedDaily.length >= 60) {
+        if (signalHistory.length >= MINIMUM_HISTORY && completedDaily.length >= 60) {
           let signal = null;
           signalEvaluations++;
           try {
