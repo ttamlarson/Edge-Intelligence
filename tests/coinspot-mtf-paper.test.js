@@ -111,7 +111,7 @@ test("MTF entry risk is capped by remaining daily-loss headroom before minimum-n
  assert.ok(blocked.lastCandidateRanking[0].riskBudgetAud<=0.08);
  assert.ok(blocked.lastCandidateRanking[0].estimatedNetStopLossAud<=blocked.lastCandidateRanking[0].riskBudgetAud+0.01);
  assert.equal(blocked.cashAud,97.08);
- assert.equal(blocked.lastProcessed.BTC,undefined);
+ assert.equal(blocked.lastProcessed.BTC,"2026-11-25T00:00:00.000Z");
  assert.equal(validateMtfPaperAccount(blocked),true);
 });
 
