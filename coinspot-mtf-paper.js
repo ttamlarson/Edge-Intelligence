@@ -111,6 +111,13 @@ export function validateMtfPaperAccount(a) {
       Date.parse(signalAt) <= Date.parse(a.updatedAt)));
   const openPositionSignalConsumed = !a?.openPosition ||
     a.lastProcessed?.[a.openPosition.coin] === a.openPosition.signalAt;
+  const closedTradeSignalsConsumed = Array.isArray(a?.closedTrades) &&
+    a.closedTrades.every(trade => {
+      const processedAt = Date.parse(a.lastProcessed?.[trade?.coin] || "");
+      const tradeSignalAt = Date.parse(trade?.signalAt || "");
+      return Number.isFinite(processedAt) && Number.isFinite(tradeSignalAt) &&
+        processedAt >= tradeSignalAt;
+    });
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       (a.riskAccountingVersion !== undefined && a.riskAccountingVersion !== 2) ||
@@ -123,7 +130,7 @@ export function validateMtfPaperAccount(a) {
       (!legacyRiskAccounting && (!Number.isFinite(minimumDailyLossForLedgerDay) || a.dailyLossAud + 0.02 < minimumDailyLossForLedgerDay)) ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||
-      !validLastProcessed || !openPositionSignalConsumed ||
+      !validLastProcessed || !openPositionSignalConsumed || !closedTradeSignalsConsumed ||
       !validCandidateRanking)
     throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
   if (a.openPosition) {
