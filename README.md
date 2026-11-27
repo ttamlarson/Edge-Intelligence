@@ -270,3 +270,11 @@ The automated paper engine accepts an entry only when both the market and its qu
 The crypto research reviewer now records the requested model alias separately from the provider-returned model ID, provider response ID, review-policy version, request-start time and completion time. Its review ID binds the full validated OHLCV dataset and fixed research assumptions to full SHA-256 digests for the model and policy cohort. User-supplied or external OHLCV remains explicitly unverified; this review is a research critique, not a trade instruction or a calibrated probability. Structured output requires substantive thesis and counter-thesis text, and a backdated completion clock fails closed.
 
 Crypto strategy comparison now keeps quote-currency net P&L separate from percentage return. It uses a strategy's actual out-of-sample returnPct field when supplied and reports null when it is absent; it no longer copies a currency amount into a percentage field. Existing chronological splits, common research screen, fees, slippage and paper-only execution controls are unchanged. No profitability claim or live order route is added. The walk-forward buy-and-hold reference scales its 50% allocation with the configured starting capital and computes return percentage against that full account capital, rather than treating an absolute P&L amount as a percentage.
+
+
+### CoinSpot MTF KV consistency and sync-error safety — 27 November 2026
+
+- The scheduled paper runner now evaluates the exact in-memory history snapshot returned by its successful read-only sync batch. It no longer relies on an immediate second KV read that may observe an older Cloudflare KV edge-cache value.
+- The paper status includes a compact historySyncConsistency diagnostic with the sync/strategy revision timestamps and cursor. The internal history snapshot is never copied into the public status payload.
+- A missing credential, failed/invalid sync, or revision mismatch blocks new entries and AI review for that scan. Current public AUD quotes remain available so an existing simulated position can still be marked and protected by its stop and daily-loss controls.
+- Fee/slippage assumptions, sizing, stops, loss limits and paper-only/live-trading safety flags are unchanged. No real exchange order, withdrawal or transfer is submitted.
