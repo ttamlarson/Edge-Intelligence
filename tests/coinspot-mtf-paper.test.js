@@ -102,6 +102,7 @@ test("MTF entry risk is capped by remaining daily-loss headroom before minimum-n
   signalAt:"2026-11-25T00:00:00.000Z",entryPrice:100000,exitPrice:88000,
   quantity:0.00024,entryFeeAud:0.02,exitFeeAud:0.02,pnlAud:-2.92,reason:"STOP"
  }];
+ account.lastProcessed={BTC:"2026-11-25T00:00:00.000Z"};
  assert.equal(validateMtfPaperAccount(account),true);
  const blocked=processMtfPaperAccount(account,{markets:[candidate()],now:"2026-11-25T08:15:00.000Z"});
  assert.equal(blocked.openPosition,null);
@@ -236,6 +237,7 @@ test("daily loss circuit includes open mark-to-market loss and closes at the lim
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
  a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
+ a.lastProcessed.ETH="2026-11-25T02:00:00.000Z";
  a.dailyLossAud=2.9+Math.max(0,-a.unrealizedPnlAud);
  const p=a.openPosition;
  const bid=p.entryPrice-2000;
@@ -323,7 +325,7 @@ test("reconciles closed-trade P&L to modeled prices and fees and prevents realiz
   signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,
   entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP"};
  const base=createMtfPaperAccount(now);
- const valid={...base,cashAud:97.1,equityAud:97.1,realizedPnlAud:-2.9,dailyLossAud:2.9,closedTrades:[trade]};
+ const valid={...base,cashAud:97.1,equityAud:97.1,realizedPnlAud:-2.9,dailyLossAud:2.9,lastProcessed:{BTC:trade.signalAt},closedTrades:[trade]};
  assert.equal(validateMtfPaperAccount(valid),true);
  assert.throws(()=>validateMtfPaperAccount({...valid,closedTrades:[{...trade,pnlAud:-1}]}),/ledger failed validation/);
  assert.throws(()=>validateMtfPaperAccount({...valid,dailyLossAud:0}),/ledger failed validation/);
@@ -334,8 +336,8 @@ test("rejects closed trades with non-finite P&L or fee accounting before daily-l
  const trade={coin:"BTC",pair:"BTC/AUD",openedAt:"2026-11-25T08:00:00.000Z",closedAt:"2026-11-25T09:00:00.000Z",
   signalAt:"2026-11-25T04:00:00.000Z",entryPrice:100000,exitPrice:99000,quantity:0.001,
   entryFeeAud:0.1,exitFeeAud:0.099,pnlAud:NaN,reason:"TRAILING_STOP"};
- assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[trade]}),/ledger failed validation/);
- assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),closedTrades:[{...trade,pnlAud:-1,exitFeeAud:Infinity}]}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),lastProcessed:{BTC:trade.signalAt},closedTrades:[trade]}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...createMtfPaperAccount(now),lastProcessed:{BTC:trade.signalAt},closedTrades:[{...trade,pnlAud:-1,exitFeeAud:Infinity}]}),/ledger failed validation/);
 });
 
 
