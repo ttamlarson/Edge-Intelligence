@@ -149,7 +149,7 @@ export function calculateAsxAiCalibration(closedTrades, {
       Number.isInteger(provenance.barsProvided) && provenance.barsProvided >= 51 &&
       provenance.barsReviewed === 30 &&
       /^[a-f0-9]{64}$/i.test(fingerprint || "") &&
-      review.reviewId.endsWith(String(fingerprint).slice(0, 16)) &&
+      review.reviewId.endsWith(String(fingerprint)) &&
       Date.parse(provenance.observedAt || "") <= reviewedAt &&
       (review.requestStartedAt === undefined ||
         (Number.isFinite(Date.parse(review.requestStartedAt)) && Date.parse(review.requestStartedAt) <= reviewedAt)) &&
