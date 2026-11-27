@@ -238,9 +238,14 @@ test("existing paper positions remain stop-managed while historical candles are 
   markets:{BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}}
  }));
  kv.values.set("coinspot-mtf-paper-global-v1",JSON.stringify(opened));
- globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:stop*0.95,ask:stop*0.951,last:stop*0.95}}),{status:200,headers:{"Content-Type":"application/json"}});
+ globalThis.fetch=async url=>{
+  const target=String(url);
+  if(target.includes("/pubapi/v2/latest/"))return new Response(JSON.stringify({status:"ok",prices:{bid:stop*0.95,ask:stop*0.951,last:stop*0.95}}),{status:200,headers:{"Content-Type":"application/json"}});
+  if(target.includes("/pubapi/v2/orders/completed/"))return new Response(JSON.stringify({status:"ok",orders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
  try{
-  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding},"2026-11-25T09:00:00.000Z");
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-25T09:00:00.000Z");
   assert.equal(result.openPosition,null);
   assert.equal(result.closedTrades.at(-1).reason,"TRAILING_STOP");
   const btc=result.markets.find(m=>m.coin==="BTC");
@@ -738,9 +743,14 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-11-26",liveTradingEnabled:false,
   markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
- globalThis.fetch=async url=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ globalThis.fetch=async url=>{
+  const target=String(url);
+  if(target.includes("/pubapi/v2/latest/"))return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+  if(target.includes("/pubapi/v2/orders/completed/"))return new Response(JSON.stringify({status:"ok",orders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
  try{
-  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding},"2026-11-26T04:00:00.000Z",1);
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-26T04:00:00.000Z",1);
   const eth=result.markets.find(m=>m.coin==="ETH");
   assert.equal(eth.fourHourCandles,415);
   assert.equal(eth.contiguousFourHourCandles,19);

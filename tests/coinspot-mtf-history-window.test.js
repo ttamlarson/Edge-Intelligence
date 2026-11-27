@@ -80,15 +80,26 @@ async function readPaperSnapshot(gaps) {
   };
   const cache = new Map();
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    status: "ok", prices: { bid: 61400, ask: 61460, last: 61430 }
-  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.includes("/pubapi/v2/latest/")) {
+      return new Response(JSON.stringify({
+        status: "ok", prices: { bid: 61400, ask: 61460, last: 61430 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (target.includes("/pubapi/v2/orders/completed/")) {
+      return new Response(JSON.stringify({ status: "ok", orders: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ status: "ok", buyorders: [], sellorders: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
   try {
     return await __test.runCoinSpotMtfPaper({
       EDGE_KV: {
         get: async key => key === "coinspot-mtf-history-global-v1" ? JSON.stringify(state) : cache.get(key) || null,
         put: async (key, value) => { cache.set(key, value); }
-      }
+      },
+      COINSPOT_READONLY_KEY: "test-key",
+      COINSPOT_READONLY_SECRET: "test-secret"
     }, new Date(NOW), 1);
   } finally {
     globalThis.fetch = previousFetch;
