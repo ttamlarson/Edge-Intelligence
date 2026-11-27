@@ -3,6 +3,7 @@
 const MAX_RESPONSE_CHARS = 12000;
 const MAX_BARS = 30;
 const MIN_BARS = 51;
+const REVIEW_POLICY_VERSION = "ASX_AI_REVIEW_V2";
 const finite = value => typeof value === "number" && Number.isFinite(value) ? value : null;
 
 function responseText(payload) {
@@ -15,7 +16,7 @@ function responseText(payload) {
   return "";
 }
 
-function validateInput(candidate, bars) {
+function validateInput(candidate, bars, sourceMetadata, reviewClock) {
   if (!candidate || candidate.status !== "PAPER_CANDIDATE" || candidate.executable !== false ||
       candidate.simulatedOnly !== true || !/^[A-Z0-9.]{2,12}$/.test(String(candidate.symbol || "")) ||
       candidate.currency !== "AUD" || typeof candidate.source !== "string" || !candidate.source.trim() ||
@@ -55,7 +56,41 @@ function validateInput(candidate, bars) {
   if (observedAt !== previous) {
     return { valid: false, reason: "Candidate observation time does not match the latest supplied source bar." };
   }
-  return { valid: true, bars: clean };
+
+  let sourceUrl;
+  try { sourceUrl = new URL(sourceMetadata?.sourceUrl || ""); } catch { sourceUrl = null; }
+  const retrievedAt = Date.parse(sourceMetadata?.retrievedAt || "");
+  const providerSymbols = sourceMetadata?.symbols;
+  const providerRows = sourceMetadata?.providerRowsForSymbol;
+  if (!sourceMetadata || sourceMetadata.source !== candidate.source ||
+      !sourceUrl || sourceUrl.protocol !== "https:" ||
+      !["datacedar.com", "www.datacedar.com"].includes(sourceUrl.hostname) ||
+      sourceUrl.username || sourceUrl.password || sourceUrl.search || sourceUrl.hash ||
+      !Number.isFinite(retrievedAt) || retrievedAt < previous || retrievedAt > reviewClock + 5 * 60_000 ||
+      sourceMetadata.currency !== "AUD" || sourceMetadata.exchange !== "ASX" ||
+      sourceMetadata.timeframe !== "1d" || sourceMetadata.adjustment !== "raw" ||
+      sourceMetadata.dataClass !== "historical_market_data_not_realtime" ||
+      !Array.isArray(providerSymbols) || !providerSymbols.includes(candidate.symbol) ||
+      !Number.isInteger(providerRows) || providerRows < clean.length) {
+    return { valid: false, reason: "AI review requires validated DataCedar ASX source, retrieval, symbol, timeframe, adjustment and row-count provenance." };
+  }
+
+  return {
+    valid: true,
+    bars: clean,
+    sourceMetadata: {
+      source: candidate.source,
+      sourceUrl: sourceUrl.href,
+      retrievedAt: new Date(retrievedAt).toISOString(),
+      currency: "AUD",
+      exchange: "ASX",
+      timeframe: "1d",
+      adjustment: "raw",
+      dataClass: "historical_market_data_not_realtime",
+      symbols: [...new Set(providerSymbols.map(symbol => String(symbol).toUpperCase()))].sort(),
+      providerRowsForSymbol: providerRows
+    }
+  };
 }
 
 async function sha256(value) {
@@ -81,10 +116,10 @@ function validateDecision(value) {
       typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 100 ||
       typeof predictedWinProbability !== "number" || !Number.isFinite(predictedWinProbability) ||
       predictedWinProbability < 0 || predictedWinProbability > 1 ||
-      typeof thesis !== "string" || thesis.length > 1600 ||
-      typeof counterThesis !== "string" || counterThesis.length > 1600 ||
+      typeof thesis !== "string" || thesis.trim().length < 20 || thesis.length > 1600 ||
+      typeof counterThesis !== "string" || counterThesis.trim().length < 20 || counterThesis.length > 1600 ||
       !Array.isArray(riskFlags) || riskFlags.length > 10 ||
-      riskFlags.some(flag => typeof flag !== "string" || flag.length > 300)) {
+      riskFlags.some(flag => typeof flag !== "string" || !flag.trim() || flag.length > 300)) {
     throw new Error("AI decision did not match the required structured schema.");
   }
   const approved = decision === "APPROVE" && confidence >= 75 && riskFlags.length === 0;
@@ -107,28 +142,31 @@ const DECISION_SCHEMA = {
     decision: { type: "string", enum: ["APPROVE", "REJECT", "REVIEW"] },
     confidence: { type: "number", minimum: 0, maximum: 100 },
     predicted_win_probability: { type: "number", minimum: 0, maximum: 1 },
-    thesis: { type: "string", maxLength: 1600 },
-    counter_thesis: { type: "string", maxLength: 1600 },
+    thesis: { type: "string", minLength: 20, maxLength: 1600 },
+    counter_thesis: { type: "string", minLength: 20, maxLength: 1600 },
     risk_flags: { type: "array", maxItems: 10, items: { type: "string", maxLength: 300 } }
   },
   required: ["decision", "confidence", "predicted_win_probability", "thesis", "counter_thesis", "risk_flags"]
 };
 
 export async function evaluateAsxAiDecision({
-  candidate, bars, apiKey, model = "gpt-6.2-astra", fetchImpl = fetch,
-  timeoutMs = 12000, now = Date.now()
+  candidate, bars, sourceMetadata, apiKey, model = "gpt-6.2-astra", fetchImpl = fetch,
+  timeoutMs = 12000, now = Date.now(), clock = () => Date.now()
 } = {}) {
   if (!apiKey) return { status: "AI_BLOCKED_NOT_CONFIGURED", approved: false, reason: "OPENAI_API_KEY is not configured." };
-  const validated = validateInput(candidate, bars);
-  if (!validated.valid) return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: validated.reason };
   const reviewClock = now instanceof Date ? now.getTime() : Number(now);
   if (!Number.isFinite(reviewClock) || !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-      typeof model !== "string" || !model.trim() || model.length > 120) {
+      typeof model !== "string" || !model.trim() || model.length > 120 || typeof clock !== "function") {
+    return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: "AI review clock, model or timeout configuration is invalid." };
+  }
+  const validated = validateInput(candidate, bars, sourceMetadata, reviewClock);
+  if (!validated.valid) return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: validated.reason };
+  
     return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: "AI review clock, model or timeout configuration is invalid." };
   }
 
   const recentBars = validated.bars.slice(-MAX_BARS);
-  let fingerprint, modelFingerprint;
+  let fingerprint;
   const candidateEvidence = {
     symbol: candidate.symbol, currency: candidate.currency, source: candidate.source,
     observedAt: candidate.observedAt, entryReference: candidate.entryReference,
@@ -142,8 +180,12 @@ export async function evaluateAsxAiDecision({
     deterministicReason: candidate.reason
   };
   try {
-    fingerprint = await sha256({ candidate: candidateEvidence, recentDailyBars: recentBars });
-    modelFingerprint = await sha256({ model });
+    fingerprint = await sha256({
+      policyVersion: REVIEW_POLICY_VERSION,
+      candidate: candidateEvidence,
+      recentDailyBars: recentBars,
+      sourceMetadata: validated.sourceMetadata
+    });
   } catch {
     return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "Candidate or source-bar fingerprinting failed; AI review was not attempted." };
   }
@@ -151,6 +193,15 @@ export async function evaluateAsxAiDecision({
   const inputProvenance = {
     source: candidate.source,
     sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
+    sourceMetadataVersion: 1,
+    sourceUrl: validated.sourceMetadata.sourceUrl,
+    retrievedAt: validated.sourceMetadata.retrievedAt,
+    exchange: validated.sourceMetadata.exchange,
+    timeframe: validated.sourceMetadata.timeframe,
+    adjustment: validated.sourceMetadata.adjustment,
+    dataClass: validated.sourceMetadata.dataClass,
+    providerRowsForSymbol: validated.sourceMetadata.providerRowsForSymbol,
+    reviewRequestStartedAt: new Date(reviewClock).toISOString(),
     currency: "AUD",
     observedAt,
     firstBarAt: validated.bars[0].timestamp,
@@ -160,10 +211,9 @@ export async function evaluateAsxAiDecision({
     volumeBarsAvailable: recentBars.filter(bar => bar.volume !== null).length,
     volumeBarsMissing: recentBars.filter(bar => bar.volume === null).length,
     fingerprintAlgorithm: "SHA-256",
-    fingerprintScope: "DETERMINISTIC_CANDIDATE_AND_REVIEWED_DAILY_BARS",
+    fingerprintScope: "DETERMINISTIC_CANDIDATE_REVIEWED_DAILY_BARS_AND_PROVIDER_METADATA",
     fingerprint
   };
-  const reviewId = "asx-" + candidate.symbol + "-" + observedAt.slice(0, 10) + "-" + modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
   const packet = {
     symbol: candidate.symbol, currency: candidate.currency, source: candidate.source,
     observedAt: candidate.observedAt, entryReference: candidate.entryReference,
@@ -174,7 +224,8 @@ export async function evaluateAsxAiDecision({
     estimatedNetTargetProfitAud: candidate.estimatedNetTargetProfitAud,
     estimatedNetStopLossAud: candidate.estimatedNetStopLossAud,
     rewardRiskAfterCosts: candidate.rewardRiskAfterCosts,
-    deterministicReason: candidate.reason, recentDailyBars: recentBars, inputProvenance
+    deterministicReason: candidate.reason, recentDailyBars: recentBars,
+    sourceMetadata: validated.sourceMetadata, inputProvenance
   };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -202,6 +253,8 @@ export async function evaluateAsxAiDecision({
       return { status: "AI_BLOCKED_PROVIDER_REDIRECT", approved: false, reason: "AI provider redirected to an unexpected host." };
     }
     if (!response.ok) return { status: "AI_BLOCKED_PROVIDER_ERROR", approved: false, reason: "OpenAI returned HTTP " + response.status + "." };
+    const contentLength = Number(response.headers?.get?.("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_CHARS) return { status: "AI_BLOCKED_RESPONSE_TOO_LARGE", approved: false, reason: "AI response exceeded the size limit." };
     const raw = await response.text();
     if (raw.length > MAX_RESPONSE_CHARS) return { status: "AI_BLOCKED_RESPONSE_TOO_LARGE", approved: false, reason: "AI response exceeded the size limit." };
     let payload;
@@ -212,9 +265,45 @@ export async function evaluateAsxAiDecision({
     try { decision = validateDecision(JSON.parse(responseText(payload))); } catch (error) {
       return { status: "AI_BLOCKED_INVALID_DECISION", approved: false, reason: error.message };
     }
+    const actualModel = typeof payload.model === "string" && payload.model.trim()
+      ? payload.model.trim()
+      : model;
+    if (actualModel.length > 120) {
+      return { status: "AI_BLOCKED_INVALID_RESPONSE", approved: false, reason: "OpenAI returned an invalid model identifier." };
+    }
+    let completedAt;
+    try {
+      const completionClock = clock();
+      completedAt = completionClock instanceof Date ? completionClock.getTime() : Number(completionClock);
+    } catch {
+      completedAt = Number.NaN;
+    }
+    if (!Number.isFinite(completedAt)) {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI review completion timestamp is invalid." };
+    }
+    const reviewedAt = new Date(Math.max(reviewClock, completedAt)).toISOString();
+    let modelFingerprint;
+    try {
+      modelFingerprint = await sha256({
+        requestedModel: model,
+        actualModel,
+        policyVersion: REVIEW_POLICY_VERSION
+      });
+    } catch {
+      return { status: "AI_BLOCKED_PROVENANCE_ERROR", approved: false, reason: "AI model-version fingerprinting failed." };
+    }
+    const reviewId = "asx-" + candidate.symbol + "-" + observedAt.slice(0, 10) + "-" +
+      modelFingerprint.slice(0, 8) + "-" + fingerprint.slice(0, 16);
     return {
-      ...decision, model, reviewedAt: new Date(reviewClock).toISOString(),
-      reviewId, inputProvenance
+      ...decision,
+      model: actualModel,
+      requestedModel: model,
+      reviewPolicyVersion: REVIEW_POLICY_VERSION,
+      requestStartedAt: new Date(reviewClock).toISOString(),
+      reviewedAt,
+      providerResponseId: typeof payload.id === "string" && payload.id.length <= 120 ? payload.id : null,
+      reviewId,
+      inputProvenance
     };
   } catch (error) {
     return {
