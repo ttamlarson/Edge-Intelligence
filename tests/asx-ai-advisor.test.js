@@ -16,7 +16,13 @@ const bars = Array.from({ length: 60 }, (_, i) => ({
   open: 40 + i * 0.08, high: 40.5 + i * 0.08, low: 39.8 + i * 0.08,
   close: 40.2 + i * 0.08, volume: 100000 + i
 }));
-const aiResponse = decision => new Response(JSON.stringify({ output_text: JSON.stringify(decision) }), {
+const sourceMetadata = {
+  source: candidate.source, sourceUrl: "https://datacedar.com/markets/australia",
+  retrievedAt: candidate.observedAt, currency: "AUD", exchange: "ASX",
+  timeframe: "1d", adjustment: "raw", dataClass: "historical_market_data_not_realtime",
+  symbols: ["BHP"], providerRowsForSymbol: 60
+};
+const aiResponse = (decision, extra = {}) => new Response(JSON.stringify({ output_text: JSON.stringify(decision), ...extra }), {
   status: 200, headers: { "Content-Type": "application/json" }
 });
 const approve = {
@@ -35,7 +41,7 @@ test("AI advisor fails closed when the OpenAI secret is not configured", async (
 test("AI advisor uses strict structured output and records a SHA-256 source fingerprint", async () => {
   let request;
   const result = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test-only",
+    candidate, bars, sourceMetadata, apiKey: "test-only",
     fetchImpl: async (url, init) => {
       request = { url, init, body: JSON.parse(init.body) };
       return aiResponse(approve);
@@ -58,9 +64,55 @@ test("AI advisor uses strict structured output and records a SHA-256 source fing
   assert.match(result.inputProvenance.fingerprint, /^[a-f0-9]{64}$/);
   assert.equal(result.inputProvenance.barsProvided, 60);
   assert.equal(result.inputProvenance.barsReviewed, 30);
-  assert.equal(result.inputProvenance.fingerprintScope, "DETERMINISTIC_CANDIDATE_AND_REVIEWED_DAILY_BARS");
+  assert.equal(result.inputProvenance.fingerprintScope, "DETERMINISTIC_CANDIDATE_REVIEWED_DAILY_BARS_AND_PROVIDER_METADATA");
+  assert.equal(result.inputProvenance.sourceMetadataVersion, 1);
+  assert.equal(result.inputProvenance.sourceUrl, sourceMetadata.sourceUrl);
+  assert.equal(result.inputProvenance.retrievedAt, sourceMetadata.retrievedAt);
+  assert.equal(result.inputProvenance.providerRowsForSymbol, 60);
   assert.equal(result.inputProvenance.sourceVerification, "NOT_INDEPENDENTLY_VERIFIED");
   assert.equal(result.reviewId.includes(result.inputProvenance.fingerprint.slice(0, 16)), true);
+});
+
+
+test("AI advisor requires source-verified DataCedar metadata and substantive opposing analysis", async () => {
+  let called = false;
+  const invalidMetadata = [
+    { ...sourceMetadata, sourceUrl: "http://datacedar.com/markets/australia" },
+    { ...sourceMetadata, retrievedAt: "2026-11-19T00:00:00.000Z" },
+    { ...sourceMetadata, symbols: ["CBA"] },
+    { ...sourceMetadata, providerRowsForSymbol: 20 }
+  ];
+  for (const metadata of invalidMetadata) {
+    const result = await evaluateAsxAiDecision({
+      candidate, bars, sourceMetadata: metadata, apiKey: "test",
+      fetchImpl: async () => { called = true; return aiResponse(approve); }
+    });
+    assert.equal(result.status, "AI_BLOCKED_INVALID_INPUT");
+    assert.equal(result.approved, false);
+  }
+  const emptyThesis = await evaluateAsxAiDecision({
+    candidate, bars, sourceMetadata, apiKey: "test",
+    fetchImpl: async () => aiResponse({ ...approve, thesis: "   " })
+  });
+  assert.equal(emptyThesis.status, "AI_BLOCKED_INVALID_DECISION");
+  assert.equal(emptyThesis.approved, false);
+  assert.equal(called, false);
+});
+
+test("AI review records provider model identity and completion time rather than backdating review", async () => {
+  const startedAt = Date.parse(candidate.observedAt) + 1000;
+  const completedAt = startedAt + 5000;
+  const result = await evaluateAsxAiDecision({
+    candidate, bars, sourceMetadata, apiKey: "test",
+    model: "requested-model-alias", now: startedAt, clock: () => completedAt,
+    fetchImpl: async () => aiResponse(approve, { model: "provider-resolved-model-v2", id: "resp_asx_audit" })
+  });
+  assert.equal(result.model, "provider-resolved-model-v2");
+  assert.equal(result.requestedModel, "requested-model-alias");
+  assert.equal(result.reviewPolicyVersion, "ASX_AI_REVIEW_V2");
+  assert.equal(result.requestStartedAt, new Date(startedAt).toISOString());
+  assert.equal(result.reviewedAt, new Date(completedAt).toISOString());
+  assert.equal(result.providerResponseId, "resp_asx_audit");
 });
 
 test("AI advisor blocks low confidence, risk flags and non-approval decisions", async () => {
@@ -107,7 +159,7 @@ test("AI advisor rejects invalid provenance before calling the model", async () 
   ];
   for (const invalidCandidate of invalidCandidates) {
     const result = await evaluateAsxAiDecision({
-      candidate: invalidCandidate, bars, apiKey: "test",
+      candidate: invalidCandidate, bars, sourceMetadata, apiKey: "test",
       fetchImpl: async () => { called = true; return aiResponse(approve); }
     });
     assert.equal(result.status, "AI_BLOCKED_INVALID_INPUT");
@@ -121,7 +173,7 @@ test("AI advisor preserves missing provider volume as missing rather than invent
   let requestBody;
   const barsWithoutVolume = bars.map(({ volume, ...bar }) => bar);
   const result = await evaluateAsxAiDecision({
-    candidate, bars: barsWithoutVolume, apiKey: "test",
+    candidate, bars: barsWithoutVolume, sourceMetadata, apiKey: "test",
     fetchImpl: async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return aiResponse(approve);
@@ -158,7 +210,7 @@ test("AI advisor blocks provider errors, redirects and timeouts without approvin
 
 test("ASX review identifiers separate model versions for the same candidate and evidence",async()=>{
  const review=async model=>evaluateAsxAiDecision({
-  candidate,bars,apiKey:"test-only",model,now:Date.parse(candidate.observedAt)+1000,
+  candidate,bars,sourceMetadata,apiKey:"test-only",model,now:Date.parse(candidate.observedAt)+1000,
   fetchImpl:async()=>aiResponse(approve)
  });
  const first=await review("model-a"),second=await review("model-b");
