@@ -107,7 +107,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
 
   const markEquity = bar => {
     const liquidationValue = position
-      ? position.quantity * bar.close * (1 - executionCostBps / 10000) * (1 - CONFIG.feeRate)
+      ? position.quantity * bar.close * (1 - executionCostBps / 10000) * (1 - feeRate)
       : 0;
     const equity = cash + liquidationValue;
     peakEquity = Math.max(peakEquity, equity);
