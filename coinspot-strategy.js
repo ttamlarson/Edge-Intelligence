@@ -162,7 +162,7 @@ export function walkForwardCoinSpotTrend({
   const ticker = String(market || "").toUpperCase();
   const clock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
   if (!/^[A-Z0-9]{2,20}$/.test(ticker) || typeof source !== "string" || !source.trim() || source.length > 200 ||
-      !/^[A-Z]{3,5}$/.test(quoteCurrency) || startingCapital !== 100 ||
+      !/^[A-Z]{3,5}$/.test(quoteCurrency) || !Number.isFinite(startingCapital) || startingCapital <= 0 || startingCapital > 1_000_000 ||
       ![feeRate, slippageBps, spreadBps, initialHistoryFraction].every(Number.isFinite) ||
       feeRate < 0 || slippageBps < 0 || spreadBps < 0 ||
       initialHistoryFraction < 0.5 || initialHistoryFraction > 0.8 ||
