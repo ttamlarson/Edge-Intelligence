@@ -1281,6 +1281,7 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
     const actualModel = typeof payload.model === "string" && payload.model.trim()
       ? payload.model.trim() : requestedModel;
     if (!actualModel || actualModel.length > 120 ||
+        (payload.model !== undefined && (typeof payload.model !== "string" || !payload.model.trim() || payload.model.length > 120)) ||
         (payload.id !== undefined && (typeof payload.id !== "string" || !payload.id || payload.id.length > 120))) {
       return blocked("AI_REVIEW_INVALID_RESPONSE", "The AI provider returned an invalid model or response identifier.");
     }
