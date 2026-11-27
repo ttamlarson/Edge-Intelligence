@@ -1251,7 +1251,8 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
             cachedProvenance?.modelFingerprint === modelFingerprint &&
             cachedProvenance?.signalAt === signal.signalAt &&
             cachedProvenance?.spreadBps === Number(spreadBps.toFixed(2)) &&
-            cachedProvenance?.pair === market.pair) return cachedReview;
+            cachedProvenance?.pair === market.pair &&
+            JSON.stringify(cachedProvenance?.history) === JSON.stringify(historyEvidence)) return cachedReview;
       } catch { /* invalid advisory cache is ignored and refreshed */ }
     }
   }
