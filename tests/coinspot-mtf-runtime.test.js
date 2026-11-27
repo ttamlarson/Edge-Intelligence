@@ -369,8 +369,8 @@ test("CoinSpot legacy integrity marker rebuilds the entire original 120-day wind
   lastProviderProbeAt:"2026-11-25T10:15:00.000Z",
   providerProbe:{markets:[probeMarket("BTC"),probeMarket("ETH")]},
   markets:{
-   BTC:{dailyCandles:[{timestamp:1}],fourHourCandles:[{timestamp:1}],tradesFetched:1642,lastHistoryDate:"2026-08-19"},
-   ETH:{dailyCandles:[{timestamp:1},{timestamp:2},{timestamp:3}],fourHourCandles:Array.from({length:18},(_,i)=>({timestamp:i})),tradesFetched:898,lastHistoryDate:"2026-08-19"}
+   BTC:{dailyCandles:[{timestamp:1}],fourHourCandles:[{timestamp:1}],tradesFetched:1642,tradesFetchedBase:642,tradesFetchedByDate:{"2026-08-19":1000},lastHistoryDate:"2026-08-19"},
+   ETH:{dailyCandles:[{timestamp:1},{timestamp:2},{timestamp:3}],fourHourCandles:Array.from({length:18},(_,i)=>({timestamp:i})),tradesFetched:898,tradesFetchedBase:298,tradesFetchedByDate:{"2026-08-19":600},lastHistoryDate:"2026-08-19"}
   },
   lastBatch:[{coin:"BTC",tradeCount:1642,rawBuyOrders:2769,rawSellOrders:2769},{coin:"ETH",tradeCount:602,rawBuyOrders:844,rawSellOrders:844}],
   liveTradingEnabled:false
@@ -391,9 +391,13 @@ test("CoinSpot legacy integrity marker rebuilds the entire original 120-day wind
   assert.equal(saved.markets.BTC.dailyCandles.length,0);
   assert.equal(saved.markets.BTC.fourHourCandles.length,0);
   assert.equal(saved.markets.BTC.tradesFetched,0);
+  assert.equal(saved.markets.BTC.tradesFetchedBase,0);
+  assert.deepEqual(saved.markets.BTC.tradesFetchedByDate,{"2026-07-28":0});
   assert.equal(saved.markets.ETH.dailyCandles.length,0);
   assert.equal(saved.markets.ETH.fourHourCandles.length,0);
   assert.equal(saved.markets.ETH.tradesFetched,0);
+  assert.equal(saved.markets.ETH.tradesFetchedBase,0);
+  assert.deepEqual(saved.markets.ETH.tradesFetchedByDate,{"2026-07-28":0});
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
@@ -517,6 +521,8 @@ test("CoinSpot MTF evaluates a fresh contiguous tail after an older historical g
   const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-26T04:00:00.000Z");
   const btc=result.markets.find(m=>m.coin==="BTC");
   assert.equal(btc.history.fourHourCandles,420);
+  assert.equal(btc.history.firstCompletedFourHourAt,fourHour[0].timestamp);
+  assert.ok(btc.history.fourHourHistoryCoverageDays>69);
   assert.equal(btc.history.contiguousFourHourCandles,320);
   assert.equal(btc.history.fourHourGapCount,1);
   assert.equal(btc.history.latestFourHourGap.missingIntervals,1);

@@ -4,7 +4,7 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.js";
-import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS } from "./coinspot-history.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS, COINSPOT_FOUR_HOUR_HISTORY_LIMIT } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { evaluateEarlyReversalShadow } from "./early-reversal-shadow.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
@@ -947,6 +947,8 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       dailyCandles: [],
       fourHourCandles: [],
       tradesFetched: 0,
+      tradesFetchedBase: 0,
+      tradesFetchedByDate: {},
       lastHistoryDate: null,
       lastSyncAt: null
     }]));
@@ -1030,7 +1032,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
           },0);
           updatedMarkets[coin]={
             dailyCandles:mergeCoinSpotCandles(previous.dailyCandles,daily,160),
-            fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,420),
+            fourHourCandles:mergeCoinSpotCandles(previous.fourHourCandles,fourHour,COINSPOT_FOUR_HOUR_HISTORY_LIMIT),
             tradesFetched:tradesFetchedBase+trackedTrades,
             tradesFetchedBase,
             tradesFetchedByDate,
@@ -1471,6 +1473,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       storedFourHourCandles: m.history?.storedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
       lastCompletedFourHourAt: m.history?.lastCompletedFourHourAt || null,
+      firstCompletedFourHourAt: m.history?.firstCompletedFourHourAt || null,
+      fourHourHistoryCoverageDays: m.history?.fourHourHistoryCoverageDays ?? 0,
       lastCompletedFourHourClose: m.history?.lastCompletedFourHourClose ?? null,
       shadowSignal: m.shadowSignal || null,
       shadowSignalError: m.shadowSignalError || null,
@@ -1582,6 +1586,10 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       storedFourHourCandles:storedFourHour.length,
       lastCompletedDailyAt:daily.at(-1)?.timestamp||null,
       lastCompletedFourHourAt:fourHour.at(-1)?.timestamp||null,
+      firstCompletedFourHourAt:fourHour[0]?.timestamp||null,
+      fourHourHistoryCoverageDays:fourHour.length
+        ? Math.round(((Date.parse(fourHour.at(-1).timestamp)-Date.parse(fourHour[0].timestamp)+COINSPOT_INTERVALS.fourHour)/86400000)*100)/100
+        : 0,
       tradesFetched:history.tradesFetched||0,
       lastHistoryDate:history.lastHistoryDate||null,
       fourHourGapDiagnostics:[]
@@ -2107,6 +2115,8 @@ export default {
             storedFourHourCandles: market.storedFourHourCandles,
             lastCompletedDailyAt: market.lastCompletedDailyAt,
             lastCompletedFourHourAt: market.lastCompletedFourHourAt,
+            firstCompletedFourHourAt: market.firstCompletedFourHourAt,
+            fourHourHistoryCoverageDays: market.fourHourHistoryCoverageDays,
             lastCompletedFourHourClose: market.lastCompletedFourHourClose,
             entryModel: market.entryModel,
             triggerModel: market.triggerModel,

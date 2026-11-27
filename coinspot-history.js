@@ -3,6 +3,7 @@
 const ALLOWED = new Set(["BTC","ETH"]);
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+export const COINSPOT_FOUR_HOUR_HISTORY_LIMIT = 720;
 const finite = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 export function coinSpotHistoryRangeParams(startMs, endMs, format = "date") {
   if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) || startMs < 0 || endMs <= startMs) {
