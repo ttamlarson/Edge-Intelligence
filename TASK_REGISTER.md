@@ -358,3 +358,10 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Add regression tests for the single-read snapshot handoff, sync-error blocking and protective exits while entry creation is disabled.
 - [x] Keep the A$100 paper ledger, validated BTC/AUD and ETH/AUD inputs, fee/slippage assumptions, position sizing, stops, daily-loss cap and live-trading safety flags unchanged.
 - Validation: awaiting GitHub CI and post-merge Worker/Pages deployment verification. No real CoinSpot order, withdrawal or transfer was submitted.
+
+
+## 2026-11-27 — CoinSpot MTF KV 429 retry resilience
+- [x] Replace the single transient 429 retry with three bounded exponential backoff retries (1.2s, 2.4s and 4.8s plus jitter) while retaining per-isolate write serialization and the minimum per-key write interval.
+- [x] Keep persistent quota failures fail-closed; no history cursor, paper ledger or risk settings are reset and no new entry or AI review is permitted on a sync error.
+- [x] Add regression coverage for repeated transient 429s, serialized writes and persistent quota failures.
+- Production telemetry recorded one KV PUT 429 scan at 2026-11-27 04:30 UTC. Subsequent scans at 07:15, 07:30 and 07:45 UTC completed four-day batches without a sync error. This retry change improves resilience but does not claim Cloudflare's external write quota is eliminated.
