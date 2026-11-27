@@ -279,9 +279,21 @@ async function loadCoinSpotMtfPaper(runNow=false){
   $("mtfPaperClosedTrades").textContent=String(perf.closedTrades??0);
   $("mtfPaperFees").textContent=fmt(perf.feesPaidAud);
   $("mtfPaperWeekPnl").textContent=fmt(perf.rolling7dPnlAud);
-  $("mtfPaperPerformanceNote").textContent=perf.tradeHistoryAtLimit
+  const feedback=perf.paperTradeFeedback||{};
+  const feedbackGroups=(feedback.byEntryModel||[]).map(group=>
+   String(group.entryModel||"").replaceAll("_"," ")+": n="+group.tradeCount+
+   ", win "+Number(group.winRatePct).toFixed(1)+"%, PF "+(group.profitFactor===null?"n/a":Number(group.profitFactor).toFixed(2))+
+   ", spread "+(group.averageEntrySpreadBps===null?"n/a":Number(group.averageEntrySpreadBps).toFixed(1))+
+   " bps, risk use "+(group.averageRiskBudgetUsePct===null?"n/a":Number(group.averageRiskBudgetUsePct).toFixed(1))+"%"
+  ).join(" · ");
+  const feedbackLine=feedback.status
+   ?" Entry-model feedback: "+String(feedback.status).replaceAll("_"," ")+" (n="+Number(feedback.sampleCount||0)+")"+
+    (feedback.sampleComplete?" · all retained ranked closes":" · latest 200 retained closes only; incomplete")+
+    (feedbackGroups?" · "+feedbackGroups:"")
+   :"";
+  $("mtfPaperPerformanceNote").textContent=(perf.tradeHistoryAtLimit
    ?"Trade statistics, fees and rolling P&L use the latest 200 retained closes; rolling windows may be incomplete. Lifetime realised P&L uses cumulative ledger accounting."
-   :"Performance uses all retained closed trades. No synthetic equity-curve points are generated.";
+   :"Performance uses all retained closed trades. No synthetic equity-curve points are generated.")+feedbackLine;
 
   const when=a.lastScanAt?" · Last scan "+formatDateTime(a.lastScanAt,$("auTimezone")?.value||"Australia/Perth"):"";
   $("coinSpotMtfPaperStatus").textContent=String(a.status||"WAITING").replaceAll("_"," ")+when+(a.lastError?" · "+a.lastError:"");
@@ -301,7 +313,11 @@ async function loadCoinSpotMtfPaper(runNow=false){
    const aiStatus=m.aiGateStatus==="AI_APPROVED"?"AI GATE APPROVED · "+aiReviewStatus:
     m.aiGateStatus==="AI_BLOCKED"?"AI GATE BLOCKED · "+aiReviewStatus:
     (m.signalStatus==="BUY_CANDIDATE_PAPER_ONLY"?"AI review pending":"AI review not run · no eligible candidate");
-   return '<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · contiguous '+Number(m.contiguousDailyCandles??m.dailyCandles??0)+' daily / '+Number(m.contiguousFourHourCandles??m.fourHourCandles??0)+' 4h · '+Number(m.tradesFetched||0)+' trades</small><small>4h gaps '+Number(m.fourHourGapCount||0)+' · '+esc(gap)+'</small><small>'+esc(signalWindow)+'</small><small>'+esc(modelStatus)+(blockers?" · "+esc(blockers):"")+'</small><small>'+esc(metricLine)+'</small><em>'+esc(aiStatus)+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small></article>';
+   const candidateRank=(a.lastCandidateRanking||[]).find(item=>item.coin===m.coin);
+   const rankingLine=candidateRank?"Candidate rank #"+candidateRank.rank+" · "+String(candidateRank.status).replaceAll("_"," ")+" · estimated stop risk "+fmt(candidateRank.estimatedNetStopLossAud)+" / "+fmt(candidateRank.riskBudgetAud)+" AUD · budget use "+Number(candidateRank.riskBudgetUsePct).toFixed(1)+"% · spread "+Number(candidateRank.spreadBps).toFixed(1)+" bps · cost drag "+Number(candidateRank.costDragBps).toFixed(1)+" bps · signal age "+Number(candidateRank.signalAgeMinutes).toFixed(1)+" min · "+candidateRank.reason:"";
+   const provenance=m.aiReview?.inputProvenance;
+   const aiProvenanceLine=provenance?"AI model "+String(m.aiReview.model||"unknown")+" · policy "+String(m.aiReview.reviewPolicyVersion||"unknown")+" · reviewed "+formatDateTime(m.aiReview.reviewedAt,$("auTimezone")?.value||"Australia/Perth")+" · SHA-256 "+String(provenance.fingerprint||"").slice(0,16)+" · source "+String(provenance.sourceVerification||"unknown").replaceAll("_"," "):"";
+   return '<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · contiguous '+Number(m.contiguousDailyCandles??m.dailyCandles??0)+' daily / '+Number(m.contiguousFourHourCandles??m.fourHourCandles??0)+' 4h · '+Number(m.tradesFetched||0)+' trades</small><small>4h gaps '+Number(m.fourHourGapCount||0)+' · '+esc(gap)+'</small><small>'+esc(signalWindow)+'</small><small>'+esc(modelStatus)+(blockers?" · "+esc(blockers):"")+'</small><small>'+esc(metricLine)+'</small>'+ (rankingLine?'<small>'+esc(rankingLine)+'</small>':'') +'<em>'+esc(aiStatus)+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small>'+ (aiProvenanceLine?'<small>'+esc(aiProvenanceLine)+'</small>':'') +'</article>';
   }).join("")||'<div class="empty">Waiting for validated CoinSpot history.</div>';
   $("mtfPaperTrades").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.pair)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+esc(fmt(t.pnlAud))+'</b></div>').join(""):'<div class="empty">No automated paper trades recorded yet.</div>';
  }catch(e){$("coinSpotMtfPaperStatus").textContent="PAPER ENGINE UNAVAILABLE · "+e.message;}
