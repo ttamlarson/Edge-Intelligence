@@ -33,6 +33,7 @@ function buildHistory(gapIndexes = [100]) {
   const tradesFetchedByDate = Object.fromEntries(dailyCandles.map(candle => [
     candle.timestamp.slice(0, 10), candle.tradeCount
   ]));
+  for (const [date, count] of dailyTradeCounts) tradesFetchedByDate[date] = count;
   return { dailyCandles, fourHourCandles, tradesFetchedByDate };
 }
 

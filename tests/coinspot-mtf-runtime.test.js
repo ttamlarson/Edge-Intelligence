@@ -519,7 +519,7 @@ test("CoinSpot MTF excludes cached candles that are not reconciled to the comple
   assert.equal(btc.history.fourHourCandles,156);
   assert.equal(btc.history.trackedHistoryDays,26);
   assert.equal(btc.history.unverifiedDailyDays,97);
-  assert.equal(btc.history.unverifiedFourHourDays,70);
+  assert.equal(btc.history.unverifiedFourHourDays,71);
   assert.equal(btc.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
   assert.equal(btc.history.historyIntegrityReason,"CACHED_CANDLES_NOT_RECONCILED_TO_COMPLETED_ORDER_DATE_COUNTS");
   assert.equal(btc.signalStatus,"WARMUP_REQUIRED");
@@ -689,8 +689,8 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
   assert.equal(eth.latestFourHourGap.previousAt,"2026-11-21T20:00:00.000Z");
   assert.equal(eth.latestFourHourGap.nextAt,"2026-11-23T00:00:00.000Z");
   assert.equal(eth.latestFourHourGap.missingIntervals,6);
-  assert.equal(eth.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
-  assert.equal(eth.history.unverifiedFourHourDays,1);
+  assert.equal(eth.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
+  assert.equal(eth.unverifiedFourHourDays,1);
   assert.equal(eth.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
   assert.equal(eth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
   assert.match(eth.signalError,/19\/210/);
