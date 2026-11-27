@@ -313,7 +313,7 @@ export function walkForwardEarlyReversalShadow({
 } = {}) {
   const ticker = String(market || "").toUpperCase();
   const clock = now instanceof Date ? now.getTime()
-    : typeof now === "string" ? Date.parse(now) : Number(now);
+    : typeof now === "string" ? Date.parse(now) : typeof now === "number" ? now : NaN;
   if (!["BTC/AUD", "ETH/AUD"].includes(ticker) ||
       typeof source !== "string" || !source.trim() || source.length > 120 ||
       !Number.isFinite(clock) || ![spreadBps, feeRate, slippageBps, initialHistoryFraction].every(Number.isFinite) ||
@@ -321,7 +321,7 @@ export function walkForwardEarlyReversalShadow({
       slippageBps < 0 || slippageBps > 500 ||
       initialHistoryFraction < 0.5 || initialHistoryFraction > 0.8 ||
       !Number.isInteger(foldCount) || foldCount < 2 || foldCount > 6 ||
-      !Number.isInteger(minimumOutOfSampleTrades) || minimumOutOfSampleTrades < 1) {
+      !Number.isInteger(minimumOutOfSampleTrades) || minimumOutOfSampleTrades < 1 || minimumOutOfSampleTrades > 10000) {
     throw new Error("Invalid early-reversal walk-forward market, source, cost or fold assumptions.");
   }
 
@@ -455,13 +455,14 @@ export function walkForwardEarlyReversalShadow({
   const pooledProfitFactor = grossLoss > 0 ? round(grossProfit / grossLoss) : null;
   const meanFoldReturnPct = folds.reduce((sum, fold) => sum + fold.returnPct, 0) / folds.length;
   const meanFoldDrawdownPct = folds.reduce((sum, fold) => sum + fold.maxDrawdownPct, 0) / folds.length;
+  const worstFoldDrawdownPct = Math.max(...folds.map(fold => fold.maxDrawdownPct));
   const positiveFolds = folds.filter(fold => fold.returnPct > 0).length;
   const assessment = signalEvaluationErrors > 0
     ? "WALK_FORWARD_EVALUATION_ERRORS"
     : totalTrades < minimumOutOfSampleTrades
     ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES"
     : meanFoldReturnPct > 0 && positiveFolds >= Math.ceil(foldCount * 2 / 3) &&
-      pooledProfitFactor !== null && pooledProfitFactor > 1.2 && meanFoldDrawdownPct < 10
+      pooledProfitFactor !== null && pooledProfitFactor > 1.2 && worstFoldDrawdownPct < 10
       ? "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW"
       : "NOT_PROVEN_PROFITABLE";
 
@@ -485,6 +486,7 @@ export function walkForwardEarlyReversalShadow({
       pooledProfitFactor,
       meanFoldReturnPct: round(meanFoldReturnPct),
       meanFoldMaxDrawdownPct: round(meanFoldDrawdownPct),
+      worstFoldMaxDrawdownPct: round(worstFoldDrawdownPct),
       positiveReturnFolds: positiveFolds,
       foldCount,
       minimumOutOfSampleTrades,
