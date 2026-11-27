@@ -1215,7 +1215,15 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
     if (cached) {
       try {
         const cachedReview = JSON.parse(cached);
-        if (isValidCoinSpotMtfAiReview(cachedReview)) return cachedReview;
+        const cachedProvenance = cachedReview?.inputProvenance;
+        if (isValidCoinSpotMtfAiReview(cachedReview) &&
+            cachedReview.requestedModel === requestedModel &&
+            cachedReview.reviewPolicyVersion === COINSPOT_MTF_AI_REVIEW_POLICY_VERSION &&
+            cachedProvenance?.fingerprint === fingerprint &&
+            cachedProvenance?.modelFingerprint === modelFingerprint &&
+            cachedProvenance?.signalAt === signal.signalAt &&
+            cachedProvenance?.spreadBps === Number(spreadBps.toFixed(2)) &&
+            cachedProvenance?.pair === market.pair) return cachedReview;
       } catch { /* invalid advisory cache is ignored and refreshed */ }
     }
   }
