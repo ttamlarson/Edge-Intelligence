@@ -323,8 +323,8 @@ async function loadCoinSpotMtfPaper(runNow=false){
    const b=m.shadowBacktest||{},s=b.summary||{},h=b.history||{},costs=b.costs||{};
    const status=String(b.status||m.shadowBacktestError||"WAITING_FOR_FIRST_EVALUATION").replaceAll("_"," ");
    const trades=Number(s.totalOutOfSampleTrades)||0;
-   const fmtPct=value=>Number.isFinite(Number(value))?Number(value).toFixed(2)+"%":"—";
-   const fmtScalar=value=>Number.isFinite(Number(value))?Number(value).toFixed(2):"—";
+   const fmtPct=value=>value===null||value===undefined||value===""?"—":Number.isFinite(Number(value))?Number(value).toFixed(2)+"%":"—";
+   const fmtScalar=value=>value===null||value===undefined||value===""?"—":Number.isFinite(Number(value))?Number(value).toFixed(2):"—";
    const resultLine=trades>0
     ?"OOS trades "+trades+" · win "+fmtPct(s.winRatePct)+" · PF "+fmtScalar(s.pooledProfitFactor)+" · mean fold return "+fmtPct(s.meanFoldReturnPct)+" · mean drawdown "+fmtPct(s.meanFoldMaxDrawdownPct)
     :"No out-of-sample trades · insufficient sample · no profitability estimate";
