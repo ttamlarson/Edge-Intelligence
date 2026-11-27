@@ -69,7 +69,7 @@ async function readPaperSnapshot(gaps) {
   const state = {
     mode: "COINSPOT_AUD_RESEARCH_ONLY",
     status: "COLLECTING_LIVE_DAY",
-    nextDate: "2026-11-26",
+    nextDate: "2026-07-27",
     lastSyncAt: NOW,
     lastBatch: [],
     liveTradingEnabled: false,
@@ -140,7 +140,7 @@ test("falls back to the clean 240-bar signal window when older indicator history
 test("persists indicator warm-up diagnostics in the paper snapshot without enabling execution", async () => {
   const snapshot = await readPaperSnapshot([100]);
   const btc = snapshot.markets.find(market => market.pair === "BTC/AUD");
-  assert.equal(btc.signalStatus, "WARMUP_REQUIRED", "new entries remain blocked until validated history is ready");
+  assert.equal(btc.signalStatus, "AI_REVIEW_BLOCKED", "unconfigured AI must fail closed on a validated synthetic candidate");
   assert.equal(btc.signalWindowFourHourCandles, 240);
   assert.equal(btc.indicatorFourHourCandles, 416);
   assert.equal(btc.indicatorFourHourGapCount, 1);
