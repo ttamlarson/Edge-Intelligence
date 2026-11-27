@@ -93,7 +93,11 @@ test("one reconciled zero-trade interval is time-adjusted without fabricating a 
   }), /zero-trade gap evidence/i);
   assert.throws(() => evaluateEarlyReversalShadow({
     dailyCandles, fourHourCandles: gap,
-    confirmedZeroTradeIntervals: [{ ...evidence[0], startAt: new Date(Date.parse(evidence[0].startAt) + 4 * 3600000).toISOString() }],
+    confirmedZeroTradeIntervals: [{
+      startAt: new Date(Date.parse(evidence[0].startAt) + 4 * 3600000).toISOString(),
+      endAt: new Date(Date.parse(evidence[0].endAt) + 4 * 3600000).toISOString(),
+      status: "CONFIRMED_NO_TRADES"
+    }],
     asOf, spreadBps: 10
   }), /contiguous/i);
 });
