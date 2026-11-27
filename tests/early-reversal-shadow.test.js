@@ -101,3 +101,13 @@ test("one reconciled zero-trade interval is time-adjusted without fabricating a 
     asOf, spreadBps: 10
   }), /contiguous/i);
 });
+
+
+test("shadow engine rejects missing OHLCV fields instead of treating null as zero", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const missingVolume = fourHourCandles.map(candle => ({ ...candle }));
+  missingVolume[100].volume = null;
+  assert.throws(() => evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles: missingVolume, asOf, spreadBps: 10
+  }), /invalid/i);
+});
