@@ -129,6 +129,7 @@ export function validateMtfPaperAccount(a) {
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
         !validTimestamp(p.openedAt) || !validTimestamp(p.signalAt) ||
         Date.parse(p.openedAt) < Date.parse(p.signalAt) + FOUR_HOUR_MS ||
+        Date.parse(p.openedAt) > Date.parse(p.signalAt) + FOUR_HOUR_MS + MAX_SIGNAL_AGE_AFTER_CLOSE_MS ||
         (p.lastMarkAt !== undefined && (!validTimestamp(p.lastMarkAt) ||
           Date.parse(p.lastMarkAt) < Date.parse(p.openedAt) || Date.parse(p.lastMarkAt) > Date.parse(a.updatedAt))) ||
         (p.markStatus !== undefined && (!["CURRENT", "UNAVAILABLE", "STALE"].includes(p.markStatus) || !p.lastMarkAt)) ||
