@@ -1478,6 +1478,16 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       spreadBps: m.quote?.spreadBps ?? null, quoteRetrievedAt: m.quote?.retrievedAt || null,
       dailyCandles: m.history?.dailyCandles || 0,
       fourHourCandles: m.history?.fourHourCandles || 0,
+      validatedDailyCandles: m.history?.validatedDailyCandles ?? m.history?.dailyCandles ?? 0,
+      validatedFourHourCandles: m.history?.validatedFourHourCandles ?? m.history?.fourHourCandles ?? 0,
+      trackedHistoryDays: m.history?.trackedHistoryDays ?? 0,
+      validatedDailyDays: m.history?.validatedDailyDays ?? 0,
+      validatedFourHourDays: m.history?.validatedFourHourDays ?? 0,
+      unverifiedDailyDays: m.history?.unverifiedDailyDays ?? 0,
+      unverifiedFourHourDays: m.history?.unverifiedFourHourDays ?? 0,
+      invalidTrackedDateCount: m.history?.invalidTrackedDateCount ?? 0,
+      historyIntegrityStatus: m.history?.historyIntegrityStatus ?? "UNKNOWN",
+      historyIntegrityReason: m.history?.historyIntegrityReason ?? null,
       contiguousDailyCandles: m.history?.contiguousDailyCandles ?? m.history?.dailyCandles ?? 0,
       contiguousFourHourCandles: m.history?.contiguousFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       signalWindowFourHourCandles: m.history?.signalWindowFourHourCandles ?? m.history?.fourHourCandles ?? 0,
@@ -1612,6 +1622,134 @@ function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
   return diagnostics;
 }
 
+function validateCoinSpotMtfMarketHistory(history = {}) {
+  const storedDaily = Array.isArray(history.dailyCandles) ? history.dailyCandles : [];
+  const storedFourHour = Array.isArray(history.fourHourCandles) ? history.fourHourCandles : [];
+  const trackedRaw = history.tradesFetchedByDate;
+  const uniqueDays = candles => new Set(candles.map(candle => {
+    const timestamp = Date.parse(candle?.timestamp || "");
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : "INVALID_TIMESTAMP";
+  }));
+  if (!trackedRaw || typeof trackedRaw !== "object" || Array.isArray(trackedRaw)) {
+    return {
+      dailyCandles: [],
+      fourHourCandles: [],
+      hasDateLedger: false,
+      trackedHistoryDays: 0,
+      validatedDailyDays: 0,
+      validatedFourHourDays: 0,
+      unverifiedDailyDays: uniqueDays(storedDaily).size,
+      unverifiedFourHourDays: uniqueDays(storedFourHour).size,
+      invalidTrackedDateCount: 0,
+      status: "UNVERIFIED_DATE_LEDGER_MISSING",
+      reason: "MISSING_TRADES_FETCHED_BY_DATE"
+    };
+  }
+
+  const trackedCounts = new Map();
+  let invalidTrackedDateCount = 0;
+  for (const [date, count] of Object.entries(trackedRaw)) {
+    const timestamp = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(date + "T00:00:00.000Z") : NaN;
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date ||
+        !Number.isSafeInteger(count) || count < 0) {
+      invalidTrackedDateCount++;
+      continue;
+    }
+    trackedCounts.set(date, count);
+  }
+
+  const dailyByDay = new Map();
+  const unverifiedDaily = new Set();
+  for (const candle of storedDaily) {
+    const timestamp = Date.parse(candle?.timestamp || "");
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== candle.timestamp ||
+        timestamp % COINSPOT_INTERVALS.daily !== 0) {
+      unverifiedDaily.add("INVALID_TIMESTAMP");
+      continue;
+    }
+    const day = new Date(timestamp).toISOString().slice(0, 10);
+    const group = dailyByDay.get(day) || [];
+    group.push(candle);
+    dailyByDay.set(day, group);
+  }
+
+  const validatedDaily = [];
+  for (const [day, candles] of dailyByDay) {
+    const expected = trackedCounts.get(day);
+    const candle = candles[0];
+    if (expected === undefined || expected <= 0 || candles.length !== 1 ||
+        !Number.isSafeInteger(candle?.tradeCount) || candle.tradeCount !== expected) {
+      unverifiedDaily.add(day);
+      continue;
+    }
+    validatedDaily.push(candle);
+  }
+
+  const fourHourByDay = new Map();
+  const unverifiedFourHour = new Set();
+  const seenFourHourTimestamps = new Set();
+  for (const candle of storedFourHour) {
+    const timestamp = Date.parse(candle?.timestamp || "");
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== candle.timestamp ||
+        timestamp % COINSPOT_INTERVALS.fourHour !== 0) {
+      unverifiedFourHour.add("INVALID_TIMESTAMP");
+      continue;
+    }
+    const day = new Date(timestamp).toISOString().slice(0, 10);
+    const group = fourHourByDay.get(day) || { candles: [], count: 0, valid: true };
+    const count = candle?.tradeCount;
+    if (seenFourHourTimestamps.has(timestamp) || !Number.isSafeInteger(count) || count <= 0) {
+      group.valid = false;
+    } else {
+      group.count += count;
+    }
+    seenFourHourTimestamps.add(timestamp);
+    group.candles.push(candle);
+    fourHourByDay.set(day, group);
+  }
+
+  const validatedFourHour = [];
+  for (const [day, group] of fourHourByDay) {
+    const expected = trackedCounts.get(day);
+    if (expected === undefined || expected <= 0 || !group.valid || group.count !== expected) {
+      unverifiedFourHour.add(day);
+      continue;
+    }
+    validatedFourHour.push(...group.candles);
+  }
+
+  const unverifiedDailyDays = unverifiedDaily.size;
+  const unverifiedFourHourDays = unverifiedFourHour.size;
+  const status = invalidTrackedDateCount > 0
+    ? "INVALID_DATE_LEDGER"
+    : unverifiedDailyDays > 0 || unverifiedFourHourDays > 0
+      ? "BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS"
+      : trackedCounts.size > 0
+        ? "VALIDATED"
+        : "BACKFILLING_NO_TRACKED_DAYS";
+  const reason = invalidTrackedDateCount > 0
+    ? "INVALID_TRADE_COUNT_LEDGER_ENTRIES"
+    : unverifiedDailyDays > 0 || unverifiedFourHourDays > 0
+      ? "CACHED_CANDLES_NOT_RECONCILED_TO_COMPLETED_ORDER_DATE_COUNTS"
+      : trackedCounts.size > 0
+        ? "ALL_STORED_CANDLES_RECONCILE_TO_COMPLETED_ORDER_DATE_COUNTS"
+        : "NO_COMPLETED_ORDER_DATES_TRACKED_YET";
+
+  return {
+    dailyCandles: validatedDaily.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)),
+    fourHourCandles: validatedFourHour.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)),
+    hasDateLedger: true,
+    trackedHistoryDays: trackedCounts.size,
+    validatedDailyDays: new Set(validatedDaily.map(candle => candle.timestamp.slice(0, 10))).size,
+    validatedFourHourDays: new Set(validatedFourHour.map(candle => candle.timestamp.slice(0, 10))).size,
+    unverifiedDailyDays,
+    unverifiedFourHourDays,
+    invalidTrackedDateCount,
+    status,
+    reason
+  };
+}
+
 async function getCoinSpotMtfStrategy(env,now=new Date()) {
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
   let state;
@@ -1624,11 +1762,24 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     let quote=null,signal=null,signalError=null,shadowSignal=null,shadowSignalError=null,shadowBacktest=null,shadowBacktestError=null;
     const storedDaily=Array.isArray(history.dailyCandles)?history.dailyCandles:[];
     const storedFourHour=Array.isArray(history.fourHourCandles)?history.fourHourCandles:[];
-    const daily=storedDaily.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
-    const fourHour=storedFourHour.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
+    const provenance=validateCoinSpotMtfMarketHistory(history);
+    const validatedDaily=provenance.dailyCandles;
+    const validatedFourHour=provenance.fourHourCandles;
+    const daily=validatedDaily.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
+    const fourHour=validatedFourHour.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.fourHour<=clock);
     const historySummary={
       dailyCandles:daily.length,
       fourHourCandles:fourHour.length,
+      validatedDailyCandles:validatedDaily.length,
+      validatedFourHourCandles:validatedFourHour.length,
+      trackedHistoryDays:provenance.trackedHistoryDays,
+      validatedDailyDays:provenance.validatedDailyDays,
+      validatedFourHourDays:provenance.validatedFourHourDays,
+      unverifiedDailyDays:provenance.unverifiedDailyDays,
+      unverifiedFourHourDays:provenance.unverifiedFourHourDays,
+      invalidTrackedDateCount:provenance.invalidTrackedDateCount,
+      historyIntegrityStatus:provenance.status,
+      historyIntegrityReason:provenance.reason,
       storedDailyCandles:storedDaily.length,
       storedFourHourCandles:storedFourHour.length,
       lastCompletedDailyAt:daily.at(-1)?.timestamp||null,
@@ -1748,6 +1899,16 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       confirmedSignalWindowGaps.length?"READY_WITH_CONFIRMED_ZERO_TRADE_GAP":"READY_CONTIGUOUS";
 
     const readiness = [];
+    if(!provenance.hasDateLedger){
+      readiness.push("Completed-order date ledger is missing; stored candles are unverified and excluded.");
+    }
+    if(provenance.invalidTrackedDateCount>0){
+      readiness.push("Completed-order date ledger contains "+provenance.invalidTrackedDateCount+" invalid date/count entries.");
+    }
+    if(provenance.unverifiedDailyDays>0||provenance.unverifiedFourHourDays>0){
+      readiness.push("Excluded unverified cached history: "+provenance.unverifiedDailyDays+" daily date(s) and "+
+        provenance.unverifiedFourHourDays+" four-hour date(s) do not reconcile to the completed-order date ledger.");
+    }
     if(dailyContinuity.contiguousCandles<110){
       const gap=dailyContinuity.latestGap?" after gap "+dailyContinuity.latestGap.previousAt+" -> "+dailyContinuity.latestGap.nextAt:"";
       readiness.push("Daily contiguous history "+dailyContinuity.contiguousCandles+"/110 completed candles"+gap);
@@ -2192,6 +2353,16 @@ export default {
             signalStatus: market.signalStatus,
             completedDailyCandles: market.dailyCandles,
             completedFourHourCandles: market.fourHourCandles,
+            validatedDailyCandles: market.validatedDailyCandles,
+            validatedFourHourCandles: market.validatedFourHourCandles,
+            trackedHistoryDays: market.trackedHistoryDays,
+            validatedDailyDays: market.validatedDailyDays,
+            validatedFourHourDays: market.validatedFourHourDays,
+            unverifiedDailyDays: market.unverifiedDailyDays,
+            unverifiedFourHourDays: market.unverifiedFourHourDays,
+            invalidTrackedDateCount: market.invalidTrackedDateCount,
+            historyIntegrityStatus: market.historyIntegrityStatus,
+            historyIntegrityReason: market.historyIntegrityReason,
             signalWindowFourHourCandles: market.signalWindowFourHourCandles,
             indicatorFourHourCandles: market.indicatorFourHourCandles,
             indicatorFourHourHistoryMode: market.indicatorFourHourHistoryMode,

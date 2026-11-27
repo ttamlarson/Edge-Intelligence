@@ -8,6 +8,31 @@ function kvStore() {
  return {values,binding:{get:async key=>values.get(key)??null,put:async(key,value)=>values.set(key,value)}};
 }
 
+function attachTrackedHistory(dailyCandles, fourHourCandles, { dailyOverrides = {}, trackedOverrides = {} } = {}) {
+ const fourHourCounts = new Map();
+ for (const candle of fourHourCandles) {
+  if (!Number.isSafeInteger(candle.tradeCount) || candle.tradeCount <= 0) candle.tradeCount = 1;
+  const day = candle.timestamp.slice(0, 10);
+  fourHourCounts.set(day, (fourHourCounts.get(day) || 0) + candle.tradeCount);
+ }
+ const tracked = {};
+ for (const candle of dailyCandles) {
+  const day = candle.timestamp.slice(0, 10);
+  const count = Object.hasOwn(dailyOverrides, day)
+   ? dailyOverrides[day]
+   : fourHourCounts.has(day)
+    ? fourHourCounts.get(day)
+    : Number.isSafeInteger(candle.tradeCount) && candle.tradeCount > 0 ? candle.tradeCount : 6;
+  candle.tradeCount = count;
+  tracked[day] = Object.hasOwn(trackedOverrides, day) ? trackedOverrides[day] : count;
+ }
+ for (const [day, count] of fourHourCounts) {
+  if (!(day in tracked)) tracked[day] = Object.hasOwn(trackedOverrides, day) ? trackedOverrides[day] : count;
+ }
+ return tracked;
+}
+
+
 test("CoinSpot MTF sync backfills one UTC day per run using read-only historical orders",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
  globalThis.fetch=async(url,options={})=>{
@@ -428,10 +453,11 @@ test("CoinSpot MTF readiness counts only completed candles and exposes stored pa
   timestamp:new Date(Date.parse("2026-10-21T16:00:00.000Z")+i*fourHours).toISOString(),
   open:100,high:101,low:99,close:100,volume:1
  }));
+ const trackedCounts=attachTrackedHistory(daily,fourHourBars);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-25",liveTradingEnabled:false,
   markets:{
-   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:123,lastHistoryDate:"2026-11-25"},
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:123,tradesFetchedByDate:trackedCounts,lastHistoryDate:"2026-11-25"},
    ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}
   }
  }));
@@ -446,6 +472,70 @@ test("CoinSpot MTF readiness counts only completed candles and exposes stored pa
   assert.equal(btc.history.storedFourHourCandles,210);
   assert.equal(btc.history.lastCompletedDailyAt,"2026-11-24T00:00:00.000Z");
   assert.equal(btc.history.lastCompletedFourHourAt,"2026-11-25T08:00:00.000Z");
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("CoinSpot MTF excludes cached candles that are not reconciled to the completed-order date ledger", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const firstDay=Date.parse("2026-07-28T00:00:00.000Z");
+ const daily=Array.from({length:123},(_,index)=>{
+  const timestamp=new Date(firstDay+index*day).toISOString();
+  return {timestamp,open:100,high:101,low:99,close:100,volume:1,tradeCount:6};
+ });
+ const trackedCounts={};
+ const fourHour=[];
+ for(let dayIndex=0;dayIndex<26;dayIndex++){
+  const date=new Date(firstDay+dayIndex*day).toISOString().slice(0,10);
+  trackedCounts[date]=6;
+  for(let slot=0;slot<6;slot++){
+   const timestamp=firstDay+dayIndex*day+slot*fourHours;
+   fourHour.push({timestamp:new Date(timestamp).toISOString(),open:100,high:101,low:99,close:100,volume:1,tradeCount:1});
+  }
+ }
+ const untrackedRecentStart=Date.parse("2026-09-18T04:00:00.000Z");
+ for(let index=0;index<420;index++){
+  const timestamp=untrackedRecentStart+index*fourHours;
+  fourHour.push({timestamp:new Date(timestamp).toISOString(),open:100,high:101,low:99,close:100,volume:1,tradeCount:1});
+ }
+ const state={
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-08-23",liveTradingEnabled:false,
+  markets:{
+   BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:156,tradesFetchedByDate:trackedCounts,lastHistoryDate:"2026-08-22"},
+   ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0,tradesFetchedByDate:{}}
+  }
+ };
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(state));
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-27T06:30:00.000Z");
+  const btc=result.markets.find(market=>market.coin==="BTC");
+  assert.equal(btc.history.storedDailyCandles,123);
+  assert.equal(btc.history.storedFourHourCandles,576);
+  assert.equal(btc.history.validatedDailyCandles,26);
+  assert.equal(btc.history.validatedFourHourCandles,156);
+  assert.equal(btc.history.dailyCandles,26);
+  assert.equal(btc.history.fourHourCandles,156);
+  assert.equal(btc.history.trackedHistoryDays,26);
+  assert.equal(btc.history.unverifiedDailyDays,97);
+  assert.equal(btc.history.unverifiedFourHourDays,70);
+  assert.equal(btc.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
+  assert.equal(btc.history.historyIntegrityReason,"CACHED_CANDLES_NOT_RECONCILED_TO_COMPLETED_ORDER_DATE_COUNTS");
+  assert.equal(btc.signalStatus,"WARMUP_REQUIRED");
+  assert.equal(btc.signal,null);
+  assert.equal(btc.shadowBacktest.status,"INSUFFICIENT_HISTORY");
+
+  const missingLedger=structuredClone(state);
+  delete missingLedger.markets.BTC.tradesFetchedByDate;
+  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(missingLedger));
+  const unverified=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-27T06:30:00.000Z");
+  const blocked=unverified.markets.find(market=>market.coin==="BTC");
+  assert.equal(blocked.history.dailyCandles,0);
+  assert.equal(blocked.history.fourHourCandles,0);
+  assert.equal(blocked.history.historyIntegrityStatus,"UNVERIFIED_DATE_LEDGER_MISSING");
+  assert.equal(blocked.signalStatus,"WARMUP_REQUIRED");
+  assert.equal(blocked.signal,null);
  }finally{globalThis.fetch=originalFetch;}
 });
 
@@ -512,9 +602,10 @@ test("CoinSpot MTF evaluates a fresh contiguous tail after an older historical g
   const timestamp=Date.parse("2026-09-17T00:00:00.000Z")+index*4*3600000+(index>=100?4*3600000:0);
   return {timestamp:new Date(timestamp).toISOString(),open:close-0.1,high:close+0.3,low:close-0.3,close,volume:100};
  });
+ const trackedCounts=attachTrackedHistory(daily,fourHour);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-26",liveTradingEnabled:false,
-  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500}}
+  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
  globalThis.fetch=async url=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
  try{
@@ -551,9 +642,10 @@ test("CoinSpot MTF excludes an incomplete leading UTC day before warming long fo
    open:close-0.1,high:close+0.3,low:close-0.3,close,volume:100,tradeCount:1
   };
  });
+ const trackedCounts=attachTrackedHistory(daily,fourHour);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-27",liveTradingEnabled:false,
-  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500}}
+  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
  globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
  try{
@@ -582,22 +674,26 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
   const timestamp=Date.parse("2026-09-17T00:00:00.000Z")+index*4*3600000+(index>=400?4*3600000:0);
   return {timestamp:new Date(timestamp).toISOString(),open:close-0.1,high:close+0.3,low:close-0.3,close,volume:100};
  });
+ const trackedCounts=attachTrackedHistory(daily,fourHour,{dailyOverrides:{"2026-11-22":6},trackedOverrides:{"2026-11-22":6}});
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-11-26",liveTradingEnabled:false,
-  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500}}
+  markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
  globalThis.fetch=async url=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding},"2026-11-26T04:00:00.000Z",1);
   const eth=result.markets.find(m=>m.coin==="ETH");
-  assert.equal(eth.fourHourCandles,420);
-  assert.equal(eth.contiguousFourHourCandles,20);
+  assert.equal(eth.fourHourCandles,415);
+  assert.equal(eth.contiguousFourHourCandles,19);
   assert.equal(eth.fourHourGapCount,1);
-  assert.equal(eth.latestFourHourGap.previousAt,"2026-11-22T12:00:00.000Z");
-  assert.equal(eth.latestFourHourGap.nextAt,"2026-11-22T20:00:00.000Z");
+  assert.equal(eth.latestFourHourGap.previousAt,"2026-11-21T20:00:00.000Z");
+  assert.equal(eth.latestFourHourGap.nextAt,"2026-11-23T00:00:00.000Z");
+  assert.equal(eth.latestFourHourGap.missingIntervals,6);
+  assert.equal(eth.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
+  assert.equal(eth.history.unverifiedFourHourDays,1);
   assert.equal(eth.fourHourGapDiagnostics[0].status,"UNVERIFIED_GAP");
   assert.equal(eth.signalStatus,"INSUFFICIENT_CONTIGUOUS_HISTORY_AFTER_GAP");
-  assert.match(eth.signalError,/20\/210/);
+  assert.match(eth.signalError,/19\/210/);
   assert.equal(result.paperOnly,true);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.cashAud,100);
@@ -628,11 +724,12 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
    timestamp:new Date(timestamp).toISOString(),open:100,high:101,low:99,close:100,volume:1,tradeCount
   });
  }
+ const trackedCounts=attachTrackedHistory(daily,fourHourBars);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-11-26",liveTradingEnabled:false,
   markets:{
    BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},
-   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:1000}
+   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:1000,tradesFetchedByDate:trackedCounts}
   }
  }));
  globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
@@ -679,6 +776,7 @@ test("CoinSpot MTF identifies a verified zero-trade interval without fabricating
   const multipleGaps=structuredClone(storedState);
   multipleGaps.markets.ETH.fourHourCandles=multiplegapsBars(multipleGaps.markets.ETH.fourHourCandles);
   multipleGaps.markets.ETH.dailyCandles.find(c=>c.timestamp==="2026-11-22T00:00:00.000Z").tradeCount=126;
+  multipleGaps.markets.ETH.tradesFetchedByDate["2026-11-22"]=126;
   kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify(multipleGaps));
   const multiGapResult=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},now);
   const multiGapEth=multiGapResult.markets.find(m=>m.coin==="ETH");
@@ -749,6 +847,7 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
    open:close+0.1,high:close+1,low:close-1,close,volume:100,tradeCount:20
   };
  });
+ const trackedCounts=attachTrackedHistory(daily,fourHourBars);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
   nextDate:targetDate,lastProcessedDate:previousDate,lastBatchDate:previousDate,
@@ -762,8 +861,8 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   pendingHistorySync:{targetDate,coins:{BTC:completeMarket(),ETH:completeMarket()}},
   liveTradingEnabled:false,
   markets:{
-   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:42000,lastHistoryDate:targetDate},
-   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:18000,lastHistoryDate:targetDate}
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:42000,tradesFetchedByDate:trackedCounts,lastHistoryDate:targetDate},
+   ETH:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:18000,tradesFetchedByDate:trackedCounts,lastHistoryDate:targetDate}
   }
  }));
  globalThis.fetch=async url=>{
@@ -793,6 +892,11 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   assert.equal(btc.checks.liquidity,true);
   assert.equal(btc.checks.volatility,true);
   assert.equal(btc.signalWindowStatus,"READY_CONTIGUOUS");
+  assert.equal(btc.historyIntegrityStatus,"VALIDATED");
+  assert.equal(btc.validatedDailyCandles,122);
+  assert.equal(btc.validatedFourHourCandles,420);
+  assert.equal(btc.unverifiedDailyDays,0);
+  assert.equal(btc.unverifiedFourHourDays,0);
   assert.equal(btc.signalWindowMissingIntervals,0);
   assert.equal(btc.signalWindowConfirmedZeroTradeIntervals,0);
   assert.equal(btc.signalError,null);

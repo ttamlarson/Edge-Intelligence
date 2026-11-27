@@ -24,12 +24,16 @@ function buildHistory(gapIndexes = [100]) {
   const dailyCandles = Array.from({ length: 121 }, (_, index) => {
     const timestamp = new Date(Date.parse("2026-07-28T00:00:00.000Z") + index * DAY_MS).toISOString();
     const close = 41000 + index * 170;
+    const tradeCount = dailyTradeCounts.get(timestamp.slice(0, 10)) || 6;
     return {
       timestamp, open: close - 100, high: close + 400, low: close - 400,
-      close, volume: 1000, tradeCount: dailyTradeCounts.get(timestamp.slice(0, 10)) || 0
+      close, volume: 1000, tradeCount
     };
   });
-  return { dailyCandles, fourHourCandles };
+  const tradesFetchedByDate = Object.fromEntries(dailyCandles.map(candle => [
+    candle.timestamp.slice(0, 10), candle.tradeCount
+  ]));
+  return { dailyCandles, fourHourCandles, tradesFetchedByDate };
 }
 
 async function readStrategy(gaps) {
