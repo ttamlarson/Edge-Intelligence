@@ -156,11 +156,12 @@ test("CoinSpot AI malformed structured output fails closed to unavailable adviso
 
   const result = await __test.reviewCoinSpotMtfCandidate(
     { OPENAI_API_KEY: "test-key", EDGE_KV: kvStore().binding },
-    candidate()
+    candidate(),
+    reviewNow
   );
 
   assert.equal(result.status, "AI_REVIEW_INVALID_DECISION");
-  assert.equal(result.advisoryOnly, undefined);
+  assert.equal(result.advisoryOnly, true);
   assert.deepEqual(result.riskFlags, []);
 });
 
