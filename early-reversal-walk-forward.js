@@ -3,7 +3,7 @@
 import { evaluateEarlyReversalShadow } from "./early-reversal-shadow.js";
 
 const FOUR_HOURS = 4 * 60 * 60 * 1000;
-const DAY = 24 * FOUR_HOURS / 6;
+const DAY = 6 * FOUR_HOURS;
 const MINIMUM_HISTORY = 210;
 const MINIMUM_OUT_OF_SAMPLE_TRADES = 30;
 const STARTING_CAPITAL_AUD = 100;
@@ -91,7 +91,7 @@ function closePosition(position, rawExit, reason, cash, executionCostBps, feeRat
   };
 }
 
-function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }) {
+function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, feeRate, slippageBps }) {
   const cashStart = STARTING_CAPITAL_AUD;
   let cash = cashStart;
   let position = null;
@@ -103,7 +103,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }
   let feesPaidAud = 0;
   let blockedByDailyLoss = 0;
   let blockedByMinimumNotional = 0;
-  const executionCostBps = CONFIG.slippageBps + spreadBps / 2;
+  const executionCostBps = slippageBps + spreadBps / 2;
 
   const markEquity = bar => {
     const liquidationValue = position
@@ -116,7 +116,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }
   };
 
   const recordClose = (rawExit, reason, bar) => {
-    const closed = closePosition(position, rawExit, reason, cash, executionCostBps, CONFIG.feeRate, bar);
+    const closed = closePosition(position, rawExit, reason, cash, executionCostBps, feeRate, bar);
     cash = closed.cash;
     feesPaidAud += closed.trade.exitFeeAud + position.entryFee;
     if (closed.trade.pnlAud < 0) dailyLoss += -closed.trade.pnlAud;
@@ -189,9 +189,9 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }
             const allocationAud = Math.min(equity * CONFIG.maxAllocationPct / 100, cash);
             const entryPrice = bar.open * (1 + executionCostBps / 10000);
             const stopPrice = entryPrice - signal.risk.initialStopDistance;
-            const entryCostPerUnit = entryPrice * (1 + CONFIG.feeRate);
+            const entryCostPerUnit = entryPrice * (1 + feeRate);
             const stopExitPerUnit = stopPrice > 0
-              ? stopPrice * (1 - executionCostBps / 10000) * (1 - CONFIG.feeRate)
+              ? stopPrice * (1 - executionCostBps / 10000) * (1 - feeRate)
               : Number.NaN;
             const riskPerUnit = entryCostPerUnit - stopExitPerUnit;
             const quantity = riskBudgetAud > 0 && allocationAud > 0 &&
@@ -199,7 +199,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }
               ? Math.min(allocationAud / entryCostPerUnit, riskBudgetAud / riskPerUnit)
               : 0;
             const notional = quantity * entryPrice;
-            const entryFee = notional * CONFIG.feeRate;
+            const entryFee = notional * feeRate;
             const entryCost = notional + entryFee;
             if (dailyLoss >= CONFIG.maxDailyLossAud) {
               blockedByDailyLoss++;
@@ -267,6 +267,8 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps }
     returnPct: round((endingEquityAud / cashStart - 1) * 100),
     maxDrawdownPct: round(maxDrawdownPct),
     feesPaidAud: round(feesPaidAud),
+    grossProfitAud: round(grossProfit),
+    grossLossAud: round(grossLoss),
     blockedByDailyLoss,
     blockedByMinimumNotional
   };
@@ -303,6 +305,11 @@ export function walkForwardEarlyReversalShadow({
   const fourHour = validateBars(fourHourCandles, FOUR_HOURS, "Four-hour history");
   if (fourHour.some(candle => Date.parse(candle.timestamp) > clock)) {
     throw new Error("Walk-forward data contains a future-dated four-hour candle.");
+  }
+  for (let i = 1; i < daily.length; i++) {
+    if (Date.parse(daily[i].timestamp) - Date.parse(daily[i - 1].timestamp) !== DAY) {
+      throw new Error("Daily walk-forward history must be contiguous; missing candles are never fabricated.");
+    }
   }
   const completedDaily = daily.filter(candle => Date.parse(candle.timestamp) + DAY <= clock);
   const completedFourHour = fourHour.filter(candle => Date.parse(candle.timestamp) + FOUR_HOURS <= clock);
@@ -395,7 +402,9 @@ export function walkForwardEarlyReversalShadow({
         dailyCandles: completedDaily,
         startIndex,
         endIndex,
-        spreadBps
+        spreadBps,
+        feeRate,
+        slippageBps
       })
     });
   }
@@ -403,8 +412,8 @@ export function walkForwardEarlyReversalShadow({
   const totalTrades = folds.reduce((sum, fold) => sum + fold.trades, 0);
   const wins = folds.reduce((sum, fold) => sum + fold.wins, 0);
   const losses = folds.reduce((sum, fold) => sum + fold.losses, 0);
-  const grossProfit = folds.reduce((sum, fold) => sum + Math.max(0, fold.netPnlAud), 0);
-  const grossLoss = folds.reduce((sum, fold) => sum + Math.max(0, -fold.netPnlAud), 0);
+  const grossProfit = folds.reduce((sum, fold) => sum + fold.grossProfitAud, 0);
+  const grossLoss = folds.reduce((sum, fold) => sum + fold.grossLossAud, 0);
   const pooledProfitFactor = grossLoss > 0 ? round(grossProfit / grossLoss) : null;
   const meanFoldReturnPct = folds.reduce((sum, fold) => sum + fold.returnPct, 0) / folds.length;
   const meanFoldDrawdownPct = folds.reduce((sum, fold) => sum + fold.maxDrawdownPct, 0) / folds.length;
