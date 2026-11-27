@@ -657,7 +657,8 @@ function multiplegapsBars(bars) {
 test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history blockers", async () => {
  const kv=kvStore(),originalFetch=globalThis.fetch,originalLog=console.log,calls=[],messages=[];
  const day=24*60*60*1000,fourHours=4*60*60*1000;
- const nowMs=Date.now(),targetDate=new Date(nowMs).toISOString().slice(0,10),startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+day,previousDate=new Date(startMs-day).toISOString().slice(0,10);\n const lastCompletedFourHourStart=Math.floor(nowMs/fourHours)*fourHours-fourHours;
+ const nowMs=Date.now(),targetDate=new Date(nowMs).toISOString().slice(0,10),startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+day,previousDate=new Date(startMs-day).toISOString().slice(0,10);
+ const lastCompletedFourHourStart=Math.floor(nowMs/fourHours)*fourHours-fourHours;
  const probeAt=new Date().toISOString();
  const completeMarket=()=>({
   windows:[],processedThroughMs:endMs,trades:[],rawRowsSeen:0,rawBuyOrders:0,rawSellOrders:0,
