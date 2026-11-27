@@ -173,7 +173,8 @@ export async function reviewCryptoWalkForward({
     if (!Number.isFinite(requestClock)) {
       return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI request-start timestamp is invalid.", liveTradingEnabled: false };
     }
-    const requestStartedAt = new Date(Math.max(clock, requestClock)).toISOString();
+    const requestStartedAtMs = Math.max(clock, requestClock);
+    const requestStartedAt = new Date(requestStartedAtMs).toISOString();
     inputProvenance.reviewRequestStartedAt = requestStartedAt;
     const response = await fetchImpl("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -249,7 +250,7 @@ export async function reviewCryptoWalkForward({
     } catch {
       completedAt = Number.NaN;
     }
-    if (!Number.isFinite(completedAt) || completedAt < requestClock) {
+    if (!Number.isFinite(completedAt) || completedAt < requestStartedAtMs) {
       return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI review completion timestamp is invalid or predates the request.", liveTradingEnabled: false };
     }
     let modelFingerprint;
