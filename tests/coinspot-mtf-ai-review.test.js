@@ -17,6 +17,12 @@ function marketAt(now=baseNow){
  return {
   coin:"BTC",pair:"BTC/AUD",
   quote:{pair:"BTC/AUD",bid:99950,ask:100050,last:100000,spreadBps:10,retrievedAt:now},
+  history:{
+   dailyCandles:122,fourHourCandles:420,contiguousDailyCandles:120,contiguousFourHourCandles:418,
+   dailyGapCount:1,fourHourGapCount:2,signalWindowMissingIntervals:0,
+   signalWindowConfirmedZeroTradeIntervals:3,signalWindowStatus:"COMPLETE",
+   indicatorFourHourHistoryMode:"CONTIGUOUS"
+  },
   signal:{
    strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",
    entryModel:"DONCHIAN_BREAKOUT",signalAt,marketRegime:"BULLISH",
@@ -59,10 +65,13 @@ test("CoinSpot MTF AI review is strict, versioned, provenance-bound and cached p
   assert.equal(first.model,"provider-resolved-mtf-model");
   assert.equal(first.requestedModel,"test-model-v1");
   assert.equal(first.modelIdentitySource,"PROVIDER_REPORTED");
-  assert.equal(first.reviewPolicyVersion,"COINSPOT_MTF_AI_REVIEW_V2");
+  assert.equal(first.reviewPolicyVersion,"COINSPOT_MTF_AI_REVIEW_V3");
   assert.equal(first.providerResponseId,"resp_coinspot_mtf_review");
   assert.ok(Date.parse(first.reviewedAt)>=Date.parse(first.requestStartedAt));
   assert.equal(first.inputProvenance.sourceVerification,"NOT_INDEPENDENTLY_VERIFIED");
+  assert.equal(first.inputProvenance.history.contiguousDailyCandles,120);
+  assert.equal(first.inputProvenance.history.contiguousFourHourCandles,418);
+  assert.equal(first.inputProvenance.history.fourHourGapCount,2);
   assert.match(first.inputProvenance.fingerprint,/^[a-f0-9]{64}$/);
   assert.match(first.inputProvenance.modelFingerprint,/^[a-f0-9]{64}$/);
   assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint));
@@ -119,6 +128,10 @@ test("CoinSpot MTF AI review rejects stale, future and malformed quote/signal in
   const liveFlag=marketAt();
   liveFlag.signal.execution.liveTradingEnabled=true;
   assert.equal((await __test.reviewCoinSpotMtfCandidate(env,liveFlag,baseNow)).status,"AI_REVIEW_INVALID_INPUT");
+
+  const noHistory=marketAt();
+  delete noHistory.history;
+  assert.equal((await __test.reviewCoinSpotMtfCandidate(env,noHistory,baseNow)).status,"AI_REVIEW_INVALID_INPUT");
 
   assert.equal((await __test.reviewCoinSpotMtfCandidate({},marketAt(),baseNow)).status,"AI_REVIEW_NOT_CONFIGURED");
   assert.equal(calls,0);
