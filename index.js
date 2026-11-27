@@ -2469,8 +2469,8 @@ function isCoinSpotMtfScheduleSlot(event, env) {
     ? new Date(scheduledTime).getUTCMinutes()
     : new Date().getUTCMinutes();
   // Other scheduled engines share this Worker invocation's subrequest budget.
-  // Reserve :00 for them and run CoinSpot MTF alone at :15, :30 and :45.
-  return minute > 0 && minute % 15 === 0;
+  // Reserve :00 for them; run the bounded CoinSpot MTF backfill every five minutes.
+  return minute > 0 && minute % 5 === 0;
 }
 
 export default {
