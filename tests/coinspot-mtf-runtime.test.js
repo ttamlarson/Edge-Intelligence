@@ -102,8 +102,24 @@ test("CoinSpot MTF status keeps signals blocked during warm-up but still retriev
  }finally{globalThis.fetch=originalFetch;}
 });
 
-test("CoinSpot MTF paper runner advances history and creates a paper-only AUD ledger",async()=>{
+test("CoinSpot MTF paper runner backfills after a validated provider probe and creates a paper-only AUD ledger",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
+ const now="2026-11-25T08:00:00.000Z";
+ const probeMarket=coin=>({
+  coin,
+  readOnlyHistory:{
+   partitionHistory:[
+    {variants:[{format:"epoch"},{format:"epoch-string"},{format:"epoch-ms"}]},
+    {variants:[{format:"epoch"},{format:"epoch-string"},{format:"epoch-ms"}]}
+   ]
+  }
+ });
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",startedAt:now,nextDate:"2026-07-28",
+  markets:{BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}},
+  providerProbe:{checkedAt:now,readOnlyStatus:"AUTHENTICATED",markets:[probeMarket("BTC"),probeMarket("ETH")]},
+  lastProviderProbeAt:now,liveTradingEnabled:false
+ }));
  globalThis.fetch=async(url,options={})=>{
   const target=String(url),method=options.method||"GET",body=options.body?JSON.parse(options.body):null;
   calls.push({url:target,method,body});
@@ -113,20 +129,24 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
   return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
  };
  try{
-  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z", 1);
-  assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,1);
-  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,20);
-  assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,2);
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, now, 1);
+  assert.equal(calls.filter(call=>call.url.endsWith("/status")).length,0);
+  assert.equal(calls.filter(call=>call.url.endsWith("/orders/market/completed")).length,4);
+  assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/orders/completed/")).length,0);
   assert.equal(calls.filter(call=>call.url.includes("/pubapi/v2/latest/")).length,2);
   assert.equal(result.mode,"COINSPOT_MTF_AUTOMATED_PAPER");
   assert.equal(result.cashAud,100);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.paperOnly,true);
+  assert.equal(result.historyRequestBudgetThisScan,20);
+  assert.equal(result.providerProbeBudgetGuardApplied,false);
+  assert.equal(result.historyRequestsThisScan,4);
   assert.equal(result.markets.length,2);
   assert.equal(result.markets[0].signalStatus,"WARMUP_REQUIRED");
-   assert.equal(result.markets[0].quoteRetrievedAt,"2026-11-25T08:00:00.000Z");
+  assert.equal(result.markets[0].quoteRetrievedAt,now);
   const history=JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"));
   assert.equal(history.lastProcessedDate,"2026-07-28");
+  assert.equal(history.nextDate,"2026-07-29");
   const account=JSON.parse(kv.values.get("coinspot-mtf-paper-global-v1"));
   assert.equal(account.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}

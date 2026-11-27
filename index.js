@@ -991,6 +991,19 @@ async function probeCoinSpotProviders(env, clock) {
   return probe;
 }
 
+function coinSpotMtfProviderProbeRequired(state, clock) {
+  const previousProbeAt = Date.parse(state?.lastProviderProbeAt || "");
+  const needsPartitionProbe = !Array.isArray(state?.providerProbe?.markets) ||
+    state.providerProbe.markets.some(market =>
+      !Array.isArray(market.readOnlyHistory?.partitionHistory) ||
+      market.readOnlyHistory.partitionHistory.length !== 2 ||
+      market.readOnlyHistory.partitionHistory.some(window => !Array.isArray(window.variants) || window.variants.length !== 3)
+    );
+  return !Number.isFinite(previousProbeAt) ||
+    clock - previousProbeAt >= 24 * 60 * 60 * 1000 ||
+    needsPartitionProbe;
+}
+
 async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
   if(!env.EDGE_KV) return {status:"STORAGE_UNAVAILABLE",liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now);
@@ -1049,14 +1062,8 @@ async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
     // Rebuild in memory; the first success/failure checkpoint below persists
     // the rewind marker and the new cursor together.
   }
-  const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
-  const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
-    state.providerProbe.markets.some(market =>
-      !Array.isArray(market.readOnlyHistory?.partitionHistory) ||
-      market.readOnlyHistory.partitionHistory.length !== 2 ||
-      market.readOnlyHistory.partitionHistory.some(window => !Array.isArray(window.variants) || window.variants.length !== 3)
-    );
-  if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000 || needsPartitionProbe) {
+  const providerProbePerformed = coinSpotMtfProviderProbeRequired(state, clock);
+  if (providerProbePerformed) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
     // Keep probe diagnostics in memory; the next history checkpoint persists
@@ -1095,13 +1102,21 @@ async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
 
   const updatedMarkets={...state.markets};
   const outcomes=[];
+  const requestedBudgetPerMarket = Number.isSafeInteger(options?.maxRequestsPerMarket)
+    ? Math.max(0, Math.min(COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC, options.maxRequestsPerMarket))
+    : COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC;
+  // A probe can consume up to 19 provider requests. Keep paper-runner history
+  // work to one request per market on that invocation so quotes and protective
+  // position management retain Worker subrequest headroom.
+  const requestBudgetPerMarket = options?.paperRunner && providerProbePerformed
+    ? 1 : requestedBudgetPerMarket;
   for(const coin of COINSPOT_MTF_COINS){
     const progress=pending.coins[coin];
     const callsBefore=progress.apiCallsTotal;
     if(!progress.complete){
       try {
         const allowEpochMsSubday = hasValidatedCoinSpotSubdayEpochMsFormat(state.providerProbe, coin);
-        await fetchCoinSpotHistoryProgress(env, coin, progress, COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC, allowEpochMsSubday);
+        await fetchCoinSpotHistoryProgress(env, coin, progress, requestBudgetPerMarket, allowEpochMsSubday);
         if(progress.complete){
           const trades=progress.trades;
           const daily=aggregateCoinSpotTrades(trades,COINSPOT_INTERVALS.daily);
@@ -1134,6 +1149,9 @@ async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
           progress.trades=[];
         }
       } catch(error) {
+        if (providerProbePerformed && error && typeof error === "object") {
+          error.providerProbePerformed = true;
+        }
         state={
           ...state,markets:updatedMarkets,pendingHistorySync:pending,
           lastSyncAt:new Date(clock).toISOString(),nextDate:targetDate,
@@ -1188,7 +1206,7 @@ async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
     status,processedDate:dateComplete?targetDate:state.lastProcessedDate||null,
     targetDate,nextDate,dateComplete,progress:progressSummary,
     lastSyncAt:state.lastSyncAt || null,
-    markets:outcomes,providerProbe:state.providerProbe||null,liveTradingEnabled:false
+    markets:outcomes,providerProbe:state.providerProbe||null,providerProbePerformed,liveTradingEnabled:false
   };
   if (options?.includeState === true) result.historyState = state;
   return result;
@@ -1517,10 +1535,24 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
   let syncedHistoryState = null;
   const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
   let historyRequestsThisScan = 0;
+  let historyRequestBudgetThisScan = 20;
+  let providerProbeBudgetGuardApplied = false;
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
     for (let i = 0; i < backfillDaysRequested; i++) {
+      const remainingRequestBudget = Math.max(0, historyRequestBudgetThisScan - historyRequestsThisScan);
+      const maxRequestsPerMarket = Math.min(
+        COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC,
+        Math.floor(remainingRequestBudget / COINSPOT_MTF_COINS.length)
+      );
+      if (maxRequestsPerMarket < 1) break;
       try {
-        const syncResult = await syncCoinSpotMtfHistoryUnlocked(env, new Date(clock), { includeState: true });
+        const syncResult = await syncCoinSpotMtfHistoryUnlocked(env, new Date(clock), {
+          includeState: true, paperRunner: true, maxRequestsPerMarket
+        });
+        if (syncResult.providerProbePerformed === true) {
+          providerProbeBudgetGuardApplied = true;
+          historyRequestBudgetThisScan = 2;
+        }
         const syncSnapshot = { ...syncResult };
         if (syncSnapshot.historyState && typeof syncSnapshot.historyState === "object" && !Array.isArray(syncSnapshot.historyState)) {
           syncedHistoryState = syncSnapshot.historyState;
@@ -1538,8 +1570,14 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
         historyRequestsThisScan += (historySync.markets || []).reduce((sum, market) => sum + Math.max(0, Number(market.apiCalls) || 0), 0);
         if (historySync.dateComplete !== true) break;
         backfillDaysProcessed++;
-        if (historySync.status === "COLLECTING_LIVE_DAY" || historyRequestsThisScan >= 30) break;
+        if (historySync.status === "COLLECTING_LIVE_DAY" ||
+            historyRequestsThisScan >= historyRequestBudgetThisScan ||
+            providerProbeBudgetGuardApplied) break;
       } catch (error) {
+        if (error?.providerProbePerformed === true) {
+          providerProbeBudgetGuardApplied = true;
+          historyRequestBudgetThisScan = 2;
+        }
         syncError = String(error?.message || "CoinSpot history sync failed").replace(/\s+/g, " ").slice(0, 220);
         break;
       }
@@ -1603,7 +1641,8 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
   const snapshot = {
     ...account, performance: calculateMtfPaperPerformance(account, nowIso), status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
     strategyStatus: strategy.status || "UNKNOWN", historySync, historySyncConsistency,
-    backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
+    backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan,
+    historyRequestBudgetThisScan, providerProbeBudgetGuardApplied, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
       coin: m.coin, pair: m.pair,
       signalStatus: aiGate.gates[m.coin] === "AI_BLOCKED" ? "AI_REVIEW_BLOCKED" : m.signalStatus || "NO_SIGNAL",

@@ -3,10 +3,10 @@
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 const MAX_KEY_LENGTH = 128;
 const MAX_BODY_BYTES = 8192;
-// The four-day MTF backfill can issue up to 24 read-only requests. With two
-// bounded 15-second attempts per request, the worst-case retry envelope is
-// 12 minutes; keep the global lease longer so slow retries cannot admit a
-// second history/ledger writer while the first scan is still running.
+// The paper runner caps normal history work at 20 logical requests per scan.
+// A provider-probe scan reduces history work to one request per market; even
+// with two bounded 15-second attempts per read-only call, the retry envelope
+// stays below the 20-minute global lease and cannot admit a competing writer.
 const PAPER_SYNC_LEASE_MS = 20 * 60 * 1000;
 function response(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: JSON_HEADERS });
