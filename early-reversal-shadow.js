@@ -4,12 +4,33 @@ const FOUR_HOURS = 14400000;
 const finite = value => Number.isFinite(Number(value)) ? Number(value) : null;
 const round = value => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 
-function validate(candles, interval, minimum, label) {
+function confirmedGapMap(gaps, interval, label) {
+  if (!Array.isArray(gaps) || gaps.length > 1) {
+    throw new Error(label + " accepts at most one explicitly confirmed zero-trade interval.");
+  }
+  const map = new Map();
+  for (const gap of gaps) {
+    const start = Date.parse(gap?.startAt || "");
+    const end = Date.parse(gap?.endAt || "");
+    if (gap?.status !== "CONFIRMED_NO_TRADES" ||
+        !Number.isFinite(start) || !Number.isFinite(end) || end - start !== interval ||
+        new Date(start).toISOString() !== gap.startAt ||
+        new Date(end).toISOString() !== gap.endAt || map.has(start)) {
+      throw new Error(label + " contains invalid zero-trade gap evidence.");
+    }
+    map.set(start, end);
+  }
+  return map;
+}
+
+function validate(candles, interval, minimum, label, confirmedGaps = []) {
   if (!Array.isArray(candles) || candles.length < minimum || candles.length > 50000) {
     throw new Error(label + " requires at least " + minimum + " actual candles.");
   }
+  const allowedGaps = confirmedGapMap(confirmedGaps, interval, label);
+  const consumedGaps = new Set();
   let previous = -Infinity;
-  return candles.map(candle => {
+  const validated = candles.map(candle => {
     const timestamp = Date.parse(candle?.timestamp || "");
     const open = finite(candle?.open), high = finite(candle?.high);
     const low = finite(candle?.low), close = finite(candle?.close);
@@ -20,19 +41,41 @@ function validate(candles, interval, minimum, label) {
         low > Math.min(open, close) || high < low || volume < 0) {
       throw new Error(label + " contains invalid, unordered, incomplete or misaligned OHLCV data.");
     }
-    if (previous !== -Infinity && timestamp - previous !== interval) {
-      throw new Error(label + " must be contiguous; missing candles are never fabricated.");
+    if (previous !== -Infinity) {
+      const elapsed = timestamp - previous;
+      if (elapsed % interval !== 0) {
+        throw new Error(label + " contains timestamps outside the expected interval grid.");
+      }
+      for (let missingAt = previous + interval; missingAt < timestamp; missingAt += interval) {
+        if (allowedGaps.get(missingAt) !== missingAt + interval) {
+          throw new Error(label + " must be contiguous unless each gap is explicitly confirmed zero-trade; missing candles are never fabricated.");
+        }
+        consumedGaps.add(missingAt);
+      }
     }
     previous = timestamp;
     return { timestamp: new Date(timestamp).toISOString(), open, high, low, close, volume };
   });
+  if (consumedGaps.size !== allowedGaps.size) {
+    throw new Error(label + " contains zero-trade gap evidence that does not match an actual missing interval.");
+  }
+  return validated;
 }
 
-function ema(values, period) {
-  if (values.length < period) return null;
+function ema(candles, period, interval) {
+  if (candles.length < period) return null;
+  const values = candles.map(candle => candle.close);
   let value = values.slice(0, period).reduce((sum, item) => sum + item, 0) / period;
-  const alpha = 2 / (period + 1);
-  for (let i = period; i < values.length; i++) value = values[i] * alpha + value * (1 - alpha);
+  const baseAlpha = 2 / (period + 1);
+  for (let i = period; i < values.length; i++) {
+    const elapsedIntervals = (Date.parse(candles[i].timestamp) - Date.parse(candles[i - 1].timestamp)) / interval;
+    if (!Number.isInteger(elapsedIntervals) || elapsedIntervals < 1) return null;
+    // A confirmed no-trade bucket contributes elapsed time, not a fabricated
+    // OHLCV observation. The EMA decays over the full interval gap while price
+    // remains at the last observed EMA until the next actual trade candle.
+    const alpha = 1 - Math.pow(1 - baseAlpha, elapsedIntervals);
+    value = values[i] * alpha + value * (1 - alpha);
+  }
   return value;
 }
 
@@ -66,11 +109,12 @@ function rsi(values, period = 14) {
  * The legacy paper ledger deliberately rejects this strategy identifier.
  */
 export function evaluateEarlyReversalShadow({
-  dailyCandles, fourHourCandles, asOf = Date.now(), spreadBps = 0,
-  minimumVolume = 0, volatilityMinPct = 0.002, volatilityMaxPct = 0.12
+  dailyCandles, fourHourCandles, confirmedZeroTradeIntervals = [],
+  asOf = Date.now(), spreadBps = 0, minimumVolume = 0,
+  volatilityMinPct = 0.002, volatilityMaxPct = 0.12
 } = {}) {
   const daily = validate(dailyCandles, DAY, 60, "Daily history");
-  const fourHour = validate(fourHourCandles, FOUR_HOURS, 210, "Four-hour history");
+  const fourHour = validate(fourHourCandles, FOUR_HOURS, 210, "Four-hour history", confirmedZeroTradeIntervals);
   const clock = asOf instanceof Date ? asOf.getTime()
     : typeof asOf === "string" ? Date.parse(asOf) : Number(asOf);
   if (!Number.isFinite(clock) || !Number.isFinite(spreadBps) || spreadBps < 0 ||
@@ -86,13 +130,13 @@ export function evaluateEarlyReversalShadow({
     throw new Error("Early-reversal signals require closed, correctly ordered daily and four-hour candles.");
   }
 
-  const dc = daily.map(c => c.close), hc = fourHour.map(c => c.close);
-  const dailyEma20 = ema(dc, 20), dailyEma50 = ema(dc, 50);
-  const priorDailyEma20 = ema(dc.slice(0, -1), 20);
-  const priorDailyEma50 = ema(dc.slice(0, -5), 50);
-  const fourHourEma20 = ema(hc, 20), fourHourEma50 = ema(hc, 50);
-  const priorFourHourEma20 = ema(hc.slice(0, -1), 20);
-  const priorFourHourEma50 = ema(hc.slice(0, -5), 50);
+  const hc = fourHour.map(c => c.close);
+  const dailyEma20 = ema(daily, 20, DAY), dailyEma50 = ema(daily, 50, DAY);
+  const priorDailyEma20 = ema(daily.slice(0, -1), 20, DAY);
+  const priorDailyEma50 = ema(daily.slice(0, -5), 50, DAY);
+  const fourHourEma20 = ema(fourHour, 20, FOUR_HOURS), fourHourEma50 = ema(fourHour, 50, FOUR_HOURS);
+  const priorFourHourEma20 = ema(fourHour.slice(0, -1), 20, FOUR_HOURS);
+  const priorFourHourEma50 = ema(fourHour.slice(0, -5), 50, FOUR_HOURS);
   const volatility = atr(fourHour, 20);
   const volatilityPct = volatility / signalBar.close;
   const momentum = rsi(hc, 14);
@@ -139,6 +183,12 @@ export function evaluateEarlyReversalShadow({
       fourHourEma50: round(fourHourEma50), fourHourEma20SlopePct: round((fourHourEma20 / priorFourHourEma20 - 1) * 100),
       rsi14: round(momentum), atr20: round(volatility), atrPct: round(volatilityPct * 100),
       breakoutLevel: round(breakoutLevel), spreadBps
+    },
+    history: {
+      dailyActualCandles: daily.length,
+      fourHourActualCandles: fourHour.length,
+      confirmedZeroTradeIntervals: confirmedZeroTradeIntervals.length,
+      fourHourEmaUsesElapsedTime: true
     },
     risk: {
       initialStopDistance: round(stopDistance), initialStopAtr: 2.5,
