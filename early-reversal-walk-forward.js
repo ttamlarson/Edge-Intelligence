@@ -43,17 +43,74 @@ function validateBars(candles, interval, label) {
   });
 }
 
-function latestContiguousRun(candles, interval) {
-  let run = [];
-  let gapCount = 0;
-  for (const candle of candles) {
-    if (run.length && Date.parse(candle.timestamp) - Date.parse(run.at(-1).timestamp) !== interval) {
-      gapCount++;
-      run = [];
-    }
-    run.push(candle);
+function validateConfirmedGapEvidence(gaps, interval, label) {
+  if (!Array.isArray(gaps) || gaps.length > 1000) {
+    throw new Error(label + " accepts at most 1000 explicitly confirmed zero-trade intervals.");
   }
-  return { candles: run, gapCount };
+  const map = new Map();
+  for (const gap of gaps) {
+    const start = Date.parse(gap?.startAt || "");
+    const end = Date.parse(gap?.endAt || "");
+    if (gap?.status !== "CONFIRMED_NO_TRADES" ||
+        !Number.isFinite(start) || !Number.isFinite(end) || end - start !== interval ||
+        new Date(start).toISOString() !== gap.startAt ||
+        new Date(end).toISOString() !== gap.endAt || map.has(start)) {
+      throw new Error(label + " contains invalid zero-trade gap evidence.");
+    }
+    map.set(start, end);
+  }
+  return map;
+}
+
+function latestContiguousRun(candles, interval, confirmedGapMap) {
+  let runStartIndex = 0;
+  let gapCount = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const previousAt = Date.parse(candles[i - 1].timestamp);
+    const currentAt = Date.parse(candles[i].timestamp);
+    if (currentAt - previousAt === interval) continue;
+    let fullyConfirmed = currentAt > previousAt && (currentAt - previousAt) % interval === 0;
+    for (let missingAt = previousAt + interval; fullyConfirmed && missingAt < currentAt; missingAt += interval) {
+      if (confirmedGapMap.get(missingAt) !== missingAt + interval) fullyConfirmed = false;
+    }
+    if (!fullyConfirmed) {
+      gapCount++;
+      runStartIndex = i;
+    }
+  }
+
+  const run = candles.slice(runStartIndex);
+  const firstAt = Date.parse(run[0]?.timestamp || "");
+  const lastAt = Date.parse(run.at(-1)?.timestamp || "");
+  const confirmedZeroTradeIntervals = [...confirmedGapMap.entries()]
+    .filter(([start, end]) => start >= firstAt && end <= lastAt)
+    .map(([start, end]) => ({
+      startAt: new Date(start).toISOString(),
+      endAt: new Date(end).toISOString(),
+      status: "CONFIRMED_NO_TRADES"
+    }));
+  const actualMissing = new Set();
+  for (let i = 1; i < run.length; i++) {
+    const previousAt = Date.parse(run[i - 1].timestamp);
+    const currentAt = Date.parse(run[i].timestamp);
+    for (let missingAt = previousAt + interval; missingAt < currentAt; missingAt += interval) {
+      actualMissing.add(missingAt);
+      if (confirmedGapMap.get(missingAt) !== missingAt + interval) {
+        throw new Error("Latest validated four-hour run contains an unverified gap.");
+      }
+    }
+  }
+  for (const gap of confirmedZeroTradeIntervals) {
+    if (!actualMissing.has(Date.parse(gap.startAt))) {
+      throw new Error("Confirmed zero-trade evidence does not match a missing interval in the latest run.");
+    }
+  }
+  return {
+    candles: run,
+    gapCount,
+    confirmedZeroTradeIntervals,
+    confirmedGapCount: actualMissing.size
+  };
 }
 
 function atr(candles, period = 20) {
@@ -91,7 +148,7 @@ function closePosition(position, rawExit, reason, cash, executionCostBps, feeRat
   };
 }
 
-function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, feeRate, slippageBps }) {
+function simulateFold({ candles, dailyCandles, confirmedZeroTradeIntervals, startIndex, endIndex, spreadBps, feeRate, slippageBps }) {
   const cashStart = STARTING_CAPITAL_AUD;
   let cash = cashStart;
   let position = null;
@@ -178,9 +235,15 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
           let signal = null;
           signalEvaluations++;
           try {
+            const signalStartAt = Date.parse(signalHistory[0].timestamp);
+            const signalEndAt = Date.parse(signalHistory.at(-1).timestamp);
+            const signalGaps = confirmedZeroTradeIntervals.filter(gap =>
+              Date.parse(gap.startAt) >= signalStartAt && Date.parse(gap.endAt) <= signalEndAt
+            );
             signal = evaluateEarlyReversalShadow({
               dailyCandles: completedDaily,
               fourHourCandles: signalHistory,
+              confirmedZeroTradeIntervals: signalGaps,
               asOf: signalAsOf,
               spreadBps
             });
@@ -301,6 +364,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
 export function walkForwardEarlyReversalShadow({
   dailyCandles,
   fourHourCandles,
+  confirmedZeroTradeIntervals = [],
   market = "UNKNOWN",
   source = "coinspot_readonly_completed_orders",
   now = Date.now(),
@@ -313,7 +377,7 @@ export function walkForwardEarlyReversalShadow({
 } = {}) {
   const ticker = String(market || "").toUpperCase();
   const clock = now instanceof Date ? now.getTime()
-    : typeof now === "string" ? Date.parse(now) : Number(now);
+    : typeof now === "string" ? Date.parse(now) : typeof now === "number" ? now : NaN;
   if (!["BTC/AUD", "ETH/AUD"].includes(ticker) ||
       typeof source !== "string" || !source.trim() || source.length > 120 ||
       !Number.isFinite(clock) || ![spreadBps, feeRate, slippageBps, initialHistoryFraction].every(Number.isFinite) ||
@@ -321,7 +385,7 @@ export function walkForwardEarlyReversalShadow({
       slippageBps < 0 || slippageBps > 500 ||
       initialHistoryFraction < 0.5 || initialHistoryFraction > 0.8 ||
       !Number.isInteger(foldCount) || foldCount < 2 || foldCount > 6 ||
-      !Number.isInteger(minimumOutOfSampleTrades) || minimumOutOfSampleTrades < 1) {
+      !Number.isInteger(minimumOutOfSampleTrades) || minimumOutOfSampleTrades < 1 || minimumOutOfSampleTrades > 10000) {
     throw new Error("Invalid early-reversal walk-forward market, source, cost or fold assumptions.");
   }
 
@@ -337,13 +401,19 @@ export function walkForwardEarlyReversalShadow({
   }
   const completedDaily = daily.filter(candle => Date.parse(candle.timestamp) + DAY <= clock);
   const completedFourHour = fourHour.filter(candle => Date.parse(candle.timestamp) + FOUR_HOURS <= clock);
-  const latestRun = latestContiguousRun(completedFourHour, FOUR_HOURS);
+  const confirmedGapMap = validateConfirmedGapEvidence(
+    confirmedZeroTradeIntervals, FOUR_HOURS, "Walk-forward history"
+  );
+  const latestRun = latestContiguousRun(completedFourHour, FOUR_HOURS, confirmedGapMap);
   const run = latestRun.candles;
   const history = {
     dailyCandles: completedDaily.length,
     fourHourCandles: completedFourHour.length,
     latestContiguousFourHourCandles: run.length,
+    latestValidatedFourHourCandles: run.length,
     fourHourGapCount: latestRun.gapCount,
+    unverifiedGapCount: latestRun.gapCount,
+    confirmedZeroTradeIntervals: latestRun.confirmedGapCount,
     firstFourHourAt: run[0]?.timestamp || null,
     lastFourHourAt: run.at(-1)?.timestamp || null,
     firstDailyAt: completedDaily[0]?.timestamp || null,
@@ -397,7 +467,7 @@ export function walkForwardEarlyReversalShadow({
       folds: [],
       limitations: [
         "Only complete, actual CoinSpot-derived candles are used.",
-        "Four-hour gaps split the history; missing candles are never fabricated.",
+        "Unverified four-hour gaps split the history; confirmed zero-trade intervals are time-adjusted and never fabricated as candles.",
         "No strategy parameters are fitted on the out-of-sample periods."
       ]
     };
@@ -428,7 +498,8 @@ export function walkForwardEarlyReversalShadow({
         endIndex,
         spreadBps,
         feeRate,
-        slippageBps
+        slippageBps,
+        confirmedZeroTradeIntervals: latestRun.confirmedZeroTradeIntervals
       })
     });
   }
@@ -455,13 +526,14 @@ export function walkForwardEarlyReversalShadow({
   const pooledProfitFactor = grossLoss > 0 ? round(grossProfit / grossLoss) : null;
   const meanFoldReturnPct = folds.reduce((sum, fold) => sum + fold.returnPct, 0) / folds.length;
   const meanFoldDrawdownPct = folds.reduce((sum, fold) => sum + fold.maxDrawdownPct, 0) / folds.length;
+  const worstFoldDrawdownPct = Math.max(...folds.map(fold => fold.maxDrawdownPct));
   const positiveFolds = folds.filter(fold => fold.returnPct > 0).length;
   const assessment = signalEvaluationErrors > 0
     ? "WALK_FORWARD_EVALUATION_ERRORS"
     : totalTrades < minimumOutOfSampleTrades
     ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES"
     : meanFoldReturnPct > 0 && positiveFolds >= Math.ceil(foldCount * 2 / 3) &&
-      pooledProfitFactor !== null && pooledProfitFactor > 1.2 && meanFoldDrawdownPct < 10
+      pooledProfitFactor !== null && pooledProfitFactor > 1.2 && worstFoldDrawdownPct < 10
       ? "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW"
       : "NOT_PROVEN_PROFITABLE";
 
@@ -469,7 +541,7 @@ export function walkForwardEarlyReversalShadow({
     ...base,
     status: assessment === "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW"
       ? "RESEARCH_CANDIDATE" : assessment,
-    methodology: "Fixed early-reversal rules; signal on a completed 4h close; entry at the next 4h open; 0.1% fee per side, 15 bps slippage plus half of a conservative 50 bps spread per side; 0.5% equity risk budget, 25% allocation ceiling, A$3 daily loss cap, 2.5 ATR initial stop, 3 ATR trailing stop, and 30-day maximum hold. Stops use adverse gap fills and stop-first OHLC handling.",
+    methodology: "Fixed early-reversal rules; explicitly confirmed zero-trade intervals are time-adjusted without synthesizing OHLCV candles; signal on a completed 4h close; entry at the next 4h open; 0.1% fee per side, 15 bps slippage plus half of a conservative 50 bps spread per side; 0.5% equity risk budget, 25% allocation ceiling, A$3 daily loss cap, 2.5 ATR initial stop, 3 ATR trailing stop, and 30-day maximum hold. Stops use adverse gap fills and stop-first OHLC handling.",
     summary: {
       totalOutOfSampleTrades: totalTrades,
       signalEvaluations: totalSignalEvaluations,
@@ -485,6 +557,7 @@ export function walkForwardEarlyReversalShadow({
       pooledProfitFactor,
       meanFoldReturnPct: round(meanFoldReturnPct),
       meanFoldMaxDrawdownPct: round(meanFoldDrawdownPct),
+      worstFoldMaxDrawdownPct: round(worstFoldDrawdownPct),
       positiveReturnFolds: positiveFolds,
       foldCount,
       minimumOutOfSampleTrades,
@@ -495,6 +568,7 @@ export function walkForwardEarlyReversalShadow({
     limitations: [
       "Historical bid/ask spreads are unavailable; the maximum permitted 50 bps spread is charged on every side.",
       "CoinSpot trade-derived OHLCV does not provide historical executable order-book depth or guaranteed fills.",
+      "Confirmed zero-trade intervals are accepted only when daily and four-hour trade counts reconcile; no missing OHLCV candles are generated.",
       "This deterministic backtest does not use AI to predict returns; any AI review remains advisory only.",
       "A research candidate would still require an extended forward paper sample; it cannot enter the production ledger or enable live trading."
     ]
