@@ -140,6 +140,11 @@ test("CoinSpot MTF AI provider, schema, size and cache failures fail closed",asy
   assert.equal((await __test.reviewCoinSpotMtfCandidate(env,marketAt(),baseNow)).status,"AI_REVIEW_INVALID_DECISION");
 
   globalThis.fetch=async()=>new Response(JSON.stringify({
+   id:"resp-invalid-model",model:42,output_text:JSON.stringify(reviewDecision)
+  }),{status:200});
+  assert.equal((await __test.reviewCoinSpotMtfCandidate(env,marketAt(),baseNow)).status,"AI_REVIEW_INVALID_RESPONSE");
+
+  globalThis.fetch=async()=>new Response(JSON.stringify({
    id:"x".repeat(121),model:"test-model",output_text:JSON.stringify(reviewDecision)
   }),{status:200});
   assert.equal((await __test.reviewCoinSpotMtfCandidate(env,marketAt(),baseNow)).status,"AI_REVIEW_INVALID_RESPONSE");
