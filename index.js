@@ -2001,8 +2001,9 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
         "; latest contiguous run "+fourHourContinuity.contiguousCandles+"/210");
     }
     if(confirmedSignalWindowGaps.length>1){
-      readiness.push("Four-hour signal window exceeds the one-interval zero-trade allowance: confirmed zero-trade intervals "+
-        confirmedSignalWindowGaps[0].startAt+" -> "+confirmedSignalWindowGaps.at(-1).endAt);
+      readiness.push("Four-hour signal window blocked: "+confirmedSignalWindowGaps.length+
+        " confirmed zero-trade intervals exceed maximum 1: "+
+        confirmedSignalWindowGaps.map(item=>item.startAt+" -> "+item.endAt).join(", "));
     }
     if(readiness.length){
       const blockedByGap =
