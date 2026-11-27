@@ -101,6 +101,13 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
   let maxDrawdownPct = 0;
   const trades = [];
   let feesPaidAud = 0;
+  let signalEvaluations = 0;
+  let noSetupSignals = 0;
+  let watchSignals = 0;
+  let candidateSignals = 0;
+  let otherSignals = 0;
+  let signalEvaluationErrors = 0;
+  const failedCheckCounts = {};
   let blockedByDailyLoss = 0;
   let blockedByMinimumNotional = 0;
   const executionCostBps = slippageBps + spreadBps / 2;
@@ -166,10 +173,10 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
         const completedDaily = dailyCandles
           .filter(candle => Date.parse(candle.timestamp) + DAY <= signalAsOf)
           .slice(-120);
-        const historyStart = signalIndex - (MINIMUM_HISTORY - 1);
-        const signalHistory = candles.slice(historyStart, signalIndex + 1);
+        const signalHistory = candles.slice(0, signalIndex + 1);
         if (signalHistory.length === MINIMUM_HISTORY && completedDaily.length >= 60) {
           let signal = null;
+          signalEvaluations++;
           try {
             signal = evaluateEarlyReversalShadow({
               dailyCandles: completedDaily,
@@ -178,7 +185,17 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
               spreadBps
             });
           } catch {
+            signalEvaluationErrors++;
             signal = null;
+          }
+          if (signal) {
+            if (signal.status === "NO_SETUP") noSetupSignals++;
+            else if (signal.status === "WATCH") watchSignals++;
+            else if (signal.status === "SHADOW_CANDIDATE_PAPER_ONLY") candidateSignals++;
+            else otherSignals++;
+            for (const check of signal.failedChecks || []) {
+              failedCheckCounts[check] = (failedCheckCounts[check] || 0) + 1;
+            }
           }
           if (signal?.status === "SHADOW_CANDIDATE_PAPER_ONLY") {
             const equity = cash;
@@ -270,7 +287,14 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
     grossProfitAud: round(grossProfit),
     grossLossAud: round(grossLoss),
     blockedByDailyLoss,
-    blockedByMinimumNotional
+    blockedByMinimumNotional,
+    signalEvaluations,
+    noSetupSignals,
+    watchSignals,
+    candidateSignals,
+    otherSignals,
+    signalEvaluationErrors,
+    failedCheckCounts
   };
 }
 
@@ -410,6 +434,20 @@ export function walkForwardEarlyReversalShadow({
   }
 
   const totalTrades = folds.reduce((sum, fold) => sum + fold.trades, 0);
+  const totalSignalEvaluations = folds.reduce((sum, fold) => sum + fold.signalEvaluations, 0);
+  const noSetupSignals = folds.reduce((sum, fold) => sum + fold.noSetupSignals, 0);
+  const watchSignals = folds.reduce((sum, fold) => sum + fold.watchSignals, 0);
+  const candidateSignals = folds.reduce((sum, fold) => sum + fold.candidateSignals, 0);
+  const signalEvaluationErrors = folds.reduce((sum, fold) => sum + fold.signalEvaluationErrors, 0);
+  const failedCheckCounts = {};
+  for (const fold of folds) {
+    for (const [check, count] of Object.entries(fold.failedCheckCounts || {})) {
+      failedCheckCounts[check] = (failedCheckCounts[check] || 0) + count;
+    }
+  }
+  const topFailedChecks = Object.entries(failedCheckCounts)
+    .sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([check, count]) => ({ check, count }));
   const wins = folds.reduce((sum, fold) => sum + fold.wins, 0);
   const losses = folds.reduce((sum, fold) => sum + fold.losses, 0);
   const grossProfit = folds.reduce((sum, fold) => sum + fold.grossProfitAud, 0);
@@ -432,6 +470,12 @@ export function walkForwardEarlyReversalShadow({
     methodology: "Fixed early-reversal rules; signal on a completed 4h close; entry at the next 4h open; 0.1% fee per side, 15 bps slippage plus half of a conservative 50 bps spread per side; 0.5% equity risk budget, 25% allocation ceiling, A$3 daily loss cap, 2.5 ATR initial stop, 3 ATR trailing stop, and 30-day maximum hold. Stops use adverse gap fills and stop-first OHLC handling.",
     summary: {
       totalOutOfSampleTrades: totalTrades,
+      signalEvaluations: totalSignalEvaluations,
+      noSetupSignals,
+      watchSignals,
+      candidateSignals,
+      signalEvaluationErrors,
+      topFailedChecks,
       wins,
       losses,
       winRatePct: totalTrades ? round(wins / totalTrades * 100) : null,
