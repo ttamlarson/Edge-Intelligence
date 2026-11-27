@@ -1707,7 +1707,11 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
       try {
         shadowSignal=evaluateEarlyReversalShadow({
           dailyCandles:dailyContinuity.candles.slice(-120),
-          fourHourCandles:fourHourContinuity.candles.slice(-240),
+          // Use the same validated indicator history as the production
+          // strategy. A single gap is accepted only with reconciled
+          // CONFIRMED_NO_TRADES evidence; no candle is synthesized.
+          fourHourCandles:indicatorFourHourCandles,
+          confirmedZeroTradeIntervals:indicatorConfirmedZeroTradeGaps,
           asOf:clock,spreadBps:quote.spreadBps
         });
       } catch(error) {
