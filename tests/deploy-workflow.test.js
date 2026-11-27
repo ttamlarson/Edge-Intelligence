@@ -22,8 +22,10 @@ test("Worker deploy workflow watches every directly imported runtime module", as
 });
 
 
-test("Worker configuration provides a bounded CPU budget for scheduled MTF scans", async () => {
+test("Worker configuration does not set unsupported CPU overrides on the Free plan", async () => {
   const config = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
-  assert.match(config, /\[limits\][\s\S]*?cpu_ms\s*=\s*10000/m,
-    "the scheduled Worker must have an explicit 10-second CPU ceiling");
+  assert.doesNotMatch(config, /^\s*\[limits\]\s*$/m,
+    "Cloudflare Free does not accept per-Worker CPU limit overrides");
+  assert.doesNotMatch(config, /^\s*cpu_ms\s*=/m,
+    "keep the deployed CPU limit at the account's supported Free-plan default");
 });
