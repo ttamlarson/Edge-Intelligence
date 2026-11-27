@@ -5,8 +5,8 @@ const finite = value => value === null || value === undefined || value === "" ? 
 const round = value => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 
 function confirmedGapMap(gaps, interval, label) {
-  if (!Array.isArray(gaps) || gaps.length > 1) {
-    throw new Error(label + " accepts at most one explicitly confirmed zero-trade interval.");
+  if (!Array.isArray(gaps) || gaps.length > 1000) {
+    throw new Error(label + " accepts at most 1000 explicitly confirmed zero-trade intervals.");
   }
   const map = new Map();
   for (const gap of gaps) {

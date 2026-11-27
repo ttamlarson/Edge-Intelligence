@@ -111,3 +111,27 @@ test("shadow engine rejects missing OHLCV fields instead of treating null as zer
     dailyCandles, fourHourCandles: missingVolume, asOf, spreadBps: 10
   }), /invalid/i);
 });
+
+
+test("shadow engine time-adjusts multiple individually reconciled zero-trade intervals", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const missingIndexes = [60, 160];
+  const confirmedZeroTradeIntervals = missingIndexes.map(index => ({
+    startAt: fourHourCandles[index].timestamp,
+    endAt: new Date(Date.parse(fourHourCandles[index].timestamp) + 4 * 3600000).toISOString(),
+    status: "CONFIRMED_NO_TRADES"
+  }));
+  const retained = fourHourCandles.filter((_, index) => !missingIndexes.includes(index));
+  const signal = evaluateEarlyReversalShadow({
+    dailyCandles,
+    fourHourCandles: retained,
+    confirmedZeroTradeIntervals,
+    asOf,
+    spreadBps: 10
+  });
+  assert.equal(signal.history.fourHourActualCandles, 238);
+  assert.equal(signal.history.confirmedZeroTradeIntervals, 2);
+  assert.equal(signal.history.fourHourEmaUsesElapsedTime, true);
+  assert.equal(signal.execution.orderIntent, "NONE");
+  assert.equal(signal.execution.eligibleForPaperLedger, false);
+});

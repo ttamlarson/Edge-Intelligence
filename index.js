@@ -1678,8 +1678,19 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     // Re-run a fixed, chronological, cost-adjusted walk-forward against the latest
     // actual contiguous history. This result is research-only and never reaches the ledger.
     try {
+      const firstFourHourAt = Date.parse(fourHour[0]?.timestamp || "");
+      const lastFourHourAt = Date.parse(fourHour.at(-1)?.timestamp || "");
+      const confirmedWalkForwardGaps = (historySummary.fourHourGapDiagnostics || []).filter(item =>
+        item.status === "CONFIRMED_NO_TRADES" &&
+        Date.parse(item.startAt) >= firstFourHourAt &&
+        Date.parse(item.endAt) <= lastFourHourAt
+      );
       shadowBacktest=walkForwardEarlyReversalShadow({
-        dailyCandles:daily,fourHourCandles:fourHour,market:coin+"/AUD",now:clock
+        dailyCandles:daily,
+        fourHourCandles:fourHour,
+        confirmedZeroTradeIntervals:confirmedWalkForwardGaps,
+        market:coin+"/AUD",
+        now:clock
       });
     } catch(error) {
       shadowBacktestError=String(error?.message||"EARLY_REVERSAL_WALK_FORWARD_UNAVAILABLE").slice(0,180);
