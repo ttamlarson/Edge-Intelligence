@@ -136,7 +136,7 @@ export function calculateAsxAiCalibration(closedTrades, {
         Number.isInteger(provenance.providerRowsForSymbol) &&
         provenance.providerRowsForSymbol >= provenance.barsProvided);
     const valid = review.status === "AI_APPROVED_PAPER_CANDIDATE" &&
-      (review.reviewPolicyVersion === undefined || (review.reviewPolicyVersion === policyVersion && sourceMetadataValid)) &&
+      (review.reviewPolicyVersion === undefined ? sourceMetadataValid : review.reviewPolicyVersion === policyVersion && sourceMetadataValid) &&
       review.decision === "APPROVE" && typeof review.reviewId === "string" &&
       review.reviewId.length > 0 && review.reviewId.length <= 200 &&
       typeof review.model === "string" && review.model.length > 0 &&
