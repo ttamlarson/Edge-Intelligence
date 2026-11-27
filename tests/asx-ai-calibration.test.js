@@ -14,7 +14,7 @@ function trade(index, probability, outcome, exitType = "AUTOMATED_PAPER_DAILY_BA
       status: "AI_APPROVED_PAPER_CANDIDATE", decision: "APPROVE",
       confidence: 82, predictedWinProbability: probability,
       riskFlags: [], model: "test-model",
-      reviewId: "review-" + index + "-" + fingerprint.slice(0, 16), reviewedAt,
+      reviewId: "review-" + index + "-" + fingerprint, reviewedAt,
       inputProvenance: {
         source: "Synthetic test fixture only", sourceVerification: "NOT_INDEPENDENTLY_VERIFIED",
         currency: "AUD", observedAt: new Date(Date.parse(reviewedAt) - 3600000).toISOString(),
