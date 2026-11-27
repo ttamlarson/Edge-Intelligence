@@ -1148,7 +1148,7 @@ function isValidCoinSpotMtfAiReview(review) {
     isCanonicalCoinSpotIso(provenance.signalAt) && isCanonicalCoinSpotIso(provenance.quoteRetrievedAt) &&
     Number.isFinite(provenance.spreadBps) && provenance.spreadBps >= 0 && provenance.spreadBps <= 50 &&
     provenance.fingerprintAlgorithm === "SHA-256" &&
-    provenance.fingerprintScope === "COINSPOT_MTF_SIGNAL_EVIDENCE_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY" &&
+    provenance.fingerprintScope === "COINSPOT_MTF_SIGNAL_HISTORY_AND_QUOTE_SPREAD_FIXED_REVIEW_POLICY" &&
     /^[a-f0-9]{64}$/.test(provenance.fingerprint || "") &&
     /^[a-f0-9]{64}$/.test(provenance.modelFingerprint || "") &&
     review.reviewId.includes(provenance.modelFingerprint) && review.reviewId.endsWith(provenance.fingerprint));
