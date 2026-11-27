@@ -41,6 +41,7 @@ test("DataCedar fetch uses the server-side key, ASX batch route and free daily w
   let requestedUrl, requestedHeaders;
   const result = await fetchDataCedarBars({
     symbols: ["BHP", "CBA"], apiKey: "server-only-test-key", now: new Date("2026-11-18T00:00:00.000Z"),
+    clock: () => new Date("2026-11-18T00:00:03.000Z"),
     fetchImpl: async (url, options) => {
       requestedUrl = new URL(url); requestedHeaders = options.headers;
       return new Response(JSON.stringify({ data: { "asx:BHP": [row()], "asx:CBA": [] } }), { headers: { "Content-Type": "application/json" } });
@@ -55,6 +56,7 @@ test("DataCedar fetch uses the server-side key, ASX batch route and free daily w
   assert.equal(result.rowsBySymbol.BHP, 1);
   assert.equal(result.rowsBySymbol.CBA, 0);
   assert.equal(result.status, "live");
+  assert.equal(result.retrievedAt, "2026-11-18T00:00:03.000Z");
 });
 
 test("DataCedar rejects missing key, unexpected redirects, invalid JSON and provider failures", async () => {
