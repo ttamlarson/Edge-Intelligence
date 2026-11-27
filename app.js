@@ -319,6 +319,24 @@ async function loadCoinSpotMtfPaper(runNow=false){
    const aiProvenanceLine=provenance?"AI model "+String(m.aiReview.model||"unknown")+" · policy "+String(m.aiReview.reviewPolicyVersion||"unknown")+" · reviewed "+formatDateTime(m.aiReview.reviewedAt,$("auTimezone")?.value||"Australia/Perth")+" · SHA-256 "+String(provenance.fingerprint||"").slice(0,16)+" · source "+String(provenance.sourceVerification||"unknown").replaceAll("_"," "):"";
    return '<article class="integration"><b>'+esc(m.pair||m.coin)+'</b><small>'+esc(String(m.signalStatus||"WAITING").replaceAll("_"," "))+'</small><small>Bid '+(m.bid?esc(fmt(m.bid)):"—")+' · Ask '+(m.ask?esc(fmt(m.ask)):"—")+' · Spread '+(m.spreadBps??"—")+' bps</small><small>History '+Number(m.dailyCandles||0)+' daily / '+Number(m.fourHourCandles||0)+' 4h bars · contiguous '+Number(m.contiguousDailyCandles??m.dailyCandles??0)+' daily / '+Number(m.contiguousFourHourCandles??m.fourHourCandles??0)+' 4h · '+Number(m.tradesFetched||0)+' trades</small><small>4h gaps '+Number(m.fourHourGapCount||0)+' · '+esc(gap)+'</small><small>'+esc(signalWindow)+'</small><small>'+esc(modelStatus)+(blockers?" · "+esc(blockers):"")+'</small><small>'+esc(metricLine)+'</small>'+ (rankingLine?'<small>'+esc(rankingLine)+'</small>':'') +'<em>'+esc(aiStatus)+'</em><small>'+esc(m.aiReview?.summary||m.signalError||"No additional risk commentary.")+'</small>'+ (aiProvenanceLine?'<small>'+esc(aiProvenanceLine)+'</small>':'') +'</article>';
   }).join("")||'<div class="empty">Waiting for validated CoinSpot history.</div>';
+  $("mtfPaperResearch").innerHTML=(a.markets||[]).map(m=>{
+   const b=m.shadowBacktest||{},s=b.summary||{},h=b.history||{},costs=b.costs||{};
+   const status=String(b.status||m.shadowBacktestError||"WAITING_FOR_FIRST_EVALUATION").replaceAll("_"," ");
+   const trades=Number(s.totalOutOfSampleTrades)||0;
+   const fmtPct=value=>Number.isFinite(Number(value))?Number(value).toFixed(2)+"%":"—";
+   const fmtScalar=value=>Number.isFinite(Number(value))?Number(value).toFixed(2):"—";
+   const resultLine=trades>0
+    ?"OOS trades "+trades+" · win "+fmtPct(s.winRatePct)+" · PF "+fmtScalar(s.pooledProfitFactor)+" · mean fold return "+fmtPct(s.meanFoldReturnPct)+" · mean drawdown "+fmtPct(s.meanFoldMaxDrawdownPct)
+    :"No out-of-sample trades · insufficient sample · no profitability estimate";
+   const signalLine=Number.isFinite(Number(s.signalEvaluations))
+    ?"Signal checks "+Number(s.signalEvaluations)+" · NO_SETUP "+Number(s.noSetupSignals||0)+" · WATCH "+Number(s.watchSignals||0)+" · candidates "+Number(s.candidateSignals||0)+" · evaluation errors "+Number(s.signalEvaluationErrors||0)
+    :"Signal-level diagnostics appear after the next validated Worker scan";
+   const historyLine="History "+Number(h.dailyCandles||0)+" daily / "+Number(h.fourHourCandles||0)+" 4h · latest contiguous "+Number(h.latestContiguousFourHourCandles||0)+" / "+Number(s.requiredLatestContiguousFourHourCandles||270)+" required 4h bars";
+   const costLine="Modelled costs "+(Number.isFinite(Number(costs.feeRate))?(Number(costs.feeRate)*100).toFixed(2)+"% fee":"—")+" per side · "+Number(costs.slippageBps??15)+" bps slippage · "+Number(costs.spreadBps??50)+" bps spread";
+   const failed=(s.topFailedChecks||[]).slice(0,5).map(x=>String(x.check||"").replaceAll("_"," ")+" ("+Number(x.count||0)+")").join(" · ");
+   const limitations=Array.isArray(b.limitations)?b.limitations.slice(0,2).join(" · "):"";
+   return '<article class="integration"><b>'+esc(m.pair||m.coin)+' · EARLY-REVERSAL SHADOW</b><small>'+esc(status)+'</small><small>'+esc(resultLine)+'</small><small>'+esc(signalLine)+'</small><small>'+esc(historyLine)+'</small><small>'+esc(costLine)+'</small>'+(failed?'<small>Most frequent failed gates: '+esc(failed)+'</small>':'')+(b.error?'<small>'+esc(b.error)+'</small>':'')+(m.shadowBacktestError?'<small>'+esc(m.shadowBacktestError)+'</small>':'')+(limitations?'<small>'+esc(limitations)+'</small>':'')+'<em>Research only · cannot enter the paper ledger</em></article>';
+  }).join("")||'<div class="empty">Waiting for cost-adjusted historical research.</div>';
   $("mtfPaperTrades").innerHTML=a.closedTrades?.length?a.closedTrades.slice().reverse().slice(0,10).map(t=>'<div class="market-row"><div><b>'+esc(t.pair)+'</b><div class="market-meta">'+esc(t.reason)+' · '+esc(t.closedAt)+'</div></div><b>'+esc(fmt(t.pnlAud))+'</b></div>').join(""):'<div class="empty">No automated paper trades recorded yet.</div>';
  }catch(e){$("coinSpotMtfPaperStatus").textContent="PAPER ENGINE UNAVAILABLE · "+e.message;}
  finally{if(button){button.disabled=false;button.textContent="Run paper scan now";}}
