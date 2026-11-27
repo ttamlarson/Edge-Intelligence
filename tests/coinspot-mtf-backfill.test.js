@@ -88,7 +88,7 @@ test("CoinSpot MTF runner backfills four UTC dates per scan and remains paper-on
 
     assert.equal(result.backfillDaysRequested, 4);
     assert.equal(result.backfillDaysProcessed, 4);
-    assert.equal(result.historyRequestBudgetThisScan, 30);
+    assert.equal(result.historyRequestBudgetThisScan, 36);
     assert.equal(result.providerProbeBudgetGuardApplied, false);
     assert.ok(result.historyRequestsThisScan <= result.historyRequestBudgetThisScan);
     assert.equal(result.historySync.processedDate, "2026-07-31");
