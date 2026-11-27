@@ -33,7 +33,7 @@ test("crypto buy-and-hold benchmark scales capital and reports account return pe
  assert.equal(benchmark.startingCapitalQuote,500);
  assert.equal(benchmark.allocationPct,50);
  assert.ok(Number.isFinite(benchmark.profitLossQuote));
- assert.equal(benchmark.returnPct,Math.round((benchmark.profitLossQuote/500*100+Number.EPSILON)*10000)/10000);
+ assert.equal(benchmark.returnPct,Math.round((benchmark.profitLossQuote/500*100+Number.EPSILON)*100)/100);
  assert.notEqual(benchmark.returnPct,benchmark.profitLossQuote);
 });
 
