@@ -104,3 +104,46 @@ test("short ETH-like contiguous history remains research-only and cannot create 
   assert.equal(result.execution.eligibleForPaperLedger, false);
   assert.equal(result.execution.liveTradingEnabled, false);
 });
+
+
+test("walk-forward accepts multiple reconciled zero-trade intervals without fabricating candles", () => {
+  const { dailyCandles, fourHourCandles, now } = fixtures();
+  const missingIndexes = [180, 300];
+  const confirmedZeroTradeIntervals = missingIndexes.map(index => ({
+    startAt: fourHourCandles[index].timestamp,
+    endAt: new Date(Date.parse(fourHourCandles[index].timestamp) + 4 * 60 * 60 * 1000).toISOString(),
+    status: "CONFIRMED_NO_TRADES"
+  }));
+  const retained = fourHourCandles.filter((_, index) => !missingIndexes.includes(index));
+  const result = walkForwardEarlyReversalShadow({
+    dailyCandles,
+    fourHourCandles: retained,
+    confirmedZeroTradeIntervals,
+    market: "ETH/AUD",
+    now
+  });
+  assert.equal(result.history.latestValidatedFourHourCandles, 418);
+  assert.equal(result.history.confirmedZeroTradeIntervals, 2);
+  assert.equal(result.history.unverifiedGapCount, 0);
+  assert.equal(result.folds.length, 3);
+  assert.equal(result.summary.signalEvaluationErrors, 0);
+  assert.equal(result.execution.orderIntent, "NONE");
+  assert.equal(result.execution.eligibleForPaperLedger, false);
+});
+
+test("walk-forward rejects zero-trade evidence with the wrong status or interval", () => {
+  const { dailyCandles, fourHourCandles, now } = fixtures();
+  const missing = fourHourCandles[180];
+  const retained = fourHourCandles.filter((_, index) => index !== 180);
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles,
+    fourHourCandles: retained,
+    confirmedZeroTradeIntervals: [{
+      startAt: missing.timestamp,
+      endAt: new Date(Date.parse(missing.timestamp) + 4 * 60 * 60 * 1000).toISOString(),
+      status: "UNVERIFIED_GAP"
+    }],
+    market: "BTC/AUD",
+    now
+  }), /invalid zero-trade gap evidence/i);
+});
