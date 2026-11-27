@@ -100,12 +100,41 @@ test("AI calibration never pools outcomes across different model versions", () =
   const result = calculateAsxAiCalibration(rows, {
     holdoutFraction: 0.25, minimumReferenceSamples: 10, minimumOutOfSampleSamples: 5
   });
-  assert.equal(result.status, "MIXED_MODEL_VERSIONS_SEPARATE_DIAGNOSTICS");
+  assert.equal(result.status, "MIXED_MODEL_OR_REVIEW_POLICY_VERSIONS_SEPARATE_DIAGNOSTICS");
   assert.equal(result.outOfSample, null);
   assert.equal(result.outOfSampleSampleCount, 0);
   assert.equal(result.modelDiagnostics.length, 2);
   assert.deepEqual(result.modelDiagnostics.map(item => item.model), ["model-a", "model-b"]);
   assert.ok(result.modelDiagnostics.every(item => item.outOfSampleSampleCount === 5));
+});
+
+
+test("AI calibration separates review-policy versions even when the provider model is unchanged", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => {
+    const row = trade(i, 0.6, i % 2 === 0);
+    row.aiReview.reviewPolicyVersion = i < 20 ? "ASX_AI_REVIEW_V2" : "ASX_AI_REVIEW_V3";
+    row.aiReview.requestStartedAt = row.aiReview.reviewedAt;
+    Object.assign(row.aiReview.inputProvenance, {
+      sourceMetadataVersion: 1,
+      sourceUrl: "https://datacedar.com/markets/australia",
+      retrievedAt: row.aiReview.reviewedAt,
+      exchange: "ASX",
+      timeframe: "1d",
+      adjustment: "raw",
+      dataClass: "historical_market_data_not_realtime",
+      providerRowsForSymbol: 55
+    });
+    return row;
+  });
+  const result = calculateAsxAiCalibration(rows, {
+    holdoutFraction: 0.25, minimumReferenceSamples: 10, minimumOutOfSampleSamples: 5
+  });
+  assert.equal(result.status, "MIXED_MODEL_OR_REVIEW_POLICY_VERSIONS_SEPARATE_DIAGNOSTICS");
+  assert.equal(result.modelVersions.length, 1);
+  assert.deepEqual(result.reviewPolicyVersions, ["ASX_AI_REVIEW_V2", "ASX_AI_REVIEW_V3"]);
+  assert.equal(result.modelDiagnostics.length, 2);
+  assert.deepEqual(result.modelDiagnostics.map(item => item.reviewPolicyVersion), ["ASX_AI_REVIEW_V2", "ASX_AI_REVIEW_V3"]);
+  assert.equal(result.outOfSample, null);
 });
 
 test("subjective confidence bands remain descriptive and carry wide-sample uncertainty",()=>{
