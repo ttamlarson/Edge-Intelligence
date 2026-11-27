@@ -1460,6 +1460,9 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       indicatorFourHourCandles: m.history?.indicatorFourHourCandles ?? m.history?.fourHourCandles ?? 0,
       indicatorFourHourGapCount: m.history?.indicatorFourHourGapCount ?? m.history?.fourHourGapCount ?? 0,
       indicatorFourHourHistoryMode: m.history?.indicatorFourHourHistoryMode ?? "UNKNOWN",
+      indicatorFourHourExcludedCandles: m.history?.indicatorFourHourExcludedCandles ?? 0,
+      indicatorFourHourExcludedStartDays: m.history?.indicatorFourHourExcludedStartDays ?? [],
+      indicatorFourHourBoundaryStatus: m.history?.indicatorFourHourBoundaryStatus ?? "UNKNOWN",
       signalWindowElapsedIntervals: m.history?.signalWindowElapsedIntervals ?? m.history?.signalWindowFourHourCandles ?? 0,
       signalWindowMissingIntervals: m.history?.signalWindowMissingIntervals ?? 0,
       signalWindowConfirmedZeroTradeIntervals: m.history?.signalWindowConfirmedZeroTradeIntervals ?? 0,
@@ -1510,6 +1513,24 @@ async function getCoinSpotMtfPaper(env) {
   let snapshot;
   try { snapshot = JSON.parse(status); } catch { throw new HttpError(502, "CoinSpot MTF paper status is invalid JSON."); }
   return { ...snapshot, ...account, performance: calculateMtfPaperPerformance(account), markets: snapshot.markets || [], lastScanAt: snapshot.lastScanAt || null, status: snapshot.status || "PAPER_ENGINE_WAITING", liveTradingEnabled: false };
+}
+
+function trimPartialFirstFourHourDays(candles) {
+  let retained = Array.isArray(candles) ? candles : [];
+  const excludedStartDays = [];
+  while (retained.length) {
+    const firstAt = Date.parse(retained[0]?.timestamp || "");
+    if (!Number.isFinite(firstAt)) break;
+    const firstDay = new Date(firstAt).toISOString().slice(0, 10);
+    const dayStart = Date.parse(firstDay + "T00:00:00.000Z");
+    if (firstAt === dayStart) break;
+    excludedStartDays.push(firstDay);
+    // The retained series begins mid-day, so its first EMA window has no
+    // preceding close with which to time-adjust the missing leading buckets.
+    // Drop the entire partial UTC day and repeat until the boundary is aligned.
+    retained = retained.filter(candle => String(candle?.timestamp || "").slice(0, 10) !== firstDay);
+  }
+  return { candles: retained, excludedStartDays };
 }
 
 function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
@@ -1647,14 +1668,26 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     // full series is valid and has at most one reconciled zero-trade interval.
     // Entry readiness still uses the latest 240 actual bars; older unverified
     // or multiple gaps fall back to that signal window rather than being guessed.
-    const confirmedIndicatorHistoryGaps=historySummary.fourHourGapDiagnostics.filter(item=>item.status==="CONFIRMED_NO_TRADES");
-    const unverifiedIndicatorHistoryGaps=historySummary.fourHourGapDiagnostics.filter(item=>item.status!=="CONFIRMED_NO_TRADES");
-    const useFullIndicatorHistory=unverifiedIndicatorHistoryGaps.length===0&&confirmedIndicatorHistoryGaps.length<=1;
-    const indicatorFourHourCandles=useFullIndicatorHistory?fourHour:fourHourSignalWindow;
+    const indicatorHistoryBoundary=trimPartialFirstFourHourDays(fourHour);
+    const indicatorHistoryStartAt=Date.parse(indicatorHistoryBoundary.candles[0]?.timestamp||"");
+    const indicatorHistoryGapDiagnostics=historySummary.fourHourGapDiagnostics.filter(item=>
+      Number.isFinite(indicatorHistoryStartAt)&&Date.parse(item.startAt)>=indicatorHistoryStartAt
+    );
+    const confirmedIndicatorHistoryGaps=indicatorHistoryGapDiagnostics.filter(item=>item.status==="CONFIRMED_NO_TRADES");
+    const unverifiedIndicatorHistoryGaps=indicatorHistoryGapDiagnostics.filter(item=>item.status!=="CONFIRMED_NO_TRADES");
+    const useFullIndicatorHistory=indicatorHistoryBoundary.candles.length>=210&&
+      unverifiedIndicatorHistoryGaps.length===0&&confirmedIndicatorHistoryGaps.length<=1;
+    const indicatorFourHourCandles=useFullIndicatorHistory?indicatorHistoryBoundary.candles:fourHourSignalWindow;
     const indicatorConfirmedZeroTradeGaps=useFullIndicatorHistory?confirmedIndicatorHistoryGaps:confirmedSignalWindowGaps;
     historySummary.indicatorFourHourCandles=indicatorFourHourCandles.length;
     historySummary.indicatorFourHourGapCount=indicatorConfirmedZeroTradeGaps.length;
-    historySummary.indicatorFourHourHistoryMode=useFullIndicatorHistory?"FULL_VALIDATED_HISTORY":"SIGNAL_WINDOW_FALLBACK";
+    historySummary.indicatorFourHourExcludedStartDays=indicatorHistoryBoundary.excludedStartDays;
+    historySummary.indicatorFourHourExcludedCandles=fourHour.length-indicatorHistoryBoundary.candles.length;
+    historySummary.indicatorFourHourBoundaryStatus=indicatorHistoryBoundary.excludedStartDays.length
+      ?"PARTIAL_START_DAYS_EXCLUDED":"ALIGNED_UTC_DAY_START";
+    historySummary.indicatorFourHourHistoryMode=useFullIndicatorHistory
+      ?(indicatorHistoryBoundary.excludedStartDays.length?"FULL_VALIDATED_HISTORY_START_DAYS_EXCLUDED":"FULL_VALIDATED_HISTORY")
+      :"SIGNAL_WINDOW_FALLBACK";
     const elapsedSignalWindowIntervals=fourHourSignalWindow.length
       ? Math.round((signalWindowEnd-signalWindowStart)/COINSPOT_INTERVALS.fourHour)+1 : 0;
     historySummary.signalWindowFourHourCandles=fourHourSignalWindow.length;
@@ -1674,6 +1707,10 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
     }
     if(fourHourSignalWindow.length<210){
       readiness.push("Four-hour signal history "+fourHourSignalWindow.length+"/210 actual completed candles");
+    }
+    if(indicatorHistoryBoundary.candles.length<210){
+      readiness.push("Four-hour indicator history after excluding partial leading UTC days "+
+        indicatorHistoryBoundary.candles.length+"/210 actual completed candles");
     }
     if(unverifiedSignalWindowGaps.length){
       readiness.push("Four-hour signal window contains unverified gap(s): "+
@@ -2111,6 +2148,9 @@ export default {
             signalWindowFourHourCandles: market.signalWindowFourHourCandles,
             indicatorFourHourCandles: market.indicatorFourHourCandles,
             indicatorFourHourHistoryMode: market.indicatorFourHourHistoryMode,
+            indicatorFourHourExcludedCandles: market.indicatorFourHourExcludedCandles,
+            indicatorFourHourExcludedStartDays: market.indicatorFourHourExcludedStartDays,
+            indicatorFourHourBoundaryStatus: market.indicatorFourHourBoundaryStatus,
             storedDailyCandles: market.storedDailyCandles,
             storedFourHourCandles: market.storedFourHourCandles,
             lastCompletedDailyAt: market.lastCompletedDailyAt,
