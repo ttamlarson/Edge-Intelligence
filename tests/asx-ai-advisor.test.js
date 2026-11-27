@@ -217,6 +217,6 @@ test("ASX review identifiers separate model versions for the same candidate and 
  const first=await review("model-a"),second=await review("model-b");
  assert.equal(first.inputProvenance.fingerprint,second.inputProvenance.fingerprint);
  assert.notEqual(first.reviewId,second.reviewId);
- assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint.slice(0,16)));
- assert.ok(second.reviewId.endsWith(second.inputProvenance.fingerprint.slice(0,16)));
+ assert.ok(first.reviewId.endsWith(first.inputProvenance.fingerprint));
+ assert.ok(second.reviewId.endsWith(second.inputProvenance.fingerprint));
 });
