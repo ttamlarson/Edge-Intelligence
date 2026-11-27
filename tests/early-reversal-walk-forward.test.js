@@ -38,6 +38,7 @@ test("early-reversal walk-forward uses chronological folds and conservative Coin
   assert.equal(result.parameters.maxDailyLossAud, 3);
   assert.equal(result.folds.length, 3);
   assert.ok(result.folds.every(fold => fold.testBars >= 20));
+  assert.equal(result.summary.worstFoldMaxDrawdownPct, Math.max(...result.folds.map(fold => fold.maxDrawdownPct)));
   assert.equal(result.execution.orderIntent, "NONE");
   assert.equal(result.execution.paperOnly, true);
   assert.equal(result.execution.shadowOnly, true);
@@ -95,4 +96,15 @@ test("short ETH-like contiguous history remains research-only and cannot create 
   assert.equal(result.execution.orderIntent, "NONE");
   assert.equal(result.execution.eligibleForPaperLedger, false);
   assert.equal(result.execution.liveTradingEnabled, false);
+});
+
+test("walk-forward rejects null clocks and unbounded out-of-sample thresholds", () => {
+  const { dailyCandles, fourHourCandles, now } = fixtures();
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles, fourHourCandles, market: "BTC/AUD", now: null
+  }), /invalid.*clock|invalid.*cost|invalid.*fold/i);
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles, fourHourCandles, market: "BTC/AUD", now,
+    minimumOutOfSampleTrades: 10001
+  }), /invalid.*fold/i);
 });
