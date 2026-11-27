@@ -925,7 +925,7 @@ async function probeCoinSpotProviders(env, clock) {
   return probe;
 }
 
-async function syncCoinSpotMtfHistory(env,now=new Date()) {
+async function syncCoinSpotMtfHistory(env,now=new Date(),options={}) {
   if(!env.EDGE_KV) return {status:"STORAGE_UNAVAILABLE",liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now);
   if(!Number.isFinite(clock)) return {status:"INVALID_SYNC_CLOCK",liveTradingEnabled:false};
@@ -1118,11 +1118,14 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     const market=pending.coins[coin];
     return [coin,{complete:market.complete,pendingWindows:market.windows.length,partialTradeCount:market.trades.length,apiCallsTotal:market.apiCallsTotal}];
   }));
-  return {
+  const result = {
     status,processedDate:dateComplete?targetDate:state.lastProcessedDate||null,
     targetDate,nextDate,dateComplete,progress:progressSummary,
+    lastSyncAt:state.lastSyncAt || null,
     markets:outcomes,providerProbe:state.providerProbe||null,liveTradingEnabled:false
   };
+  if (options?.includeState === true) result.historyState = state;
+  return result;
 }
 
 
@@ -1441,13 +1444,27 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
     throw new HttpError(409, "CoinSpot MTF paper scan timestamp is older than the stored ledger; history and ledger were not changed.");
   }
   let historySync = null, syncError = null, backfillDaysProcessed = 0;
+  let syncedHistoryState = null;
   const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
   let historyRequestsThisScan = 0;
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
     for (let i = 0; i < backfillDaysRequested; i++) {
       try {
-        historySync = await syncCoinSpotMtfHistory(env, new Date(clock));
-        if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) break;
+        const syncResult = await syncCoinSpotMtfHistory(env, new Date(clock), { includeState: true });
+        const syncSnapshot = { ...syncResult };
+        if (syncSnapshot.historyState && typeof syncSnapshot.historyState === "object" && !Array.isArray(syncSnapshot.historyState)) {
+          syncedHistoryState = syncSnapshot.historyState;
+        }
+        delete syncSnapshot.historyState;
+        historySync = syncSnapshot;
+        if (!["BACKFILLING", "COLLECTING_LIVE_DAY"].includes(historySync.status)) {
+          syncError = `CoinSpot history sync stopped with status ${String(historySync.status || "UNKNOWN")}.`;
+          break;
+        }
+        if (!syncedHistoryState) {
+          syncError = "CoinSpot history sync did not return its validated in-memory snapshot.";
+          break;
+        }
         historyRequestsThisScan += (historySync.markets || []).reduce((sum, market) => sum + Math.max(0, Number(market.apiCalls) || 0), 0);
         if (historySync.dateComplete !== true) break;
         backfillDaysProcessed++;
@@ -1458,18 +1475,64 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       }
     }
   } else syncError = "CoinSpot Read Only API credentials are not configured.";
+  const emptyHistoryState = {
+    mode: "COINSPOT_AUD_RESEARCH_ONLY",
+    status: "DATA_OR_SYNC_WARNING",
+    nextDate: null,
+    markets: Object.fromEntries(COINSPOT_MTF_COINS.map(coin => [coin, {
+      dailyCandles: [], fourHourCandles: [], tradesFetched: 0,
+      tradesFetchedBase: 0, tradesFetchedByDate: {}
+    }])),
+    liveTradingEnabled: false
+  };
+  const strategyHistoryState = syncError ? emptyHistoryState : syncedHistoryState;
   let strategy;
-  try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock)); }
-  catch (error) { strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false }; syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220); }
-  const aiReviews = await Promise.all((strategy.markets || []).map(async market => ({
+  try { strategy = await getCoinSpotMtfStrategy(env, new Date(clock), strategyHistoryState); }
+  catch (error) {
+    strategy = { status: "STRATEGY_DATA_UNAVAILABLE", markets: [], liveTradingEnabled: false };
+    syncError ||= String(error?.message || "Strategy data unavailable").slice(0, 220);
+  }
+  const historyRevisionMatches = Boolean(!syncError && syncedHistoryState &&
+    strategy.lastSyncAt === syncedHistoryState.lastSyncAt &&
+    strategy.nextDate === syncedHistoryState.nextDate);
+  if (!syncError && !historyRevisionMatches) {
+    syncError = "CoinSpot strategy history did not match the latest in-memory sync snapshot.";
+  }
+  if (syncError) {
+    const warning = String(syncError).replace(/\s+/g, " ").slice(0, 220);
+    strategy = {
+      ...strategy,
+      status: "DATA_OR_SYNC_WARNING",
+      markets: (strategy.markets || []).map(market => ({
+        ...market,
+        signal: null,
+        signalStatus: "DATA_OR_SYNC_WARNING",
+        signalError: [market.signalError, warning].filter(Boolean).join("; ").slice(0, 220),
+        shadowSignal: null,
+        shadowSignalError: "History sync was not confirmed; shadow signal withheld.",
+        shadowBacktest: null,
+        shadowBacktestError: "History sync was not confirmed; shadow backtest withheld."
+      }))
+    };
+  }
+  const historySyncConsistency = {
+    status: syncError ? "BLOCKED_SYNC_ERROR" : historyRevisionMatches ? "CONSISTENT_IN_MEMORY_SNAPSHOT" : "MISMATCH",
+    historyLastSyncAt: syncedHistoryState?.lastSyncAt || null,
+    strategyLastSyncAt: strategy.lastSyncAt || null,
+    historyNextDate: syncedHistoryState?.nextDate || null,
+    strategyNextDate: strategy.nextDate || null
+  };
+  const aiReviews = syncError ? [] : await Promise.all((strategy.markets || []).map(async market => ({
     coin: market.coin, review: await reviewCoinSpotMtfCandidate(env, market, nowIso)
   })));
-  const aiGate = applyCoinSpotMtfAiGate(strategy.markets || [], aiReviews);
-  account = processMtfPaperAccount(account, { markets: aiGate.markets, now: nowIso });
+  const aiGate = syncError
+    ? { markets: strategy.markets || [], gates: {} }
+    : applyCoinSpotMtfAiGate(strategy.markets || [], aiReviews);
+  account = processMtfPaperAccount(account, { markets: aiGate.markets, now: nowIso, allowNewEntries: !syncError });
   await env.EDGE_KV.put(accountKey, JSON.stringify(account));
   const snapshot = {
     ...account, performance: calculateMtfPaperPerformance(account, nowIso), status: syncError ? "DATA_OR_SYNC_WARNING" : strategy.status || "PAPER_ENGINE_ACTIVE",
-    strategyStatus: strategy.status || "UNKNOWN", historySync,
+    strategyStatus: strategy.status || "UNKNOWN", historySync, historySyncConsistency,
     backfillDaysRequested, backfillDaysProcessed, historyRequestsThisScan, lastScanAt: nowIso,
     lastError: syncError, markets: (strategy.markets || []).map(m => ({
       coin: m.coin, pair: m.pair,
@@ -1750,11 +1813,15 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
   };
 }
 
-async function getCoinSpotMtfStrategy(env,now=new Date()) {
+async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
   let state;
-  try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
-  catch { throw new HttpError(502,"CoinSpot strategy history cache is invalid JSON."); }
+  if (stateOverride && typeof stateOverride === "object" && !Array.isArray(stateOverride)) {
+    state = stateOverride;
+  } else {
+    try { state=JSON.parse(await env.EDGE_KV.get(COINSPOT_MTF_KEY)||"null"); }
+    catch { throw new HttpError(502,"CoinSpot strategy history cache is invalid JSON."); }
+  }
   if(!state) state={mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"HISTORY_SYNC_NOT_STARTED",markets:{},liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
   for(const coin of COINSPOT_MTF_COINS){

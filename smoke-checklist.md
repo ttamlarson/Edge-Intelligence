@@ -249,3 +249,11 @@
 - [ ] Confirm strategy comparison reports quote-currency netPnlQuote and percentage returnPct independently; missing percentage metrics remain null and are never copied from currency P&L.
 - [ ] Run the crypto walk-forward with two starting-capital values; confirm the 50% buy-and-hold allocation scales proportionally and benchmark returnPct equals net quote P&L divided by starting account capital, not the raw P&L amount.
 - [ ] Confirm the crypto AI review remains advisory only, no model confidence is presented as calibrated probability, and all paper/live safety controls remain unchanged.
+
+
+## CoinSpot MTF KV consistency and sync-failure handling
+
+- [ ] Confirm the scheduled paper runner reads the history KV value once for sync, then evaluates the exact in-memory snapshot returned by that sync rather than performing a second potentially stale KV read.
+- [ ] Confirm historySyncConsistency reports CONSISTENT_IN_MEMORY_SNAPSHOT when sync and strategy revisions match, and never includes the internal history arrays in the public status payload.
+- [ ] Simulate an invalid/failed history sync and verify new entries and AI review are blocked for that scan while fresh public BTC/AUD and ETH/AUD quotes remain available for existing-position stop and loss management.
+- [ ] Confirm the paper ledger remains paperOnly: true and liveTradingEnabled: false; fees, slippage, position sizing, stops and loss limits remain unchanged.

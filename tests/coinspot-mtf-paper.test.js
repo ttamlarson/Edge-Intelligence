@@ -378,3 +378,26 @@ test("migrates a legacy open-position ledger whose stored daily loss omitted its
  assert.ok(upgraded.dailyLossAud>=Math.max(0,-opened.unrealizedPnlAud));
  assert.equal(validateMtfPaperAccount(upgraded),true);
 });
+
+
+test("sync-warning scans block new MTF entries while preserving protective stop exits",()=>{
+ const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now,allowNewEntries:false});
+ assert.equal(blocked.openPosition,null);
+ assert.equal(blocked.cashAud,100);
+ assert.deepEqual(blocked.lastProcessed,{});
+ assert.deepEqual(blocked.lastCandidateRanking,[]);
+
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const stop=opened.openPosition.stopPrice;
+ const stopped={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[stopped],now:"2026-11-25T09:00:00.000Z",allowNewEntries:false});
+ assert.equal(closed.openPosition,null);
+ assert.equal(closed.closedTrades.at(-1).reason,"TRAILING_STOP");
+ assert.equal(closed.paperOnly,true);
+ assert.equal(closed.liveTradingEnabled,false);
+});

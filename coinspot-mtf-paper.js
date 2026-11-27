@@ -299,7 +299,7 @@ function buildMtfCandidateRanking(markets, account, now) {
   return ranked.map((item, index) => ({ ...item, rank: index + 1 }));
 }
 
-export function processMtfPaperAccount(account, {markets=[], now=new Date().toISOString()}={}) {
+export function processMtfPaperAccount(account, {markets=[], now=new Date().toISOString(), allowNewEntries=true}={}) {
   if (!validTimestamp(now)) throw new Error("CoinSpot MTF paper scan timestamp must be canonical UTC ISO; stored data was not changed.");
   const scanAt = Date.parse(now);
   let a = account ? structuredClone(account) : createMtfPaperAccount(now);
@@ -361,7 +361,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
   }
 
   a.lastCandidateRanking = [];
-  if (!a.openPosition && a.dailyLossAud < MTF_PAPER_CONFIG.maxDailyLossAud) {
+  if (allowNewEntries === true && !a.openPosition && a.dailyLossAud < MTF_PAPER_CONFIG.maxDailyLossAud) {
     const rankedCandidates = buildMtfCandidateRanking(markets, a, now);
     a.lastCandidateRanking = rankedCandidates.map(({ market, ...item }) => ({
       rank:item.rank, coin:item.coin, pair:item.pair, signalAt:item.signalAt, entryModel:item.entryModel,

@@ -109,6 +109,65 @@ test("CoinSpot MTF paper runner advances history and creates a paper-only AUD le
  }finally{globalThis.fetch=originalFetch;}
 });
 
+test("paper runner uses the exact in-memory history snapshot returned by its sync batch",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ let historyReads=0;
+ const binding={
+  get:async key=>{
+   if(key==="coinspot-mtf-history-global-v1")historyReads++;
+   return kv.binding.get(key);
+  },
+  put:kv.binding.put
+ };
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:101,last:100.5}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""}, "2026-11-25T08:00:00.000Z", 1);
+  assert.equal(historyReads,1,"strategy evaluation must not re-read eventually consistent KV after the sync write");
+  assert.equal(result.historySync.lastSyncAt,"2026-11-25T08:00:00.000Z");
+  assert.equal(result.historySyncConsistency.status,"CONSISTENT_IN_MEMORY_SNAPSHOT");
+  assert.equal(result.historySyncConsistency.historyLastSyncAt,"2026-11-25T08:00:00.000Z");
+  assert.equal(result.historySyncConsistency.strategyLastSyncAt,"2026-11-25T08:00:00.000Z");
+  assert.equal(Object.hasOwn(result.historySync,"historyState"),false,"internal history state must not be persisted in the public status snapshot");
+  assert.equal(result.paperOnly,true);
+  assert.equal(result.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test("history sync errors block new MTF signals but retain fresh public AUD quotes",async()=>{
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const now="2026-11-25T08:00:00.000Z";
+ globalThis.fetch=async(url,options={})=>{
+  const target=String(url);
+  if(target.includes("/pubapi/v2/latest/")){
+   return new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:101,last:100.5}}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
+  if(target.includes("/pubapi/v2/orders/completed/")){
+   return new Response(JSON.stringify({status:"ok",orders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+  }
+  if(target.endsWith("/orders/market/completed")){
+   return new Response(JSON.stringify({status:"error"}),{status:503,headers:{"Content-Type":"application/json"}});
+  }
+  return new Response(JSON.stringify({status:"ok",buyorders:[],sellorders:[]}),{status:200,headers:{"Content-Type":"application/json"}});
+ };
+ try{
+  const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret",OPENAI_API_KEY:""},now,1);
+  assert.equal(result.status,"DATA_OR_SYNC_WARNING");
+  assert.equal(result.historySyncConsistency.status,"BLOCKED_SYNC_ERROR");
+  assert.ok(result.lastError);
+  assert.equal(result.markets.length,2);
+  assert.ok(result.markets.every(market=>market.signalStatus==="DATA_OR_SYNC_WARNING"));
+  assert.ok(result.markets.every(market=>market.quoteRetrievedAt===now));
+  assert.equal(result.paperOnly,true);
+  assert.equal(result.liveTradingEnabled,false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
 test("CoinSpot read-only transport retries once with a fresh signed nonce",async()=>{
  const originalFetch=globalThis.fetch,calls=[];
  globalThis.fetch=async(url,options)=>{

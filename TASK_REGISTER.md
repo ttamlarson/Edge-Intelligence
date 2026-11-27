@@ -348,3 +348,13 @@ Updated after local implementation and automated verification on `edge-productio
 - Regression tests added for daily-loss headroom, risk/spread ranking, feedback completeness, MTF AI review cache/provenance/failure paths, missing history counts and duplicate Sydney sessions.
 - Validation boundary: latest Pages preview deployment succeeded, but the Pages project has an empty build command. GitHub Actions workflow-run retrieval returned no records, so npm test, npm run check and npm run build:pages are not verified. PR #81 remains draft/unmerged; no Worker or production Pages deployment was made.
 - All trading remains simulated. No broker credentials, live order routes, real-money execution or user-data resets were introduced.
+
+
+## 2026-11-27 — CoinSpot MTF KV read-after-write consistency
+
+- [x] Pass the validated in-memory history state from the completed read-only sync batch directly into strategy evaluation, avoiding an immediate KV re-read that can observe an older edge-cache value.
+- [x] Add historySyncConsistency telemetry so the runtime reports whether the strategy consumed the same sync timestamp and cursor.
+- [x] Fail closed for new entries and AI review when history sync is missing, invalid, unsuccessful or inconsistent. Continue retrieving public AUD quotes so existing paper positions retain quote/stop/daily-loss management.
+- [x] Add regression tests for the single-read snapshot handoff, sync-error blocking and protective exits while entry creation is disabled.
+- [x] Keep the A$100 paper ledger, validated BTC/AUD and ETH/AUD inputs, fee/slippage assumptions, position sizing, stops, daily-loss cap and live-trading safety flags unchanged.
+- Validation: awaiting GitHub CI and post-merge Worker/Pages deployment verification. No real CoinSpot order, withdrawal or transfer was submitted.
