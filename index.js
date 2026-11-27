@@ -502,6 +502,7 @@ const COINSPOT_MTF_KV_WRITE_RETRY_DELAYS_MS = Object.freeze([1200, 2400, 4800]);
 const COINSPOT_MTF_KV_RETRY_JITTER_MS = 300;
 let coinSpotMtfHistoryWriteQueue = Promise.resolve();
 let coinSpotMtfHistoryLastWriteAt = 0;
+let coinSpotMtfHistorySyncLocalQueue = Promise.resolve();
 
 async function persistCoinSpotMtfHistory(env, state) {
   const serialized = JSON.stringify(state);
@@ -531,6 +532,63 @@ async function persistCoinSpotMtfHistory(env, state) {
   });
   coinSpotMtfHistoryWriteQueue = write.then(() => undefined, () => undefined);
   return write;
+}
+
+// Serialize the entire history/ledger operation across scheduled and HTTP
+// invocations. The Durable Object is a global atomic lease; the local queue is
+// only a Node test/development fallback and is never used in the deployed Worker.
+async function withCoinSpotMtfHistorySyncLock(env, work) {
+  const namespace = env.COINSPOT_EXECUTION_COORDINATOR;
+  if (!namespace || typeof namespace.idFromName !== "function" || typeof namespace.get !== "function") {
+    if (typeof process === "undefined") {
+      const unavailable = new Error("CoinSpot MTF global sync lock is not configured; no history or ledger writes were attempted.");
+      unavailable.code = "COINSPOT_MTF_SYNC_LOCK_UNAVAILABLE";
+      throw unavailable;
+    }
+    const queued = coinSpotMtfHistorySyncLocalQueue.then(work, work);
+    coinSpotMtfHistorySyncLocalQueue = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+
+  const id = namespace.idFromName("coinspot-mtf-history-sync-global");
+  const stub = namespace.get(id);
+  const leaseId = crypto.randomUUID();
+  let acquired;
+  try {
+    acquired = await stub.fetch("https://coordinator.internal/paper-sync/acquire", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leaseId })
+    });
+  } catch {
+    const unavailable = new Error("CoinSpot MTF global sync lock could not be reached; no history or ledger writes were attempted.");
+    unavailable.code = "COINSPOT_MTF_SYNC_LOCK_UNAVAILABLE";
+    throw unavailable;
+  }
+  if (acquired.status === 409) {
+    const locked = new Error("CoinSpot MTF history/paper sync is already running.");
+    locked.code = "COINSPOT_MTF_SYNC_LOCKED";
+    throw locked;
+  }
+  if (!acquired.ok) {
+    const unavailable = new Error("CoinSpot MTF global sync lock rejected the lease; no history or ledger writes were attempted.");
+    unavailable.code = "COINSPOT_MTF_SYNC_LOCK_UNAVAILABLE";
+    throw unavailable;
+  }
+
+  try {
+    return await work();
+  } finally {
+    try {
+      await stub.fetch("https://coordinator.internal/paper-sync/release", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leaseId })
+      });
+    } catch {
+      // The Durable Object lease expires automatically if release cannot be confirmed.
+    }
+  }
 }
 
 function createCoinSpotHistoryProgress(targetDate, startMs, endMs) {
@@ -933,7 +991,7 @@ async function probeCoinSpotProviders(env, clock) {
   return probe;
 }
 
-async function syncCoinSpotMtfHistory(env,now=new Date(),options={}) {
+async function syncCoinSpotMtfHistoryUnlocked(env,now=new Date(),options={}) {
   if(!env.EDGE_KV) return {status:"STORAGE_UNAVAILABLE",liveTradingEnabled:false};
   const clock=now instanceof Date?now.getTime():Date.parse(now);
   if(!Number.isFinite(clock)) return {status:"INVALID_SYNC_CLOCK",liveTradingEnabled:false};
@@ -1136,6 +1194,10 @@ async function syncCoinSpotMtfHistory(env,now=new Date(),options={}) {
   return result;
 }
 
+
+async function syncCoinSpotMtfHistory(env, now = new Date(), options = {}) {
+  return withCoinSpotMtfHistorySyncLock(env, () => syncCoinSpotMtfHistoryUnlocked(env, now, options));
+}
 
 const COINSPOT_MTF_AI_REVIEW_POLICY_VERSION = "COINSPOT_MTF_AI_REVIEW_V3";
 const COINSPOT_MTF_AI_REVIEW_MAX_RESPONSE_CHARS = 8000;
@@ -1432,7 +1494,7 @@ function applyCoinSpotMtfAiGate(markets = [], aiReviews = []) {
   return { markets: gatedMarkets, gates };
 }
 
-async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
+async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays = 4) {
   if (!env.EDGE_KV) throw new HttpError(503, "Persistent CoinSpot paper storage is not configured.");
   const clock = now instanceof Date ? now.getTime() : Date.parse(now);
   if (!Number.isFinite(clock)) throw new HttpError(400, "Invalid paper scan clock.");
@@ -1458,7 +1520,7 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
     for (let i = 0; i < backfillDaysRequested; i++) {
       try {
-        const syncResult = await syncCoinSpotMtfHistory(env, new Date(clock), { includeState: true });
+        const syncResult = await syncCoinSpotMtfHistoryUnlocked(env, new Date(clock), { includeState: true });
         const syncSnapshot = { ...syncResult };
         if (syncSnapshot.historyState && typeof syncSnapshot.historyState === "object" && !Array.isArray(syncSnapshot.historyState)) {
           syncedHistoryState = syncSnapshot.historyState;
@@ -1603,6 +1665,10 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
   };
   await env.EDGE_KV.put(statusKey, JSON.stringify(snapshot));
   return snapshot;
+}
+
+async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
+  return withCoinSpotMtfHistorySyncLock(env, () => runCoinSpotMtfPaperUnlocked(env, now, backfillDays));
 }
 
 async function getCoinSpotMtfPaper(env) {
@@ -2154,7 +2220,11 @@ async function handle(request, env, ctx) {
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "POST") {
     await routeLimit(env.WRITE_LIMITER, principal.sub, "coinspot-mtf-paper-run");
-    return reply(await runCoinSpotMtfPaper(env));
+    try { return reply(await runCoinSpotMtfPaper(env)); }
+    catch (error) {
+      if (error?.code === "COINSPOT_MTF_SYNC_LOCKED") throw new HttpError(409, "A CoinSpot MTF sync or paper scan is already running; no state was changed.");
+      throw error;
+    }
   }
   if (requestUrl.pathname.startsWith("/api/crypto/coinspot/paper")) {
     if (!env.EDGE_KV) throw new HttpError(503, "Persistent paper storage is not configured.");
@@ -2252,7 +2322,11 @@ async function handle(request, env, ctx) {
   if (requestUrl.pathname === "/api/crypto/coinspot/strategy/sync" && request.method === "POST") {
     await routeLimit(env.WRITE_LIMITER,principal.sub,"coinspot-mtf-sync");
     if(!env.COINSPOT_READONLY_KEY||!env.COINSPOT_READONLY_SECRET) throw new HttpError(503,"CoinSpot Read Only API credentials are not configured.");
-    return reply(await syncCoinSpotMtfHistory(env));
+    try { return reply(await syncCoinSpotMtfHistory(env)); }
+    catch (error) {
+      if (error?.code === "COINSPOT_MTF_SYNC_LOCKED") throw new HttpError(409, "A CoinSpot MTF sync or paper scan is already running; no state was changed.");
+      throw error;
+    }
   }
   if (requestUrl.pathname === "/api/markets" && request.method === "GET") {
     await routeLimit(env.DATA_LIMITER, principal.sub, "markets");
@@ -2489,6 +2563,16 @@ export default {
         }));
         return snapshot;
       }).catch(error => {
+        if (error?.code === "COINSPOT_MTF_SYNC_LOCKED") {
+          console.log(JSON.stringify({
+            event: "COINSPOT_MTF_SCAN_SKIPPED",
+            skippedAt: new Date().toISOString(),
+            reason: "SYNC_ALREADY_RUNNING",
+            paperOnly: true,
+            liveTradingEnabled: false
+          }));
+          return null;
+        }
         console.error("CoinSpot MTF paper scan failed:", String(error?.message || error).replace(/\s+/g, " ").slice(0, 220));
         throw error;
       });
