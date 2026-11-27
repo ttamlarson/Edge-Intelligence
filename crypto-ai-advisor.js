@@ -73,8 +73,8 @@ export async function reviewCryptoWalkForward({
     status: "AI_BLOCKED_NOT_CONFIGURED", advanceAllowed: false, retryable: true,
     reason: "OPENAI_API_KEY is not configured.", liveTradingEnabled: false
   };
-  const clock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
-  if (!Number.isFinite(clock) || !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+  const researchClock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
+  if (!Number.isFinite(researchClock) || !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
       typeof model !== "string" || !model.trim() || model.length > 120 || typeof clock !== "function" ||
       !Array.isArray(candles) || candles.length < 300 || candles.length > MAX_INPUT_BARS ||
       typeof source !== "string" || !source.trim() || source.length > 200) {
@@ -89,7 +89,7 @@ export async function reviewCryptoWalkForward({
   try {
     data = validateCoinSpotCandles(candles);
     research = walkForwardCoinSpotTrend({
-      candles: data, market, quoteCurrency, source, now: clock,
+      candles: data, market, quoteCurrency, source, now: researchClock,
       initialHistoryFraction: 0.6, foldCount: 3, minimumOutOfSampleTrades: 30,
       startingCapital: 100, feeRate: 0.001, slippageBps: 15, spreadBps: 10
     });
@@ -173,7 +173,7 @@ export async function reviewCryptoWalkForward({
     if (!Number.isFinite(requestClock)) {
       return { status: "AI_BLOCKED_PROVENANCE_ERROR", advanceAllowed: false, retryable: true, reason: "AI request-start timestamp is invalid.", liveTradingEnabled: false };
     }
-    const requestStartedAtMs = Math.max(clock, requestClock);
+    const requestStartedAtMs = Math.max(researchClock, requestClock);
     const requestStartedAt = new Date(requestStartedAtMs).toISOString();
     inputProvenance.reviewRequestStartedAt = requestStartedAt;
     const response = await fetchImpl("https://api.openai.com/v1/responses", {
