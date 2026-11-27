@@ -160,9 +160,11 @@ test("open-position mark freshness becomes unavailable then stale without changi
 test("open paper positions remain within the completed four-hour signal freshness window",()=>{
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(opened.openPosition);
- const exactBoundary={...opened,openPosition:{...opened.openPosition,signalAt:"2026-11-24T20:00:00.000Z"}};
+ const exactSignalAt="2026-11-24T20:00:00.000Z";
+ const exactBoundary={...opened,openPosition:{...opened.openPosition,signalAt:exactSignalAt},lastProcessed:{...opened.lastProcessed,BTC:exactSignalAt}};
  assert.equal(validateMtfPaperAccount(exactBoundary),true);
- const tooOld={...opened,openPosition:{...opened.openPosition,signalAt:"2026-11-24T19:59:59.999Z"}};
+ const staleSignalAt="2026-11-24T19:59:59.999Z";
+ const tooOld={...opened,openPosition:{...opened.openPosition,signalAt:staleSignalAt},lastProcessed:{...opened.lastProcessed,BTC:staleSignalAt}};
  assert.throws(()=>validateMtfPaperAccount(tooOld),/position failed validation/);
 });
 test("rejects malformed or inconsistent persisted position mark metadata",()=>{
