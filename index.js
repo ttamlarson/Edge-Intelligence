@@ -496,6 +496,33 @@ const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+d
 
 const COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC = 15;
 const COINSPOT_HISTORY_MIN_PARTITION_MS = 15 * 60 * 1000;
+const COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS = 1100;
+let coinSpotMtfHistoryWriteQueue = Promise.resolve();
+let coinSpotMtfHistoryLastWriteAt = 0;
+
+async function persistCoinSpotMtfHistory(env, state) {
+  const serialized = JSON.stringify(state);
+  const write = coinSpotMtfHistoryWriteQueue.then(async () => {
+    const elapsed = Date.now() - coinSpotMtfHistoryLastWriteAt;
+    const waitMs = COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS - elapsed;
+    if (coinSpotMtfHistoryLastWriteAt && waitMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+    try {
+      await env.EDGE_KV.put(COINSPOT_MTF_KEY, serialized);
+    } catch (error) {
+      const message = String(error?.message || error);
+      if (!/\b429\b|too many requests/i.test(message)) throw error;
+      // Another Worker isolate may have written this key. Retry once after
+      // Cloudflare's per-key write window; persistent quota errors still fail closed.
+      await new Promise(resolve => setTimeout(resolve, COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS));
+      await env.EDGE_KV.put(COINSPOT_MTF_KEY, serialized);
+    }
+    coinSpotMtfHistoryLastWriteAt = Date.now();
+  });
+  coinSpotMtfHistoryWriteQueue = write.then(() => undefined, () => undefined);
+  return write;
+}
 
 function createCoinSpotHistoryProgress(targetDate, startMs, endMs) {
   return {
@@ -929,7 +956,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     state.lastProcessedDate = shiftUtcDate(previousProcessedDate, -2);
     state.nextDate = shiftUtcDate(previousProcessedDate, -1);
     state.status = "BACKFILLING";
-    await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+    // Commit the rewind with the next resumable history checkpoint below.
   }
   if (state.historyIntegrityRewindFrom && !state.historyIntegrityFullRewindAt) {
     const fullStartDate = shiftUtcDate(today, -120);
@@ -952,9 +979,8 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       lastHistoryDate: null,
       lastSyncAt: null
     }]));
-    // Rebuild the full original window: earlier legacy batches may also have
-    // advanced despite incomplete capped responses. Persist before any fetch.
-    await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+    // Rebuild in memory; the first success/failure checkpoint below persists
+    // the rewind marker and the new cursor together.
   }
   const previousProbeAt = Date.parse(state.lastProviderProbeAt || "");
   const needsPartitionProbe = !Array.isArray(state.providerProbe?.markets) ||
@@ -966,9 +992,8 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
   if (!Number.isFinite(previousProbeAt) || clock - previousProbeAt >= 24 * 60 * 60 * 1000 || needsPartitionProbe) {
     state.providerProbe = await probeCoinSpotProviders(env, clock);
     state.lastProviderProbeAt = new Date(clock).toISOString();
-    // Persist provider diagnostics before backfill work so a later history
-    // failure cannot erase evidence from the live read-only/public probes.
-    await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
+    // Keep probe diagnostics in memory; the next history checkpoint persists
+    // them even if the subsequent provider fetch fails.
   }
   const targetDate=state.nextDate<=today?state.nextDate:today;
   const startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+86400000;
@@ -998,7 +1023,6 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
         markets,
         partitionValidationComputedAt: new Date(clock).toISOString()
       };
-      await env.EDGE_KV.put(COINSPOT_MTF_KEY, JSON.stringify(state));
     }
   }
 
@@ -1048,7 +1072,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
           lastSyncAt:new Date(clock).toISOString(),nextDate:targetDate,
           status:"BACKFILLING",liveTradingEnabled:false
         };
-        await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
+        await persistCoinSpotMtfHistory(env, state);
         throw error;
       }
     }
@@ -1074,7 +1098,6 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
       lastSyncAt:new Date(clock).toISOString(),nextDate:targetDate,
       status:"BACKFILLING",liveTradingEnabled:false,lastBatch:outcomes
     };
-    await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
   }
 
   const dateComplete=COINSPOT_MTF_COINS.every(coin=>pending.coins[coin].complete);
@@ -1089,7 +1112,7 @@ async function syncCoinSpotMtfHistory(env,now=new Date()) {
     nextDate,status,liveTradingEnabled:false,lastBatch:outcomes,
     pendingHistorySync:dateComplete?null:pending
   };
-  await env.EDGE_KV.put(COINSPOT_MTF_KEY,JSON.stringify(state));
+  await persistCoinSpotMtfHistory(env, state);
   const progressSummary=dateComplete?null:Object.fromEntries(COINSPOT_MTF_COINS.map(coin=>{
     const market=pending.coins[coin];
     return [coin,{complete:market.complete,pendingWindows:market.windows.length,partialTradeCount:market.trades.length,apiCallsTotal:market.apiCallsTotal}];
@@ -2210,5 +2233,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
