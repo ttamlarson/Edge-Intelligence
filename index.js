@@ -446,7 +446,10 @@ async function runAutomatedCryptoPaper(env, { fetchImpl = fetch, timeoutMs = 700
   // Use one klines request per host: the last closed candle supplies both the
   // indicator inputs and current mark, avoiding a second endpoint that could
   // fail independently and incorrectly mark an otherwise healthy market offline.
-  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/", "https://api2.binance.com/api/v3/", "https://api3.binance.com/api/v3/", "https://api4.binance.com/api/v3/"];
+  // Ten symbols x four bounded provider attempts = at most 40 outbound subrequests.
+  // Keep at least ten subrequests of headroom under the Worker invocation limit
+  // for KV and other runtime work; seven hosts could exhaust the 50-request cap.
+  const hosts = ["https://data-api.binance.vision/api/v3/", "https://api.binance.com/api/v3/", "https://api-gcp.binance.com/api/v3/", "https://api1.binance.com/api/v3/"];
   const results = await Promise.all(AUTO_SYMBOLS.map(async symbol => {
     let lastError = "NO_PROVIDER_RESPONSE";
     let lastErrorDetail = null;

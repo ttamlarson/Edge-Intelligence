@@ -23,7 +23,7 @@ test("automated crypto scan preserves structurally invalid ledger without replac
 });
 
 
-test("scheduled crypto scan omits AbortSignal.timeout outside an HTTP request context", async () => {
+test("scheduled crypto scan stays below the Worker subrequest cap and omits AbortSignal.timeout", async () => {
  const kv=storage(null), calls=[];
  const now="2026-11-25T06:00:00.000Z";
  const result=await __test.runScheduledCryptoPaper({EDGE_KV:kv.binding},{
@@ -33,7 +33,8 @@ test("scheduled crypto scan omits AbortSignal.timeout outside an HTTP request co
    return new Response("unavailable",{status:503});
   }
  });
- assert.equal(calls.length,70);
+ assert.equal(calls.length,40);
+ assert.ok(calls.length<50);
  assert.ok(calls.every(call=>call.hasSignal===false));
  assert.equal(result.mode,"AUTOMATED_PAPER_ONLY");
  assert.equal(result.liveTradingEnabled,false);
