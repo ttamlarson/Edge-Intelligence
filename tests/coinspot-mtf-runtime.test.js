@@ -657,7 +657,7 @@ function multiplegapsBars(bars) {
 test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history blockers", async () => {
  const kv=kvStore(),originalFetch=globalThis.fetch,originalLog=console.log,calls=[],messages=[];
  const day=24*60*60*1000,fourHours=4*60*60*1000;
- const targetDate="2026-11-26",startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+day;
+ const nowMs=Date.now(),targetDate=new Date(nowMs).toISOString().slice(0,10),startMs=Date.parse(targetDate+"T00:00:00.000Z"),endMs=startMs+day,previousDate=new Date(startMs-day).toISOString().slice(0,10);\n const lastCompletedFourHourStart=Math.floor(nowMs/fourHours)*fourHours-fourHours;
  const probeAt=new Date().toISOString();
  const completeMarket=()=>({
   windows:[],processedThroughMs:endMs,trades:[],rawRowsSeen:0,rawBuyOrders:0,rawSellOrders:0,
@@ -693,20 +693,20 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
  const daily=Array.from({length:122},(_,index)=>{
   const close=150-index*0.3;
   return {
-   timestamp:new Date(Date.parse("2026-07-28T00:00:00.000Z")+index*day).toISOString(),
+   timestamp:new Date(startMs-122*day+index*day).toISOString(),
    open:close+0.1,high:close+1,low:close-1,close,volume:1000,tradeCount:100
   };
  });
  const fourHourBars=Array.from({length:420},(_,index)=>{
   const close=200-index*0.2;
   return {
-   timestamp:new Date(Date.parse("2026-09-17T20:00:00.000Z")+index*fourHours).toISOString(),
+   timestamp:new Date(lastCompletedFourHourStart-419*fourHours+index*fourHours).toISOString(),
    open:close+0.1,high:close+1,low:close-1,close,volume:100,tradeCount:20
   };
  });
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
   mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",
-  nextDate:targetDate,lastProcessedDate:"2026-11-25",lastBatchDate:"2026-11-25",
+  nextDate:targetDate,lastProcessedDate:previousDate,lastBatchDate:previousDate,
   lastProviderProbeAt:probeAt,
   providerProbe:{
    checkedAt:probeAt,
@@ -731,7 +731,7 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
  console.log=(...args)=>messages.push(args.join(" "));
  let pending;
  try{
-  await worker.scheduled({scheduledTime:Date.parse("2026-11-26T20:15:00.000Z")},{
+  await worker.scheduled({scheduledTime:Date.parse(targetDate+"T00:15:00.000Z")},{
    EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-readonly-key",COINSPOT_READONLY_SECRET:"test-readonly-secret"
   },{waitUntil:promise=>{pending=promise;}});
   assert.ok(pending instanceof Promise);
