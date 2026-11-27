@@ -263,3 +263,10 @@ The automated paper engine accepts an entry only when both the market and its qu
 
 
 - Legacy CoinSpot MTF ledgers without `riskAccountingVersion` are upgraded additively on the next paper scan. The version-2 ledger requires daily loss to cover realized losses plus any retained open-position unrealized loss.
+
+
+### Crypto AI review and strategy-comparison audit — 27 November 2026
+
+The crypto research reviewer now records the requested model alias separately from the provider-returned model ID, provider response ID, review-policy version, request-start time and completion time. Its review ID binds the full validated OHLCV dataset and fixed research assumptions to full SHA-256 digests for the model and policy cohort. User-supplied or external OHLCV remains explicitly unverified; this review is a research critique, not a trade instruction or a calibrated probability. Structured output requires substantive thesis and counter-thesis text, and a backdated completion clock fails closed.
+
+Crypto strategy comparison now keeps quote-currency net P&L separate from percentage return. It uses a strategy's actual out-of-sample returnPct field when supplied and reports null when it is absent; it no longer copies a currency amount into a percentage field. Existing chronological splits, common research screen, fees, slippage and paper-only execution controls are unchanged. No profitability claim or live order route is added.
