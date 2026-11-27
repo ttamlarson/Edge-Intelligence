@@ -365,3 +365,12 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Keep persistent quota failures fail-closed; no history cursor, paper ledger or risk settings are reset and no new entry or AI review is permitted on a sync error.
 - [x] Add regression coverage for repeated transient 429s, serialized writes and persistent quota failures.
 - Production telemetry recorded one KV PUT 429 scan at 2026-11-27 04:30 UTC. Subsequent scans at 07:15, 07:30 and 07:45 UTC completed four-day batches without a sync error. This retry change improves resilience but does not claim Cloudflare's external write quota is eliminated.
+
+
+## 2026-11-27 — CoinSpot MTF global sync lease duration
+
+- [x] Increase the private Durable Object paper-sync lease from 10 to 20 minutes. The configured four-day backfill can issue up to 24 read-only requests; two bounded 15-second attempts per request yield a 12-minute worst-case retry envelope, so the previous lease could expire while a slow scan still held pending history/ledger writes.
+- [x] Add a regression test proving the lease remains exclusive beyond 15 minutes, becomes reclaimable after 20 minutes, and an expired owner cannot release a successor's lease.
+- [x] Preserve owner-only release, scheduled overlap skip, manual HTTP 409 behavior, paper-only execution, and all existing risk controls.
+- Validation: branch CI and production deployment verification pending.
+

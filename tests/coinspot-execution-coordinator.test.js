@@ -82,6 +82,44 @@ test("paper sync lease serializes global history/ledger writes and only its owne
   assert.equal((await retry.json()).acquired, true);
 });
 
+
+test("paper sync lease remains exclusive beyond the provider retry envelope and expires after 20 minutes", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-11-27T10:00:00.000Z");
+  Date.now = () => now;
+  try {
+    const { callInternal } = makeCoordinator();
+    const leaseA = "33333333-3333-4333-8333-333333333333";
+    const leaseB = "44444444-4444-4444-8444-444444444444";
+    const acquired = await callInternal("/paper-sync/acquire", { leaseId: leaseA });
+    assert.equal(acquired.status, 200);
+    const lease = await acquired.json();
+    assert.equal(lease.expiresAt, now + 20 * 60 * 1000);
+
+    // A slow but bounded scan may still be active after the 15-minute
+    // scheduled-execution window; another writer must not take its lease.
+    now += 15 * 60 * 1000;
+    const stillHeld = await callInternal("/paper-sync/acquire", { leaseId: leaseB });
+    assert.equal(stillHeld.status, 409);
+    assert.equal((await stillHeld.json()).acquired, false);
+
+    // A crashed invocation cannot block the engine permanently. Once the
+    // lease expires, a new owner may acquire it, and the old owner cannot
+    // release the successor's lease.
+    now = lease.expiresAt + 1;
+    const recovered = await callInternal("/paper-sync/acquire", { leaseId: leaseB });
+    assert.equal(recovered.status, 200);
+    assert.equal((await recovered.json()).acquired, true);
+    const staleRelease = await callInternal("/paper-sync/release", { leaseId: leaseA });
+    assert.equal(staleRelease.status, 409);
+    const released = await callInternal("/paper-sync/release", { leaseId: leaseB });
+    assert.equal(released.status, 200);
+    assert.equal((await released.json()).released, true);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test("idempotency state transitions are explicit and terminal conflicts fail closed", async () => {
   const { call } = makeCoordinator();
   await call("/idempotency/reserve", { key: "order-002", intent: { side: "SELL", coin: "ETH", amount: 0.01, rate: 3000 } });
