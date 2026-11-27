@@ -668,7 +668,7 @@ test("CoinSpot MTF evaluates a fresh contiguous tail after an older historical g
  });
  const trackedCounts=attachTrackedHistory(daily,fourHour);
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
-  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-26",liveTradingEnabled:false,
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-07-26",liveTradingEnabled:false,
   markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
  globalThis.fetch=async url=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
@@ -752,7 +752,7 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-26T04:00:00.000Z",1);
   const eth=result.markets.find(m=>m.coin==="ETH");
-  assert.equal(eth.fourHourCandles,414);
+  assert.equal(eth.fourHourCandles,415);
   assert.equal(eth.contiguousFourHourCandles,19);
   assert.equal(eth.fourHourGapCount,1);
   assert.equal(eth.latestFourHourGap.previousAt,"2026-11-21T20:00:00.000Z");
