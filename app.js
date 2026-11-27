@@ -326,12 +326,12 @@ async function loadCoinSpotMtfPaper(runNow=false){
    const fmtPct=value=>value===null||value===undefined||value===""?"—":Number.isFinite(Number(value))?Number(value).toFixed(2)+"%":"—";
    const fmtScalar=value=>value===null||value===undefined||value===""?"—":Number.isFinite(Number(value))?Number(value).toFixed(2):"—";
    const resultLine=trades>0
-    ?"OOS trades "+trades+" · win "+fmtPct(s.winRatePct)+" · PF "+fmtScalar(s.pooledProfitFactor)+" · mean fold return "+fmtPct(s.meanFoldReturnPct)+" · mean drawdown "+fmtPct(s.meanFoldMaxDrawdownPct)
+    ?"OOS trades "+trades+" · win "+fmtPct(s.winRatePct)+" · PF "+fmtScalar(s.pooledProfitFactor)+" · mean fold return "+fmtPct(s.meanFoldReturnPct)+" · mean drawdown "+fmtPct(s.meanFoldMaxDrawdownPct)+" · worst fold DD "+fmtPct(s.worstFoldMaxDrawdownPct)
     :"No out-of-sample trades · insufficient sample · no profitability estimate";
    const signalLine=Number.isFinite(Number(s.signalEvaluations))
     ?"Signal checks "+Number(s.signalEvaluations)+" · NO_SETUP "+Number(s.noSetupSignals||0)+" · WATCH "+Number(s.watchSignals||0)+" · candidates "+Number(s.candidateSignals||0)+" · evaluation errors "+Number(s.signalEvaluationErrors||0)
     :"Signal-level diagnostics appear after the next validated Worker scan";
-   const historyLine="History "+Number(h.dailyCandles||0)+" daily / "+Number(h.fourHourCandles||0)+" 4h · latest contiguous "+Number(h.latestContiguousFourHourCandles||0)+" / "+Number(s.requiredLatestContiguousFourHourCandles||270)+" required 4h bars";
+   const historyLine="History "+Number(h.dailyCandles||0)+" daily / "+Number(h.fourHourCandles||0)+" 4h · latest validated "+Number(h.latestValidatedFourHourCandles??h.latestContiguousFourHourCandles??0)+" / "+Number(s.requiredLatestContiguousFourHourCandles||270)+" required 4h bars · confirmed zero-trade gaps "+Number(h.confirmedZeroTradeIntervals||0)+" · unverified gaps "+Number(h.unverifiedGapCount??h.fourHourGapCount??0);
    const costLine="Modelled costs "+(Number.isFinite(Number(costs.feeRate))?(Number(costs.feeRate)*100).toFixed(2)+"% fee":"—")+" per side · "+Number(costs.slippageBps??15)+" bps slippage · "+Number(costs.spreadBps??50)+" bps spread";
    const failed=(s.topFailedChecks||[]).slice(0,5).map(x=>String(x.check||"").replaceAll("_"," ")+" ("+Number(x.count||0)+")").join(" · ");
    const limitations=Array.isArray(b.limitations)?b.limitations.slice(0,2).join(" · "):"";
