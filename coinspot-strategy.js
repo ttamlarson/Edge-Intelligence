@@ -198,7 +198,7 @@ export function walkForwardCoinSpotTrend({
       testStartAt: data[startIndex].timestamp,
       testEndAt: data[endIndex - 1].timestamp,
       ...simulated,
-      benchmark: benchmarkFold(data, startIndex, endIndex, costs)
+      benchmark: benchmarkFold(data, startIndex, endIndex, costs, startingCapital)
     });
   }
 
