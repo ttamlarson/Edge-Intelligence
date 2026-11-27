@@ -107,6 +107,22 @@ test("CoinSpot MTF AI review is strict, versioned, provenance-bound and cached p
  }finally{globalThis.fetch=originalFetch;}
 });
 
+test("unknown MTF history counters remain unknown rather than being coerced to zero",async()=>{
+ const originalFetch=globalThis.fetch;
+ globalThis.fetch=successfulFetch("gpt-6.2-astra");
+ try{
+  const market=marketAt();
+  market.history.dailyGapCount=null;
+  delete market.history.fourHourGapCount;
+  const review=await __test.reviewCoinSpotMtfCandidate(
+   {OPENAI_API_KEY:"test-only",OPENAI_MODEL:"gpt-6.2-astra",EDGE_KV:kvStore()},market,baseNow
+  );
+  assert.equal(review.status,"AI_REVIEW_COMPLETE");
+  assert.equal(review.inputProvenance.history.dailyGapCount,null);
+  assert.equal(review.inputProvenance.history.fourHourGapCount,null);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
 test("CoinSpot MTF AI review rejects stale, future and malformed quote/signal inputs before provider calls",async()=>{
  const originalFetch=globalThis.fetch;
  let calls=0;
