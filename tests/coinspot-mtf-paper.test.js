@@ -29,6 +29,60 @@ test("does not consume a signal when risk sizing falls below the minimum notiona
  assert.equal(retried.lastProcessed.BTC,"2026-11-25T04:00:00.000Z");
 });
 
+test("accepts an executable quote exactly at the 20-minute freshness boundary",()=>{
+ const boundary=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:40:00.000Z");
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[boundary],now});
+ assert.ok(opened.openPosition);
+ assert.equal(opened.paperOnly,true);
+ assert.equal(opened.liveTradingEnabled,false);
+});
+
+function setSpread(market, spreadBps) {
+ const midpoint=100000,half=midpoint*spreadBps/20000;
+ market.quote.bid=midpoint-half;
+ market.quote.ask=midpoint+half;
+ market.quote.last=midpoint;
+ market.quote.spreadBps=(market.quote.ask-market.quote.bid)/((market.quote.ask+market.quote.bid)/2)*10000;
+ return market;
+}
+
+test("risk-aware MTF ranking prefers lower executable spread and persists the entry evidence",()=>{
+ const wide=setSpread(candidate("ETH"),40);
+ const tight=setSpread(candidate("BTC"),10);
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[wide,tight],now});
+ assert.equal(opened.openPosition.coin,"BTC");
+ assert.equal(opened.openPosition.candidateRank,1);
+ assert.ok(opened.openPosition.riskBudgetUsePct<=100.01);
+ assert.equal(opened.lastCandidateRanking[0].coin,"BTC");
+ assert.equal(opened.lastCandidateRanking[0].status,"ELIGIBLE");
+ assert.ok(opened.lastCandidateRanking[0].spreadBps<opened.lastCandidateRanking[1].spreadBps);
+ assert.equal(validateMtfPaperAccount(opened),true);
+});
+
+test("MTF entry risk is capped by remaining daily-loss headroom before minimum-notional sizing",()=>{
+ const account=createMtfPaperAccount(now);
+ account.cashAud=97.08;
+ account.realizedPnlAud=-2.92;
+ account.equityAud=97.08;
+ account.dailyLossAud=2.92;
+ account.closedTrades=[{
+  id:"prior-loss",coin:"BTC",pair:"BTC/AUD",
+  openedAt:"2026-11-25T04:00:00.000Z",closedAt:"2026-11-25T05:00:00.000Z",
+  signalAt:"2026-11-25T00:00:00.000Z",entryPrice:100000,exitPrice:88000,
+  quantity:0.00024,entryFeeAud:0.02,exitFeeAud:0.02,pnlAud:-2.92,reason:"STOP"
+ }];
+ assert.equal(validateMtfPaperAccount(account),true);
+ const blocked=processMtfPaperAccount(account,{markets:[candidate()],now:"2026-11-25T08:15:00.000Z"});
+ assert.equal(blocked.openPosition,null);
+ assert.equal(blocked.lastCandidateRanking.length,1);
+ assert.equal(blocked.lastCandidateRanking[0].status,"BLOCKED_DAILY_LOSS_CAPACITY");
+ assert.ok(blocked.lastCandidateRanking[0].riskBudgetAud<=0.08);
+ assert.ok(blocked.lastCandidateRanking[0].estimatedNetStopLossAud<=blocked.lastCandidateRanking[0].riskBudgetAud+0.01);
+ assert.equal(blocked.cashAud,97.08);
+ assert.equal(blocked.lastProcessed.BTC,undefined);
+ assert.equal(validateMtfPaperAccount(blocked),true);
+});
+
 test("stale or future quote timestamps cannot open or close paper positions",()=>{
  const staleEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:39:59.999Z");
  const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[staleEntry],now});
