@@ -75,6 +75,11 @@ test("walk-forward rejects future bars, daily gaps and spreads above the strateg
   assert.throws(() => walkForwardEarlyReversalShadow({
     dailyCandles, fourHourCandles, market: "BTC/AUD", now, spreadBps: 50.01
   }), /invalid.*cost/i);
+  const missingVolume = fourHourCandles.map(candle => ({ ...candle }));
+  missingVolume[100].volume = null;
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles, fourHourCandles: missingVolume, market: "BTC/AUD", now
+  }), /invalid/i);
 });
 
 test("short ETH-like contiguous history remains research-only and cannot create paper positions", () => {
