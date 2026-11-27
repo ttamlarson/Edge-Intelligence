@@ -498,6 +498,8 @@ const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+d
 const COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC = 15;
 const COINSPOT_HISTORY_MIN_PARTITION_MS = 15 * 60 * 1000;
 const COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS = 1100;
+const COINSPOT_MTF_KV_WRITE_RETRY_DELAYS_MS = Object.freeze([1200, 2400, 4800]);
+const COINSPOT_MTF_KV_RETRY_JITTER_MS = 300;
 let coinSpotMtfHistoryWriteQueue = Promise.resolve();
 let coinSpotMtfHistoryLastWriteAt = 0;
 
@@ -509,17 +511,23 @@ async function persistCoinSpotMtfHistory(env, state) {
     if (coinSpotMtfHistoryLastWriteAt && waitMs > 0) {
       await new Promise(resolve => setTimeout(resolve, waitMs));
     }
-    try {
-      await env.EDGE_KV.put(COINSPOT_MTF_KEY, serialized);
-    } catch (error) {
-      const message = String(error?.message || error);
-      if (!/\b429\b|too many requests/i.test(message)) throw error;
-      // Another Worker isolate may have written this key. Retry once after
-      // Cloudflare's per-key write window; persistent quota errors still fail closed.
-      await new Promise(resolve => setTimeout(resolve, COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS));
-      await env.EDGE_KV.put(COINSPOT_MTF_KEY, serialized);
+    let retry = 0;
+    while (true) {
+      try {
+        await env.EDGE_KV.put(COINSPOT_MTF_KEY, serialized);
+        coinSpotMtfHistoryLastWriteAt = Date.now();
+        return;
+      } catch (error) {
+        const message = String(error?.message || error);
+        const backoffMs = COINSPOT_MTF_KV_WRITE_RETRY_DELAYS_MS[retry];
+        if (!/\b429\b|too many requests/i.test(message) || backoffMs === undefined) throw error;
+        // Worker isolates do not share this in-memory queue. Bounded exponential
+        // backoff with jitter lets another isolate's Cloudflare KV write window clear.
+        const jitterMs = Math.floor(Math.random() * COINSPOT_MTF_KV_RETRY_JITTER_MS);
+        await new Promise(resolve => setTimeout(resolve, backoffMs + jitterMs));
+        retry++;
+      }
     }
-    coinSpotMtfHistoryLastWriteAt = Date.now();
   });
   coinSpotMtfHistoryWriteQueue = write.then(() => undefined, () => undefined);
   return write;
