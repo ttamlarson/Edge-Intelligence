@@ -99,6 +99,12 @@
 - Close an AI-reviewed position through the automated daily-bar stop/target path and confirm the review metadata survives in trade history. Confirm manual closes are excluded from AI calibration diagnostics.
 - Confirm the AI calibration report uses the latest chronological holdout, reports Brier/reliability diagnostics, and remains explicitly uncalibrated / not model-trained.
 - Confirm all paper controls remain authoritative: 1% risk budget, AUD 200 position cap, AUD 100 cash reserve, fees and no live order route.
+- Confirm each new AI review records the DataCedar source URL, retrieval time, exchange, AUD currency, daily timeframe, raw adjustment mode, historical-data classification, symbol set and per-symbol provider row count.
+- Change one provider metadata field or one reviewed OHLC bar and verify the SHA-256 evidence fingerprint changes; confirm the full digest is embedded in and revalidated against the review ID before paper opening.
+- Confirm the requested model alias and provider-returned model ID are stored separately, with provider response ID, review-policy version, request-start time and completion time.
+- Delay the AI response in a test and verify the paper position opening timestamp is at or after review completion, never the request start.
+- Return empty/boilerplate thesis or counter-thesis, invalid source URL, stale retrieval timestamp, missing symbol coverage or insufficient provider row count; confirm the AI reviewer fails closed and does not consume the completed-bar cursor for retryable provider failures.
+- Seed trades with the same model but different review-policy versions; confirm calibration keeps separate chronological cohorts and does not pool the metrics. Legacy reviews remain grouped as unversioned.
 
 
 ## EDGE MTF Donchian breakout candidate
