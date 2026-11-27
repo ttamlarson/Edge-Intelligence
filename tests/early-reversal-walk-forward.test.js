@@ -38,6 +38,7 @@ test("early-reversal walk-forward uses chronological folds and conservative Coin
   assert.equal(result.parameters.maxDailyLossAud, 3);
   assert.equal(result.folds.length, 3);
   assert.ok(result.folds.every(fold => fold.testBars >= 20));
+  assert.equal(result.summary.worstFoldMaxDrawdownPct, Math.max(...result.folds.map(fold => fold.maxDrawdownPct)));
   assert.ok(result.summary.signalEvaluations > 0);
   assert.equal(
     result.summary.noSetupSignals + result.summary.watchSignals + result.summary.candidateSignals +
@@ -146,4 +147,15 @@ test("walk-forward rejects zero-trade evidence with the wrong status or interval
     market: "BTC/AUD",
     now
   }), /invalid zero-trade gap evidence/i);
+});
+
+test("walk-forward rejects null clocks and unbounded out-of-sample thresholds", () => {
+  const { dailyCandles, fourHourCandles, now } = fixtures();
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles, fourHourCandles, market: "BTC/AUD", now: null
+  }), /invalid.*walk-forward/i);
+  assert.throws(() => walkForwardEarlyReversalShadow({
+    dailyCandles, fourHourCandles, market: "BTC/AUD", now,
+    minimumOutOfSampleTrades: 10001
+  }), /invalid.*walk-forward/i);
 });
