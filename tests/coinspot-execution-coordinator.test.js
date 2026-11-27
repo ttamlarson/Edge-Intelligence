@@ -96,8 +96,8 @@ test("paper sync lease remains exclusive beyond the provider retry envelope and 
     const lease = await acquired.json();
     assert.equal(lease.expiresAt, now + 20 * 60 * 1000);
 
-    // A slow but bounded scan may still be active after the 15-minute
-    // scheduled-execution window; another writer must not take its lease.
+    // A slow but bounded scan may still be active at the next 15-minute cron
+    // interval; another writer must not take its lease.
     now += 15 * 60 * 1000;
     const stillHeld = await callInternal("/paper-sync/acquire", { leaseId: leaseB });
     assert.equal(stillHeld.status, 409);

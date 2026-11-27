@@ -372,5 +372,6 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Increase the private Durable Object paper-sync lease from 10 to 20 minutes. The configured four-day backfill can issue up to 24 read-only requests; two bounded 15-second attempts per request yield a 12-minute worst-case retry envelope, so the previous lease could expire while a slow scan still held pending history/ledger writes.
 - [x] Add a regression test proving the lease remains exclusive beyond 15 minutes, becomes reclaimable after 20 minutes, and an expired owner cannot release a successor's lease.
 - [x] Preserve owner-only release, scheduled overlap skip, manual HTTP 409 behavior, paper-only execution, and all existing risk controls.
-- Validation: branch CI and production deployment verification pending.
+- Validation: GitHub Actions branch CI passed on commit `8e3b144c` (deterministic tests, JavaScript syntax, ASX module checks and Pages build). Production deployment verification pending.
+- Production runtime at 2026-11-27 10:15 UTC: backfill advanced through 2026-10-05, with 70/110 validated daily candles for each market; 53 daily and 54 four-hour cached dates remain unverified. The history/strategy snapshot timestamps and cursors match. BTC spread was 20.45 bps; ETH spread was 64.39 bps, above the unchanged 50 bps entry ceiling. The A$100 ledger remained flat with zero positions and zero completed trades.
 
