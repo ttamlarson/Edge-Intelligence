@@ -59,17 +59,21 @@ function normalizeBars(bars) {
     throw new TypeError("At least 51 and no more than 5,000 completed daily bars are required.");
   }
   let previous = -Infinity;
+  const sessionDates = new Set();
   return bars.map((bar, index) => {
     const timestamp = Date.parse(bar?.timestamp || "");
+    const sessionDate = Number.isFinite(timestamp) ? sydneyClock(timestamp)?.date : null;
     const open = Number(bar?.open), high = Number(bar?.high);
     const low = Number(bar?.low), close = Number(bar?.close);
     if (!Number.isFinite(timestamp) || timestamp <= previous ||
+        !sessionDate || sessionDates.has(sessionDate) ||
         ![open, high, low, close].every(Number.isFinite) ||
         open <= 0 || high <= 0 || low <= 0 || close <= 0 ||
         high < Math.max(open, close) || low > Math.min(open, close) || low > high) {
-      throw new TypeError("Invalid or unordered ASX OHLC bar at row " + (index + 1) + ".");
+      throw new TypeError("Invalid, duplicate-session or unordered ASX OHLC bar at row " + (index + 1) + ".");
     }
     previous = timestamp;
+    sessionDates.add(sessionDate);
     return {
       timestamp: new Date(timestamp).toISOString(),
       open: round4(open), high: round4(high), low: round4(low), close: round4(close)

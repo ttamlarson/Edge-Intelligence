@@ -200,15 +200,31 @@ export function openPaperPosition(portfolio, candidate, { id, openedAt = new Dat
       aiReview.predictedWinProbability >= 0 && aiReview.predictedWinProbability <= 1 &&
       Array.isArray(aiReview?.riskFlags) && aiReview.riskFlags.length === 0 &&
       typeof aiReview?.model === "string" && aiReview.model.length > 0 &&
-      typeof aiReview?.reviewId === "string" && aiReview.reviewId.length > 0 &&
+      typeof aiReview?.reviewId === "string" && aiReview.reviewId.length > 0 && aiReview.reviewId.length <= 200 &&
+      aiReview?.reviewPolicyVersion === "ASX_AI_REVIEW_V2" &&
+      typeof aiReview?.requestedModel === "string" && aiReview.requestedModel.length > 0 && aiReview.requestedModel.length <= 120 &&
+      typeof aiReview?.requestStartedAt === "string" &&
       Number.isFinite(reviewedTimestamp) && reviewedTimestamp >= candidateObservedTimestamp && reviewedTimestamp <= now + 5 * 60_000 &&
+      Number.isFinite(Date.parse(aiReview.requestStartedAt)) &&
+      Date.parse(aiReview.requestStartedAt) >= Date.parse(provenance?.retrievedAt || "") &&
+      Date.parse(aiReview.requestStartedAt) <= reviewedTimestamp &&
+      provenance?.reviewRequestStartedAt === aiReview.requestStartedAt &&
+      provenance?.sourceMetadataVersion === 1 &&
       provenance?.currency === "AUD" && provenance?.source === candidate.source &&
       Date.parse(provenance?.observedAt || "") === Date.parse(candidate.observedAt || "") &&
       provenance?.sourceVerification === "NOT_INDEPENDENTLY_VERIFIED" &&
+      typeof provenance?.sourceUrl === "string" &&
+      (() => { try { const url = new URL(provenance.sourceUrl); return url.protocol === "https:" && ["datacedar.com", "www.datacedar.com"].includes(url.hostname) && !url.username && !url.password && !url.search && !url.hash; } catch { return false; } })() &&
+      Number.isFinite(Date.parse(provenance?.retrievedAt || "")) &&
+      Date.parse(provenance.retrievedAt) >= Date.parse(provenance.observedAt) &&
+      provenance?.exchange === "ASX" && provenance?.timeframe === "1d" &&
+      provenance?.adjustment === "raw" && provenance?.dataClass === "historical_market_data_not_realtime" &&
+      Number.isInteger(provenance?.providerRowsForSymbol) &&
+      provenance.providerRowsForSymbol >= provenance.barsProvided &&
       Number.isInteger(provenance?.barsProvided) && provenance.barsProvided >= 51 &&
       provenance?.barsReviewed === 30 && provenance?.fingerprintAlgorithm === "SHA-256" &&
       typeof provenance?.fingerprint === "string" && /^[a-f0-9]{64}$/i.test(provenance.fingerprint) &&
-      aiReview.reviewId.endsWith(provenance.fingerprint.slice(0, 16));
+      aiReview.reviewId.endsWith(provenance.fingerprint);
     if (!validAiReview) return { accepted: false, reason: "AI review provenance or approval metadata is invalid." };
   }
   const shares = num(candidate.shares), entryPrice = roundPrice(num(candidate.entryReference));

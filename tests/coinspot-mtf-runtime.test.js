@@ -756,7 +756,7 @@ test("CoinSpot MTF scheduled telemetry exposes deterministic gate and history bl
   assert.ok(btc.signalMetrics.fourHourTrendSpreadPct<0);
   assert.ok(btc.signalMetrics.longTrendSlopePct<0);
   assert.equal(btc.aiGateStatus,"NOT_REQUIRED");
-  assert.equal(summary.lastError,null);
+  assert.equal(summary.lastError,null,"Unexpected CoinSpot request(s): "+JSON.stringify({calls,pending:JSON.parse(kv.values.get("coinspot-mtf-history-global-v1"))?.pendingHistorySync}));
   assert.equal(summary.historySync.status,"COLLECTING_LIVE_DAY");
   assert.equal(summary.historySync.dateComplete,true);
   assert.equal(summary.historySync.progress,null);

@@ -22,6 +22,27 @@ test("crypto walk-forward uses fixed chronological folds and separate virtual ca
  assert.ok(result.folds.every(fold=>fold.endingEquityQuote>=0));
 });
 
+
+test("crypto buy-and-hold benchmark scales capital and reports account return percentage", () => {
+ const now=Date.parse("2026-11-25T08:00:00.000Z");
+ const result=walkForwardCoinSpotTrend({
+  candles,market:"BTCUSDT",source:"Synthetic test fixture only",
+  startingCapital:500,now
+ });
+ assert.equal(result.startingCapital,500);
+ const benchmark=result.folds[0].benchmark;
+ assert.equal(benchmark.startingCapitalQuote,500);
+ assert.equal(benchmark.allocationPct,50);
+ assert.ok(Number.isFinite(benchmark.profitLossQuote));
+ assert.equal(benchmark.returnPct,Math.round((benchmark.profitLossQuote/500*100+Number.EPSILON)*100)/100);
+ assert.notEqual(benchmark.returnPct,benchmark.profitLossQuote);
+});
+
+test("crypto walk-forward rejects invalid virtual capital", () => {
+ assert.throws(()=>walkForwardCoinSpotTrend({candles,market:"BTCUSDT",source:"fixture",startingCapital:0,now:Date.parse("2026-11-25T08:00:00.000Z")}),/assumptions/i);
+ assert.throws(()=>walkForwardCoinSpotTrend({candles,market:"BTCUSDT",source:"fixture",startingCapital:1_000_001,now:Date.parse("2026-11-25T08:00:00.000Z")}),/assumptions/i);
+});
+
 test("crypto walk-forward rejects future, incomplete and discontinuous hourly data", () => {
  const shifted=candles.map((bar,index)=>({
   ...bar,timestamp:new Date(Date.parse("2026-11-25T07:00:00.000Z")-(candles.length-1-index)*3600000).toISOString()

@@ -121,16 +121,16 @@ export function backtestCoinSpotTrend({ candles, startingCapital = 100, starting
     outOfSample.netPnlQuote > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
   return { strategy: "EMA_TREND_PULLBACK_1H_V1", marketDataSource: "user_supplied_historical_ohlcv",
-    startingCapital: 100, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs,
+    startingCapital, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs,
     sample: { totalCandles: validated.length, splitIndex: split, trainFraction, inSampleCandles: split - 60, outOfSampleCandles: validated.length - split,
       minimumOutOfSampleTrades, assessmentRule: "At least 30 completed out-of-sample trades; then positive net P&L, profit factor > 1.2 and max drawdown < 10%." },
     splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
 }
 
 
-function benchmarkFold(candles, startIndex, endIndex, costs) {
+function benchmarkFold(candles, startIndex, endIndex, costs, startingCapital) {
   const entry = candles[startIndex].open * (1 + (costs.slippageBps + costs.spreadBps / 2) / 10000);
-  const spend = 50;
+  const spend = startingCapital * 0.5;
   const quantity = spend / (entry * (1 + costs.feeRate));
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return { status: "NO_BENCHMARK_POSITION", returnPct: null, profitLossQuote: null, quantity: 0 };
@@ -142,11 +142,12 @@ function benchmarkFold(candles, startIndex, endIndex, costs) {
   const profitLossQuote = round(proceeds - entryCost);
   return {
     status: "SIMULATED_BUY_AND_HOLD_REFERENCE",
+    startingCapitalQuote: round(startingCapital), allocationPct: 50,
     entryAt: candles[startIndex].timestamp,
     exitAt: candles[endIndex - 1].timestamp,
     quantity: round(quantity),
     profitLossQuote,
-    returnPct: round(profitLossQuote)
+    returnPct: round(profitLossQuote / startingCapital * 100)
   };
 }
 
@@ -161,7 +162,7 @@ export function walkForwardCoinSpotTrend({
   const ticker = String(market || "").toUpperCase();
   const clock = now instanceof Date ? now.getTime() : typeof now === "string" ? Date.parse(now) : Number(now);
   if (!/^[A-Z0-9]{2,20}$/.test(ticker) || typeof source !== "string" || !source.trim() || source.length > 200 ||
-      !/^[A-Z]{3,5}$/.test(quoteCurrency) || startingCapital !== 100 ||
+      !/^[A-Z]{3,5}$/.test(quoteCurrency) || !Number.isFinite(startingCapital) || startingCapital <= 0 || startingCapital > 1_000_000 ||
       ![feeRate, slippageBps, spreadBps, initialHistoryFraction].every(Number.isFinite) ||
       feeRate < 0 || slippageBps < 0 || spreadBps < 0 ||
       initialHistoryFraction < 0.5 || initialHistoryFraction > 0.8 ||
@@ -197,7 +198,7 @@ export function walkForwardCoinSpotTrend({
       testStartAt: data[startIndex].timestamp,
       testEndAt: data[endIndex - 1].timestamp,
       ...simulated,
-      benchmark: benchmarkFold(data, startIndex, endIndex, costs)
+      benchmark: benchmarkFold(data, startIndex, endIndex, costs, startingCapital)
     });
   }
 
@@ -238,9 +239,9 @@ export function walkForwardCoinSpotTrend({
       outOfSampleBars
     },
     methodology: "Fixed EMA20/EMA50 trend and RSI 50–68 pullback screen; next-hour-open entries; 1% equity risk budget, 50% allocation ceiling, daily realised-loss pause, 0.1% fee, configured slippage and spread; stop-first hourly OHLC exits with worse-open gap handling; fold-end liquidation.",
-    comparison: "Each fold resets the same virtual 100-unit quote-currency capital. The buy-and-hold reference uses a separate 50-unit allocation and is not risk-matched.",
+    comparison: "Each fold resets the same configured virtual quote-currency capital. The buy-and-hold reference uses a separate 50% starting-capital allocation; it is a benchmark, not a risk-matched strategy.",
     parameterPolicy: "FIXED_RULES_NO_FITTING",
-    startingCapital: 100,
+    startingCapital,
     costs,
     folds,
     summary: {

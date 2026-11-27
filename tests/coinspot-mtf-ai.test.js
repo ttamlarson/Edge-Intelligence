@@ -2,11 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { __test } from "../index.js";
 
+const reviewNow = "2026-11-25T12:00:00.000Z";
+
 function candidate(status = "BUY_CANDIDATE_PAPER_ONLY") {
   return {
     coin: "BTC",
     pair: "BTC/AUD",
-    quote: { bid: 90000, ask: 90010, last: 90005, spreadBps: 1.11 },
+    quote: { pair: "BTC/AUD", bid: 90000, ask: 90010, last: 90005, spreadBps: 1.11, retrievedAt: reviewNow },
+    history: {
+      dailyCandles: 122, fourHourCandles: 420, contiguousDailyCandles: 120, contiguousFourHourCandles: 418,
+      dailyGapCount: 1, fourHourGapCount: 2, signalWindowMissingIntervals: 0,
+      signalWindowConfirmedZeroTradeIntervals: 3, signalWindowStatus: "COMPLETE",
+      indicatorFourHourHistoryMode: "CONTIGUOUS"
+    },
     signal: {
       strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1",
       status,
@@ -56,7 +64,8 @@ test("CoinSpot AI review skips the provider when there is no deterministic paper
 
   const result = await __test.reviewCoinSpotMtfCandidate(
     { OPENAI_API_KEY: "test-key" },
-    candidate("NO_TRADE")
+    candidate("NO_TRADE"),
+    reviewNow
   );
 
   assert.equal(result, null);
@@ -88,7 +97,7 @@ test("CoinSpot AI review uses the configured Responses model and strict structur
     OPENAI_MODEL: "gpt-6.2-astra",
     EDGE_KV: store.binding
   };
-  const result = await __test.reviewCoinSpotMtfCandidate(env, candidate());
+  const result = await __test.reviewCoinSpotMtfCandidate(env, candidate(), reviewNow);
 
   assert.equal(result.status, "AI_REVIEW_COMPLETE");
   assert.equal(result.assessment, "CAUTION");
@@ -101,7 +110,7 @@ test("CoinSpot AI review uses the configured Responses model and strict structur
   assert.equal(body.model, "gpt-6.2-astra");
   assert.equal(body.text.format.type, "json_schema");
   assert.equal(body.text.format.strict, true);
-  assert.equal(body.text.format.name, "edge_coinspot_signal_review");
+  assert.equal(body.text.format.name, "edge_coinspot_mtf_risk_review");
   assert.equal(body.input[0].role, "system");
   assert.match(body.input[0].content, /Do not authorise execution/i);
   assert.match(body.input[0].content, /Do not change any strategy, position size, fee or risk rule/i);
@@ -109,14 +118,14 @@ test("CoinSpot AI review uses the configured Responses model and strict structur
   const cacheKeys = [...store.values.keys()];
   assert.equal(cacheKeys.length, 1);
   const cacheKey = cacheKeys[0];
-  const cachePrefix = "coinspot-mtf-ai-review:BTC:2026-11-25T08:00:00.000Z:";
+  const cachePrefix = "coinspot-mtf-ai-review:COINSPOT_MTF_AI_REVIEW_V3:BTC:";
   assert.ok(cacheKey.startsWith(cachePrefix));
-  assert.match(cacheKey.slice(cachePrefix.length), /^[a-f0-9]{24}$/);
+  assert.match(cacheKey.slice(cachePrefix.length), /^[a-f0-9]{64}:[a-f0-9]{64}$/);
   assert.ok(store.values.has(cacheKey));
   assert.equal(store.writes[0].key, cacheKey);
   assert.equal(store.writes[0].options.expirationTtl, 86400);
 
-  const cached = await __test.reviewCoinSpotMtfCandidate(env, candidate());
+  const cached = await __test.reviewCoinSpotMtfCandidate(env, candidate(), reviewNow);
   assert.equal(cached.status, "AI_REVIEW_COMPLETE");
   assert.equal(calls, 1, "cached advisory review must avoid a duplicate provider call");
 });
@@ -128,12 +137,13 @@ test("CoinSpot AI provider errors remain advisory and do not throw", async t => 
 
   const result = await __test.reviewCoinSpotMtfCandidate(
     { OPENAI_API_KEY: "test-key", EDGE_KV: kvStore().binding },
-    candidate()
+    candidate(),
+    reviewNow
   );
 
   assert.equal(result.status, "AI_REVIEW_PROVIDER_ERROR");
   assert.match(result.summary, /HTTP 429/);
-  assert.equal(result.advisoryOnly, undefined);
+  assert.equal(result.advisoryOnly, true);
 });
 
 test("CoinSpot AI malformed structured output fails closed to unavailable advisory status", async t => {
@@ -146,11 +156,12 @@ test("CoinSpot AI malformed structured output fails closed to unavailable adviso
 
   const result = await __test.reviewCoinSpotMtfCandidate(
     { OPENAI_API_KEY: "test-key", EDGE_KV: kvStore().binding },
-    candidate()
+    candidate(),
+    reviewNow
   );
 
-  assert.equal(result.status, "AI_REVIEW_UNAVAILABLE");
-  assert.equal(result.advisoryOnly, undefined);
+  assert.equal(result.status, "AI_REVIEW_INVALID_DECISION");
+  assert.equal(result.advisoryOnly, true);
   assert.deepEqual(result.riskFlags, []);
 });
 
