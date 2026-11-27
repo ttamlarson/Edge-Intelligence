@@ -334,3 +334,17 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Extend the same model-version and review-policy audit to crypto research reviews: retain the full validated-dataset SHA-256, requested alias, provider-returned model ID, response ID and request/completion timestamps. User-supplied/external OHLCV provenance remains explicitly unverified.
 - [x] Correct crypto strategy comparison so netPnlQuote remains a quote-currency amount and returnPct comes only from the strategy percentage metric; missing percentage data remains null rather than being mislabeled as P&L.
 - [x] Scale the crypto walk-forward buy-and-hold reference allocation with starting capital and calculate account-level percentage return against that capital, keeping benchmark quote P&L and percentage return in separate units.
+
+
+## 2026-11-27 — MTF risk ranking, AI provenance and ASX session integrity
+
+- [x] Cap each CoinSpot MTF entry's fee/slippage-adjusted stop-risk budget by both the existing 0.5% equity budget and the remaining AUD 3 daily-loss headroom. A candidate that cannot support the AUD 10 minimum notional is blocked without consuming its signal.
+- [x] Replace breakout-vote-only ordering with deterministic risk-budget-use, executable-spread, modeled-cost, breakout-vote, long-trend and signal-age ranking. Persist the scan-relative rank and entry-time risk/cost evidence additively in the paper ledger and closed trades.
+- [x] Add descriptive paper-trade feedback grouped by entry model, including sample size, win rate, profit factor, average spread, risk-budget use and retained-history completeness. Small samples remain explicitly insufficient; no predictive edge or profitability is inferred.
+- [x] Version the CoinSpot MTF AI veto by requested model and review-policy version. Bind reviews to SHA-256 signal, history-completeness and quote-spread evidence; retain provider model/response identity, request/completion times, quote observation time and explicit unverified-source status. Cached records are checked against current evidence.
+- [x] Fail closed on stale/future signal or quote clocks, missing contiguous-history counts, malformed provider identity, invalid structured output, oversized response, timeout, cache failure or invalid provenance. The AI review is qualitative/advisory and cannot set probabilities or override deterministic controls.
+- [x] Expose candidate rank/risk/cost evidence, AI model/policy/fingerprint/source status and entry-model feedback in the dashboard.
+- [x] Reject duplicate Australia/Sydney session dates in ASX walk-forward input, even where timestamps differ.
+- Regression tests added for daily-loss headroom, risk/spread ranking, feedback completeness, MTF AI review cache/provenance/failure paths, missing history counts and duplicate Sydney sessions.
+- Validation boundary: latest Pages preview deployment succeeded, but the Pages project has an empty build command. GitHub Actions workflow-run retrieval returned no records, so npm test, npm run check and npm run build:pages are not verified. PR #81 remains draft/unmerged; no Worker or production Pages deployment was made.
+- All trading remains simulated. No broker credentials, live order routes, real-money execution or user-data resets were introduced.
