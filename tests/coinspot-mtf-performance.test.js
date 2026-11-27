@@ -59,6 +59,8 @@ test("reports descriptive MTF paper-trade feedback by entry model and captured r
  const p=calculateMtfPaperPerformance(account,now);
  assert.equal(p.paperTradeFeedback.status,"INSUFFICIENT_SAMPLE");
  assert.equal(p.paperTradeFeedback.sampleCount,2);
+ assert.equal(p.paperTradeFeedback.sampleBasis,"ALL_RETAINED_CLOSED_TRADES");
+ assert.equal(p.paperTradeFeedback.sampleComplete,true);
  assert.equal(p.paperTradeFeedback.byEntryModel.length,2);
  assert.equal(p.paperTradeFeedback.byEntryModel[0].entryModel,"DONCHIAN_BREAKOUT");
  assert.equal(p.paperTradeFeedback.byEntryModel[0].winRatePct,100);
