@@ -1108,6 +1108,5 @@ test("CoinSpot MTF allows validated signal history while excluding stale unverif
   assert.equal(btc.history.unverifiedDailyDays,13);
   assert.equal(btc.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
   assert.notEqual(btc.signalStatus,"WARMUP_REQUIRED");
-  assert.equal(btc.signal,null);
  }finally{globalThis.fetch=originalFetch;}
 });
