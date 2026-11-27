@@ -38,11 +38,11 @@ test("accepts an executable quote exactly at the 20-minute freshness boundary",(
 });
 
 function setSpread(market, spreadBps) {
- const midpoint=100000,half=midpoint*spreadBps/20000;
- market.quote.bid=midpoint-half;
- market.quote.ask=midpoint+half;
- market.quote.last=midpoint;
- market.quote.spreadBps=(market.quote.ask-market.quote.bid)/((market.quote.ask+market.quote.bid)/2)*10000;
+ const ask=100000,bid=ask*(20000-spreadBps)/(20000+spreadBps);
+ market.quote.bid=bid;
+ market.quote.ask=ask;
+ market.quote.last=(bid+ask)/2;
+ market.quote.spreadBps=(ask-bid)/((ask+bid)/2)*10000;
  return market;
 }
 
