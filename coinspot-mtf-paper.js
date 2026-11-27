@@ -100,6 +100,17 @@ export function validateMtfPaperAccount(a) {
       Number.isFinite(item.signalAgeMinutes) && item.signalAgeMinutes >= 0 &&
       typeof item.reason === "string" && item.reason.length > 0 && item.reason.length <= 240)
   );
+  // The idempotency ledger is safety-critical: after a position is closed, the
+  // same still-fresh four-hour signal must not be re-entered after a restart.
+  // Reject unknown markets, malformed/future signal clocks, and open positions
+  // whose signal was not recorded as consumed.
+  const validLastProcessed = Boolean(a?.lastProcessed && typeof a.lastProcessed === "object" &&
+    !Array.isArray(a.lastProcessed) && Object.keys(a.lastProcessed).length <= 2 &&
+    Object.entries(a.lastProcessed).every(([coin, signalAt]) =>
+      validCoin(coin) && validTimestamp(signalAt) &&
+      Date.parse(signalAt) <= Date.parse(a.updatedAt)));
+  const openPositionSignalConsumed = !a?.openPosition ||
+    a.lastProcessed?.[a.openPosition.coin] === a.openPosition.signalAt;
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       (a.riskAccountingVersion !== undefined && a.riskAccountingVersion !== 2) ||
@@ -112,7 +123,7 @@ export function validateMtfPaperAccount(a) {
       (!legacyRiskAccounting && (!Number.isFinite(minimumDailyLossForLedgerDay) || a.dailyLossAud + 0.02 < minimumDailyLossForLedgerDay)) ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||
-      !a.lastProcessed || typeof a.lastProcessed!=="object" || Array.isArray(a.lastProcessed) ||
+      !validLastProcessed || !openPositionSignalConsumed ||
       !validCandidateRanking)
     throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
   if (a.openPosition) {
