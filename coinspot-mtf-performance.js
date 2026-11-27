@@ -58,6 +58,7 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
     interpretation: "Entry-model outcomes and recorded spread/risk usage are descriptive paper-trade feedback only; they do not establish a causal edge, calibrated prediction or profitability."
   };
   return {
+    paperTradeFeedback,
     currency: "AUD",
     startingCapitalAud: round(startingCapital),
     equityAud: round(equity),
