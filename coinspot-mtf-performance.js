@@ -54,6 +54,8 @@ export function calculateMtfPaperPerformance(account, now = new Date()) {
   const paperTradeFeedback = {
     status: rankedTrades.length >= 30 ? "DESCRIPTIVE_ONLY" : "INSUFFICIENT_SAMPLE",
     sampleCount: rankedTrades.length,
+    sampleBasis: tradeHistoryAtLimit ? "LATEST_200_RETAINED_CLOSED_TRADES" : "ALL_RETAINED_CLOSED_TRADES",
+    sampleComplete: !tradeHistoryAtLimit,
     byEntryModel,
     interpretation: "Entry-model outcomes and recorded spread/risk usage are descriptive paper-trade feedback only; they do not establish a causal edge, calibrated prediction or profitability."
   };
