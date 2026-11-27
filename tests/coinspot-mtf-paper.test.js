@@ -29,6 +29,13 @@ test("does not consume a signal when risk sizing falls below the minimum notiona
  assert.equal(retried.lastProcessed.BTC,"2026-11-25T04:00:00.000Z");
 });
 
+test("accepts an executable quote exactly at the 20-minute freshness boundary",()=>{
+ const boundary=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:40:00.000Z");
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[boundary],now});
+ assert.ok(opened.openPosition);
+ assert.equal(opened.paperOnly,true);
+ assert.equal(opened.liveTradingEnabled,false);
+});
 test("stale or future quote timestamps cannot open or close paper positions",()=>{
  const staleEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:39:59.999Z");
  const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[staleEntry],now});
