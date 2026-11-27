@@ -128,9 +128,9 @@ export function backtestCoinSpotTrend({ candles, startingCapital = 100, starting
 }
 
 
-function benchmarkFold(candles, startIndex, endIndex, costs) {
+function benchmarkFold(candles, startIndex, endIndex, costs, startingCapital) {
   const entry = candles[startIndex].open * (1 + (costs.slippageBps + costs.spreadBps / 2) / 10000);
-  const spend = 50;
+  const spend = startingCapital * 0.5;
   const quantity = spend / (entry * (1 + costs.feeRate));
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return { status: "NO_BENCHMARK_POSITION", returnPct: null, profitLossQuote: null, quantity: 0 };
@@ -142,11 +142,12 @@ function benchmarkFold(candles, startIndex, endIndex, costs) {
   const profitLossQuote = round(proceeds - entryCost);
   return {
     status: "SIMULATED_BUY_AND_HOLD_REFERENCE",
+    startingCapitalQuote: round(startingCapital), allocationPct: 50,
     entryAt: candles[startIndex].timestamp,
     exitAt: candles[endIndex - 1].timestamp,
     quantity: round(quantity),
     profitLossQuote,
-    returnPct: round(profitLossQuote)
+    returnPct: round(profitLossQuote / startingCapital * 100)
   };
 }
 
