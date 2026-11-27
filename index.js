@@ -495,7 +495,7 @@ const COINSPOT_MTF_COINS = ["BTC","ETH"];
 const utcDate = timestamp => new Date(timestamp).toISOString().slice(0,10);
 const shiftUtcDate = (date,days) => new Date(Date.parse(date+"T00:00:00.000Z")+days*86400000).toISOString().slice(0,10);
 
-const COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC = 15;
+const COINSPOT_HISTORY_REQUEST_BUDGET_PER_MARKET_PER_SYNC = 18;
 const COINSPOT_HISTORY_MIN_PARTITION_MS = 15 * 60 * 1000;
 const COINSPOT_MTF_KV_MIN_WRITE_INTERVAL_MS = 1100;
 const COINSPOT_MTF_KV_WRITE_RETRY_DELAYS_MS = Object.freeze([1200, 2400, 4800]);
