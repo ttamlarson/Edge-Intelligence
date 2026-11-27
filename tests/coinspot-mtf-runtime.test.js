@@ -33,6 +33,25 @@ function attachTrackedHistory(dailyCandles, fourHourCandles, { dailyOverrides = 
 }
 
 
+test("CoinSpot MTF paper scan fails closed when the global Durable Object sync lease is held", async () => {
+ const kv=kvStore();
+ const coordinator={
+  idFromName:name=>name,
+  get:id=>{
+   assert.equal(id,"coinspot-mtf-history-sync-global");
+   return {fetch:async url=>{
+    assert.equal(new URL(url).pathname,"/paper-sync/acquire");
+    return new Response(JSON.stringify({acquired:false}),{status:409,headers:{"Content-Type":"application/json"}});
+   }};
+  }
+ };
+ await assert.rejects(
+  __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_EXECUTION_COORDINATOR:coordinator},"2026-11-25T06:00:00.000Z",4),
+  error=>error?.code==="COINSPOT_MTF_SYNC_LOCKED"
+ );
+ assert.equal(kv.values.size,0,"a skipped scan must not change history, paper ledger or status");
+});
+
 test("CoinSpot MTF sync backfills one UTC day per run using read-only historical orders",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
  globalThis.fetch=async(url,options={})=>{
