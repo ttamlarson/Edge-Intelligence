@@ -118,6 +118,25 @@ export function validateMtfPaperAccount(a) {
       return Number.isFinite(processedAt) && Number.isFinite(tradeSignalAt) &&
         processedAt >= tradeSignalAt;
     });
+  // A persisted idempotency timestamp alone cannot prove that the same signal
+  // was not closed twice: lastProcessed intentionally stores only the latest
+  // signal per coin. Validate uniqueness across the retained trade history and
+  // ensure an open position cannot overlap a previously closed signal.
+  const closedTradeIds = new Set();
+  const closedTradeSignalKeys = new Set();
+  const uniqueClosedTradeLedger = Array.isArray(a?.closedTrades) && a.closedTrades.every(trade => {
+    const signalKey = String(trade?.coin) + "|" + String(trade?.signalAt);
+    const tradeId = typeof trade?.id === "string" && trade.id.length > 0
+      ? trade.id : signalKey;
+    if (closedTradeIds.has(tradeId) || closedTradeSignalKeys.has(signalKey)) return false;
+    closedTradeIds.add(tradeId);
+    closedTradeSignalKeys.add(signalKey);
+    return true;
+  });
+  const openPositionSignalNotPreviouslyClosed = !a?.openPosition ||
+    !closedTradeSignalKeys.has(String(a.openPosition.coin) + "|" + String(a.openPosition.signalAt));
+  const openPositionIdNotPreviouslyClosed = !a?.openPosition ||
+    !(typeof a.openPosition.id === "string" && closedTradeIds.has(a.openPosition.id));
   if (!a || a.mode!=="COINSPOT_MTF_AUTOMATED_PAPER" || a.currency!=="AUD" ||
       (a.paperOnly !== undefined && a.paperOnly !== true) ||
       (a.riskAccountingVersion !== undefined && a.riskAccountingVersion !== 2) ||
@@ -131,7 +150,8 @@ export function validateMtfPaperAccount(a) {
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
       a.closedTrades.some(trade => !validClosedTrade(trade)) ||
       !validLastProcessed || !openPositionSignalConsumed || !closedTradeSignalsConsumed ||
-      !validCandidateRanking)
+      !uniqueClosedTradeLedger || !openPositionSignalNotPreviouslyClosed ||
+      !openPositionIdNotPreviouslyClosed || !validCandidateRanking)
     throw new Error("CoinSpot MTF paper ledger failed validation; stored data was not changed.");
   if (a.openPosition) {
     const p = a.openPosition;
@@ -140,6 +160,7 @@ export function validateMtfPaperAccount(a) {
       Math.abs(p.entryCost - (p.notionalAud + p.entryFeeAud)) <= 0.02 &&
       Math.abs(p.notionalAud - p.quantity * p.entryPrice) <= 0.02;
     if (!validCoin(p.coin) || p.pair !== p.coin + "/AUD" ||
+        typeof p.id !== "string" || p.id.length === 0 ||
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
         !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
         !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches ||
