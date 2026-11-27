@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams } from "../coinspot-history.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_FOUR_HOUR_HISTORY_LIMIT } from "../coinspot-history.js";
 
 test("normalizes authenticated CoinSpot AUD completed orders and rejects other quote markets",()=>{
  const payload={status:"ok",buyorders:[
@@ -42,6 +42,19 @@ test("merges updates by candle timestamp and keeps the newest bounded history",(
  assert.equal(merged.length,2);
  assert.equal(merged[0].close,3);
  assert.equal(merged[1].timestamp,"2026-11-25T00:00:00Z");
+});
+
+
+test("retains up to 720 actual four-hour candles for extended multi-timeframe history", () => {
+ const base={open:100,high:101,low:99,close:100,volume:1};
+ const bars=Array.from({length:730},(_,index)=>({
+  ...base,timestamp:new Date(Date.UTC(2026,0,1)+index*4*60*60*1000).toISOString()
+ }));
+ const retained=mergeCoinSpotCandles([],bars,COINSPOT_FOUR_HOUR_HISTORY_LIMIT);
+ assert.equal(COINSPOT_FOUR_HOUR_HISTORY_LIMIT,720);
+ assert.equal(retained.length,720);
+ assert.equal(retained[0].timestamp,bars[10].timestamp);
+ assert.equal(retained.at(-1).timestamp,bars.at(-1).timestamp);
 });
 
 test("builds documented UTC-date and exact Unix-epoch CoinSpot history ranges", () => {
