@@ -117,18 +117,18 @@ test("AI review records provider model identity and completion time rather than 
 
 test("AI advisor blocks low confidence, risk flags and non-approval decisions", async () => {
   const low = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test",
+    candidate, bars, sourceMetadata, apiKey: "test",
     fetchImpl: async () => aiResponse({ ...approve, confidence: 74 })
   });
   assert.equal(low.approved, false);
   const flagged = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test",
+    candidate, bars, sourceMetadata, apiKey: "test",
     fetchImpl: async () => aiResponse({ ...approve, risk_flags: ["Possible breakout exhaustion"] })
   });
   assert.equal(flagged.approved, false);
   for (const decision of ["REVIEW", "REJECT"]) {
     const result = await evaluateAsxAiDecision({
-      candidate, bars, apiKey: "test",
+      candidate, bars, sourceMetadata, apiKey: "test",
       fetchImpl: async () => aiResponse({ ...approve, decision })
     });
     assert.equal(result.approved, false);
@@ -142,7 +142,7 @@ test("AI advisor blocks missing or malformed probability output", async () => {
     { ...approve, confidence: 101 }
   ]) {
     const result = await evaluateAsxAiDecision({
-      candidate, bars, apiKey: "test",
+      candidate, bars, sourceMetadata, apiKey: "test",
       fetchImpl: async () => aiResponse(malformedDecision)
     });
     assert.equal(result.status, "AI_BLOCKED_INVALID_DECISION");
@@ -189,16 +189,16 @@ test("AI advisor preserves missing provider volume as missing rather than invent
 
 test("AI advisor blocks provider errors, redirects and timeouts without approving", async () => {
   const providerError = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test", fetchImpl: async () => new Response("unavailable", { status: 503 })
+    candidate, bars, sourceMetadata, apiKey: "test", fetchImpl: async () => new Response("unavailable", { status: 503 })
   });
   assert.equal(providerError.status, "AI_BLOCKED_PROVIDER_ERROR");
   const redirect = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test",
+    candidate, bars, sourceMetadata, apiKey: "test",
     fetchImpl: async () => ({ ok: true, url: "https://example.com/redirect", text: async () => "{}" })
   });
   assert.equal(redirect.status, "AI_BLOCKED_PROVIDER_REDIRECT");
   const timeout = await evaluateAsxAiDecision({
-    candidate, bars, apiKey: "test",
+    candidate, bars, sourceMetadata, apiKey: "test",
     fetchImpl: async (_url, init) => new Promise((resolve, reject) => {
       init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
     }),
