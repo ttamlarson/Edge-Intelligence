@@ -740,7 +740,7 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
  });
  const trackedCounts=attachTrackedHistory(daily,fourHour,{dailyOverrides:{"2026-11-22":6},trackedOverrides:{"2026-11-22":6}});
  kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
-  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-11-26",liveTradingEnabled:false,
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"COLLECTING_LIVE_DAY",nextDate:"2026-07-26",liveTradingEnabled:false,
   markets:{BTC:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:1000,tradesFetchedByDate:trackedCounts},ETH:{dailyCandles:daily,fourHourCandles:fourHour,tradesFetched:500,tradesFetchedByDate:trackedCounts}}
  }));
  globalThis.fetch=async url=>{
