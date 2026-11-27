@@ -1535,7 +1535,7 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
   let syncedHistoryState = null;
   const backfillDaysRequested = Math.max(1, Math.min(4, Number(backfillDays) || 1));
   let historyRequestsThisScan = 0;
-  let historyRequestBudgetThisScan = 20;
+  let historyRequestBudgetThisScan = 30;
   let providerProbeBudgetGuardApplied = false;
   if (env.COINSPOT_READONLY_KEY && env.COINSPOT_READONLY_SECRET) {
     for (let i = 0; i < backfillDaysRequested; i++) {
@@ -2085,10 +2085,9 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
     if(provenance.invalidTrackedDateCount>0){
       readiness.push("Completed-order date ledger contains "+provenance.invalidTrackedDateCount+" invalid date/count entries.");
     }
-    if(provenance.unverifiedDailyDays>0||provenance.unverifiedFourHourDays>0){
-      readiness.push("Excluded unverified cached history: "+provenance.unverifiedDailyDays+" daily date(s) and "+
-        provenance.unverifiedFourHourDays+" four-hour date(s) do not reconcile to the completed-order date ledger.");
-    }
+    // Unverified cached candles are already excluded by validateCoinSpotMtfMarketHistory.
+    // Keep their counts/status visible for diagnostics, but do not let stale cache
+    // outside the validated signal series veto a signal built solely from validated bars.
     if(dailyContinuity.contiguousCandles<110){
       const gap=dailyContinuity.latestGap?" after gap "+dailyContinuity.latestGap.previousAt+" -> "+dailyContinuity.latestGap.nextAt:"";
       readiness.push("Daily contiguous history "+dailyContinuity.contiguousCandles+"/110 completed candles"+gap);
