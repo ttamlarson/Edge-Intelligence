@@ -247,4 +247,5 @@
 - [ ] Return blank/boilerplate thesis or counter-thesis text and verify strict structured-output validation rejects it.
 - [ ] Keep the requested model alias constant while returning two different provider model IDs; confirm the review IDs differ and the actual model IDs are displayed separately.
 - [ ] Confirm strategy comparison reports quote-currency netPnlQuote and percentage returnPct independently; missing percentage metrics remain null and are never copied from currency P&L.
+- [ ] Run the crypto walk-forward with two starting-capital values; confirm the 50% buy-and-hold allocation scales proportionally and benchmark returnPct equals net quote P&L divided by starting account capital, not the raw P&L amount.
 - [ ] Confirm the crypto AI review remains advisory only, no model confidence is presented as calibrated probability, and all paper/live safety controls remain unchanged.
