@@ -1657,6 +1657,7 @@ async function runCoinSpotMtfPaperUnlocked(env, now = new Date(), backfillDays =
       validatedFourHourDays: m.history?.validatedFourHourDays ?? 0,
       unverifiedDailyDays: m.history?.unverifiedDailyDays ?? 0,
       unverifiedFourHourDays: m.history?.unverifiedFourHourDays ?? 0,
+      retentionBoundaryExcludedFourHourDays: m.history?.retentionBoundaryExcludedFourHourDays ?? [],
       invalidTrackedDateCount: m.history?.invalidTrackedDateCount ?? 0,
       historyIntegrityStatus: m.history?.historyIntegrityStatus ?? "UNKNOWN",
       historyIntegrityReason: m.history?.historyIntegrityReason ?? null,
@@ -1816,6 +1817,7 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
       validatedFourHourDays: 0,
       unverifiedDailyDays: uniqueDays(storedDaily).size,
       unverifiedFourHourDays: uniqueDays(storedFourHour).size,
+      retentionBoundaryExcludedFourHourDays: [],
       invalidTrackedDateCount: 0,
       status: "UNVERIFIED_DATE_LEDGER_MISSING",
       reason: "MISSING_TRADES_FETCHED_BY_DATE"
@@ -1861,6 +1863,16 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     validatedDaily.push(candle);
   }
 
+  const validatedDailyDaySet = new Set(validatedDaily.map(candle => candle.timestamp.slice(0, 10)));
+  const firstFourHourTimestamp = Date.parse(storedFourHour[0]?.timestamp || "");
+  const firstFourHourDay = Number.isFinite(firstFourHourTimestamp) &&
+      new Date(firstFourHourTimestamp).toISOString() === storedFourHour[0]?.timestamp
+    ? new Date(firstFourHourTimestamp).toISOString().slice(0, 10) : null;
+  const hasFullFourHourRetentionWindow = storedFourHour.length === COINSPOT_FOUR_HOUR_HISTORY_LIMIT;
+  const firstFourHourDayIsPartial = firstFourHourDay !== null &&
+    firstFourHourTimestamp % COINSPOT_INTERVALS.daily !== 0 &&
+    firstFourHourTimestamp % COINSPOT_INTERVALS.fourHour === 0;
+  const retentionBoundaryExcludedFourHourDays = new Set();
   const fourHourByDay = new Map();
   const unverifiedFourHour = new Set();
   const seenFourHourTimestamps = new Set();
@@ -1887,11 +1899,35 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
   const validatedFourHour = [];
   for (const [day, group] of fourHourByDay) {
     const expected = trackedCounts.get(day);
+    const leadingRetentionDayIsIncomplete = hasFullFourHourRetentionWindow &&
+      day === firstFourHourDay && firstFourHourDayIsPartial &&
+      validatedDailyDaySet.has(day) && Number.isSafeInteger(expected) &&
+      expected > 0 && group.valid && group.count < expected;
+    if (leadingRetentionDayIsIncomplete) {
+      // This leading UTC day is only partially retained by the rolling 720-bar
+      // window. Exclude the entire day from strategy input and report it
+      // separately; never treat its truncated candles as validated history.
+      retentionBoundaryExcludedFourHourDays.add(day);
+      continue;
+    }
     if (expected === undefined || expected <= 0 || !group.valid || group.count !== expected) {
       unverifiedFourHour.add(day);
       continue;
     }
     validatedFourHour.push(...group.candles);
+  }
+
+  // Older daily dates can legitimately precede the bounded four-hour window.
+  // They are visible as retention exclusions only when the four-hour cache is
+  // exactly at its configured cap; otherwise missing 4h history remains a
+  // validation failure.
+  for (const day of validatedDailyDaySet) {
+    if (fourHourByDay.has(day)) continue;
+    if (hasFullFourHourRetentionWindow && firstFourHourDay && day < firstFourHourDay) {
+      retentionBoundaryExcludedFourHourDays.add(day);
+    } else {
+      unverifiedFourHour.add(day);
+    }
   }
 
   const unverifiedDailyDays = unverifiedDaily.size;
@@ -1907,9 +1943,11 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     ? "INVALID_TRADE_COUNT_LEDGER_ENTRIES"
     : unverifiedDailyDays > 0 || unverifiedFourHourDays > 0
       ? "CACHED_CANDLES_NOT_RECONCILED_TO_COMPLETED_ORDER_DATE_COUNTS"
-      : trackedCounts.size > 0
-        ? "ALL_STORED_CANDLES_RECONCILE_TO_COMPLETED_ORDER_DATE_COUNTS"
-        : "NO_COMPLETED_ORDER_DATES_TRACKED_YET";
+      : retentionBoundaryExcludedFourHourDays.size > 0
+        ? "RETAINED_CANDLES_VALIDATED; LEADING_FOUR_HOUR_RETENTION_DATES_EXCLUDED"
+        : trackedCounts.size > 0
+          ? "ALL_STORED_CANDLES_RECONCILE_TO_COMPLETED_ORDER_DATE_COUNTS"
+          : "NO_COMPLETED_ORDER_DATES_TRACKED_YET";
 
   return {
     dailyCandles: validatedDaily.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)),
@@ -1920,6 +1958,7 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     validatedFourHourDays: new Set(validatedFourHour.map(candle => candle.timestamp.slice(0, 10))).size,
     unverifiedDailyDays,
     unverifiedFourHourDays,
+    retentionBoundaryExcludedFourHourDays: [...retentionBoundaryExcludedFourHourDays].sort(),
     invalidTrackedDateCount,
     status,
     reason
@@ -1957,6 +1996,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null) {
       validatedFourHourDays:provenance.validatedFourHourDays,
       unverifiedDailyDays:provenance.unverifiedDailyDays,
       unverifiedFourHourDays:provenance.unverifiedFourHourDays,
+      retentionBoundaryExcludedFourHourDays:provenance.retentionBoundaryExcludedFourHourDays || [],
       invalidTrackedDateCount:provenance.invalidTrackedDateCount,
       historyIntegrityStatus:provenance.status,
       historyIntegrityReason:provenance.reason,
@@ -2626,5 +2666,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate, validateCoinSpotMtfMarketHistory };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
