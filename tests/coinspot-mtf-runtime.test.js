@@ -392,12 +392,12 @@ test("CoinSpot legacy integrity marker rebuilds the entire original 120-day wind
   assert.equal(saved.markets.BTC.fourHourCandles.length,0);
   assert.equal(saved.markets.BTC.tradesFetched,0);
   assert.equal(saved.markets.BTC.tradesFetchedBase,0);
-  assert.deepEqual(saved.markets.BTC.tradesFetchedByDate,{});
+  assert.deepEqual(saved.markets.BTC.tradesFetchedByDate,{"2026-07-28":0});
   assert.equal(saved.markets.ETH.dailyCandles.length,0);
   assert.equal(saved.markets.ETH.fourHourCandles.length,0);
   assert.equal(saved.markets.ETH.tradesFetched,0);
   assert.equal(saved.markets.ETH.tradesFetchedBase,0);
-  assert.deepEqual(saved.markets.ETH.tradesFetchedByDate,{});
+  assert.deepEqual(saved.markets.ETH.tradesFetchedByDate,{"2026-07-28":0});
   assert.equal(saved.liveTradingEnabled,false);
  }finally{globalThis.fetch=originalFetch;}
 });
