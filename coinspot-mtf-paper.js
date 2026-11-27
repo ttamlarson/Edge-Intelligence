@@ -6,6 +6,7 @@ export const MTF_PAPER_CONFIG = Object.freeze({
 });
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const FOUR_HOUR_MS = 4 * 60 * 60 * 1000;
+const MAX_SIGNAL_AGE_AFTER_CLOSE_MS = 8 * 60 * 60 * 1000;
 const MARK_STALE_AFTER_MS = 20 * 60 * 1000;
 const validCoin = coin => coin === "BTC" || coin === "ETH";
 const validAudMarket = market => validCoin(market?.coin) && market?.pair === market.coin + "/AUD" && market?.quote?.pair === market.coin + "/AUD";
@@ -55,6 +56,7 @@ export function validateMtfPaperAccount(a) {
         !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
         !validTimestamp(trade.signalAt) || Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
         Date.parse(trade.openedAt) < Date.parse(trade.signalAt) + FOUR_HOUR_MS ||
+        Date.parse(trade.openedAt) > Date.parse(trade.signalAt) + FOUR_HOUR_MS + MAX_SIGNAL_AGE_AFTER_CLOSE_MS ||
         !positiveFinite(trade.entryPrice) || !positiveFinite(trade.exitPrice) ||
         !positiveFinite(trade.quantity) || !nonNegativeFinite(trade.entryFeeAud) ||
         !nonNegativeFinite(trade.exitFeeAud) || !Number.isFinite(trade.pnlAud) ||
@@ -199,7 +201,7 @@ function isMtfEntryCandidate(m, now) {
     Number.isFinite(stopDistance) && stopDistance > 0 &&
     Math.abs(stopDistance - expectedStopDistance) <= Math.max(1e-8, expectedStopDistance * 1e-6) &&
     Number.isFinite(signalAt) && Number.isFinite(scanAt) &&
-    ageAfterSignalClose >= 0 && ageAfterSignalClose <= 8 * 60 * 60 * 1000;
+    ageAfterSignalClose >= 0 && ageAfterSignalClose <= MAX_SIGNAL_AGE_AFTER_CLOSE_MS;
 }
 
 function rankMtfEntryCandidate(m, account, now) {
