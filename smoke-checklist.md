@@ -132,7 +132,8 @@
 
 ## CoinSpot MTF paper runtime remediation
 
-- [ ] Confirm branch CI passes the read-only allowlist, retry, timeout, fee/slippage sizing and daily-loss regression tests.
+- [x] Branch CI passed the read-only allowlist, retry, timeout, fee/slippage sizing, daily-loss and global-lease regression tests on commit `8e3b144c` (2026-11-27 10:18 UTC).
+- [x] Regression test covers the 20-minute global Durable Object lease, exclusivity beyond 15 minutes, expiry recovery and owner-only release of a successor lease.
 - [ ] After Worker deployment, call authenticated `GET /api/crypto/coinspot/readonly/status`; it must report `AUTHENTICATED` and `READ_ONLY` without exposing key material.
 - [ ] Call authenticated `POST /api/crypto/coinspot/strategy/sync` or wait for the 15-minute schedule; confirm the response reports raw buy/sell counts and accepted BTC/AUD or ETH/AUD trades.
 - [ ] Confirm a transient transport failure retries once with a higher nonce and records `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` rather than silently advancing the history cursor.

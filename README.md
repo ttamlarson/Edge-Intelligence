@@ -195,6 +195,7 @@ The CoinSpot AUD MTF breakout candidate is now connected to a separate automated
 - Transient CoinSpot transport failures are retried once with a fresh monotonic nonce and matching HMAC-SHA512 signature. Requests have a bounded 15-second timeout and persist explicit `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` diagnostics.
 - Paper position sizing now includes both entry and stop-exit fees and modeled slippage in its risk budget. The daily-loss circuit includes open mark-to-market losses as well as realized losses and closes an open paper position when the limit is reached.
 - Current BTC/AUD and ETH/AUD quotes are fetched even while historical candles are warming, so existing paper positions remain marked and stop-managed. New positions are marked to the current bid after modeled slippage and fees immediately on entry.
+- A private Durable Object lease serializes the full MTF history-sync and paper-ledger operation across scheduled and manual requests. Its 20-minute expiry exceeds the bounded four-day backfill retry envelope; overlapping scheduled scans skip cleanly and duplicate manual writes return HTTP 409 without changing state.
 - The engine remains restricted to BTC/AUD and ETH/AUD, AUD 100 simulated capital, one open position, 0.5% risk per trade, 25% allocation and AUD 3 daily loss. It never submits CoinSpot orders; `liveTradingEnabled` remains false.
 
 
