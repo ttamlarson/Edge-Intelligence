@@ -37,6 +37,25 @@ test("accepts an executable quote exactly at the 20-minute freshness boundary",(
  assert.equal(opened.liveTradingEnabled,false);
 });
 
+test("stale or future quote timestamps cannot open or close paper positions",()=>{
+ const staleEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:39:59.999Z");
+ const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[staleEntry],now});
+ assert.equal(blocked.openPosition,null);
+ assert.deepEqual(blocked.lastProcessed,{});
+ const futureEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T08:00:00.001Z");
+ assert.equal(processMtfPaperAccount(createMtfPaperAccount(now),{markets:[futureEntry],now}).openPosition,null);
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const stop=opened.openPosition.stopPrice;
+ const staleExit={...candidate(),quote:{...candidate().quote,bid:stop*.9,ask:stop,last:stop,retrievedAt:"2026-11-25T08:09:59.999Z"}};
+ const unchanged=processMtfPaperAccount(opened,{markets:[staleExit],now:"2026-11-25T08:30:00.000Z"});
+ assert.ok(unchanged.openPosition);
+ assert.equal(unchanged.openPosition.markStatus,"STALE");
+ assert.equal(unchanged.openPosition.lastMarkAt,now);
+ assert.equal(unchanged.closedTrades.length,0);
+ assert.equal(unchanged.equityAud,opened.equityAud);
+ assert.equal(unchanged.paperOnly,true);
+ assert.equal(unchanged.liveTradingEnabled,false);
+});
 function setSpread(market, spreadBps) {
  const ask=100000,bid=ask*(20000-spreadBps)/(20000+spreadBps);
  market.quote.bid=bid;
@@ -83,25 +102,6 @@ test("MTF entry risk is capped by remaining daily-loss headroom before minimum-n
  assert.equal(validateMtfPaperAccount(blocked),true);
 });
 
-test("stale or future quote timestamps cannot open or close paper positions",()=>{
- const staleEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T07:39:59.999Z");
- const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[staleEntry],now});
- assert.equal(blocked.openPosition,null);
- assert.deepEqual(blocked.lastProcessed,{});
- const futureEntry=candidate("BTC","2026-11-25T04:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T08:00:00.001Z");
- assert.equal(processMtfPaperAccount(createMtfPaperAccount(now),{markets:[futureEntry],now}).openPosition,null);
- const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
- const stop=opened.openPosition.stopPrice;
- const staleExit={...candidate(),quote:{...candidate().quote,bid:stop*.9,ask:stop,last:stop,retrievedAt:"2026-11-25T08:09:59.999Z"}};
- const unchanged=processMtfPaperAccount(opened,{markets:[staleExit],now:"2026-11-25T08:30:00.000Z"});
- assert.ok(unchanged.openPosition);
- assert.equal(unchanged.openPosition.markStatus,"STALE");
- assert.equal(unchanged.openPosition.lastMarkAt,now);
- assert.equal(unchanged.closedTrades.length,0);
- assert.equal(unchanged.equityAud,opened.equityAud);
- assert.equal(unchanged.paperOnly,true);
- assert.equal(unchanged.liveTradingEnabled,false);
-});
 test("opens a validated pullback reclaim candidate without weakening higher-timeframe gates",()=>{
  const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate("BTC","2026-11-25T04:00:00.000Z",100000,"PULLBACK_RECLAIM")],now});
  assert.ok(a.openPosition);
