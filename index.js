@@ -1170,6 +1170,7 @@ async function reviewCoinSpotMtfCandidate(env, market, now = new Date().toISOStr
   const ageAfterSignalClose = nowMs - (signalMs + 4 * 60 * 60 * 1000);
   const history = market?.history || {};
   const historyCount = value => {
+    if (value === null || value === undefined || value === "") return null;
     const count = Number(value);
     return Number.isInteger(count) && count >= 0 ? count : null;
   };
