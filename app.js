@@ -194,6 +194,9 @@ document.addEventListener("click", async event => {
    "Risk flags: "+((review.riskFlags||[]).join("; ")||"None declared"),
    "Limitations: "+((review.limitations||[]).join("; ")||"—"),
    "Walk-forward assessment: "+(review.research?.summary?.assessment||"Unavailable"),
+   "Model: "+(review.model||"—")+" (requested "+(review.requestedModel||"—")+") · policy "+(review.reviewPolicyVersion||"legacy")+(review.providerResponseId?" · response "+review.providerResponseId:""),
+   "Review timing: "+(review.requestStartedAt||provenance.reviewRequestStartedAt||"—")+" → "+(review.reviewedAt||"—"),
+   "Data: "+(provenance.sourceType||"unknown")+" · "+(provenance.dataClass||"unknown")+" · "+(provenance.quoteCurrency||"—")+" · "+(provenance.firstBarAt||"—")+" → "+(provenance.latestBarAt||"—"),
    "Provenance: "+(provenance.barsProvided||0)+" bars · SHA-256 "+(provenance.fingerprint||"").slice(0,16)+"… · source not independently verified",
    review.reason||"",
    "Model-assisted critique only; not a trained predictor, profitability claim or trade instruction."
