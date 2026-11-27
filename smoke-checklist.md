@@ -239,3 +239,12 @@
 
 
 - [ ] Confirm a legacy open-position ledger with no `riskAccountingVersion` is accepted for one-time migration, its retained unrealized loss is restored to `dailyLossAud`, and version 2 is persisted without resetting cash, position or trade history.
+
+
+## Crypto AI review and strategy-comparison audit
+- [ ] Confirm crypto AI reviews store the full validated-dataset SHA-256, source label, explicit unverified-source status, review-policy version, requested model alias, provider-returned model ID and provider response ID.
+- [ ] Confirm request-start and completion timestamps are distinct, chronological and recorded in both the review and its provenance packet; a completion clock earlier than request start must fail closed.
+- [ ] Return blank/boilerplate thesis or counter-thesis text and verify strict structured-output validation rejects it.
+- [ ] Keep the requested model alias constant while returning two different provider model IDs; confirm the review IDs differ and the actual model IDs are displayed separately.
+- [ ] Confirm strategy comparison reports quote-currency netPnlQuote and percentage returnPct independently; missing percentage metrics remain null and are never copied from currency P&L.
+- [ ] Confirm the crypto AI review remains advisory only, no model confidence is presented as calibrated probability, and all paper/live safety controls remain unchanged.
