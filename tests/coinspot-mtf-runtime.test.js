@@ -138,7 +138,7 @@ test("CoinSpot MTF paper runner backfills after a validated provider probe and c
   assert.equal(result.cashAud,100);
   assert.equal(result.liveTradingEnabled,false);
   assert.equal(result.paperOnly,true);
-  assert.equal(result.historyRequestBudgetThisScan,20);
+  assert.equal(result.historyRequestBudgetThisScan,30);
   assert.equal(result.providerProbeBudgetGuardApplied,false);
   assert.equal(result.historyRequestsThisScan,4);
   assert.equal(result.markets.length,2);
@@ -1074,5 +1074,40 @@ test("backdated scheduled MTF paper scans are rejected before CoinSpot sync or K
   assert.equal(kv.values.get(accountKey),accountRaw);
   assert.equal(kv.values.get(historyKey),historyRaw);
   assert.equal(kv.values.has(statusKey),false);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+
+test("CoinSpot MTF allows validated signal history while excluding stale unverified cache tails", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ const day=24*60*60*1000,fourHours=4*60*60*1000;
+ const firstDay=Date.parse("2026-07-28T00:00:00.000Z");
+ const daily=Array.from({length:123},(_,index)=>({
+  timestamp:new Date(firstDay+index*day).toISOString(),
+  open:100,high:101,low:99,close:100,volume:1,tradeCount:6
+ }));
+ const trackedCounts=Object.fromEntries(daily.slice(0,110).map(candle=>[candle.timestamp.slice(0,10),6]));
+ const fourHourStart=Date.parse("2026-10-10T00:00:00.000Z");
+ const fourHourBars=Array.from({length:210},(_,index)=>({
+  timestamp:new Date(fourHourStart+index*fourHours).toISOString(),
+  open:100,high:101,low:99,close:100,volume:1,tradeCount:1
+ }));
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-11-27",liveTradingEnabled:false,
+  markets:{
+   BTC:{dailyCandles:daily,fourHourCandles:fourHourBars,tradesFetched:660,tradesFetchedByDate:trackedCounts,lastHistoryDate:"2026-11-14"},
+   ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0,tradesFetchedByDate:{}}
+  }
+ }));
+ globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:100,ask:100.1,last:100.05}}),{status:200,headers:{"Content-Type":"application/json"}});
+ try{
+  const result=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-27T06:30:00.000Z");
+  const btc=result.markets.find(market=>market.coin==="BTC");
+  assert.equal(btc.history.validatedDailyCandles,110);
+  assert.equal(btc.history.validatedFourHourCandles,210);
+  assert.equal(btc.history.unverifiedDailyDays,13);
+  assert.equal(btc.history.historyIntegrityStatus,"BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
+  assert.notEqual(btc.signalStatus,"WARMUP_REQUIRED");
+  assert.equal(btc.signal,null);
  }finally{globalThis.fetch=originalFetch;}
 });
