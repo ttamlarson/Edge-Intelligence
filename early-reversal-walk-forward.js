@@ -20,7 +20,7 @@ const CONFIG = Object.freeze({
   minimumNotionalAud: 10
 });
 const round = value => Math.round((value + Number.EPSILON) * 100) / 100;
-const finite = value => Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 
 function validateBars(candles, interval, label) {
   if (!Array.isArray(candles) || candles.length > 50000) {
@@ -32,7 +32,7 @@ function validateBars(candles, interval, label) {
     const open = finite(candle?.open), high = finite(candle?.high);
     const low = finite(candle?.low), close = finite(candle?.close);
     const volume = finite(candle?.volume);
-    if (!Number.isFinite(timestamp) || timestamp % interval !== 0 || timestamp <= previous ||
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== candle.timestamp || timestamp % interval !== 0 || timestamp <= previous ||
         ![open, high, low, close, volume].every(Number.isFinite) ||
         Math.min(open, high, low, close) <= 0 || high < Math.max(open, close) ||
         low > Math.min(open, close) || high < low || volume < 0) {
@@ -303,7 +303,7 @@ export function walkForwardEarlyReversalShadow({
 
   const daily = validateBars(dailyCandles, DAY, "Daily history");
   const fourHour = validateBars(fourHourCandles, FOUR_HOURS, "Four-hour history");
-  if (fourHour.some(candle => Date.parse(candle.timestamp) > clock)) {
+  if (daily.some(candle => Date.parse(candle.timestamp) > clock) || fourHour.some(candle => Date.parse(candle.timestamp) > clock)) {
     throw new Error("Walk-forward data contains a future-dated four-hour candle.");
   }
   for (let i = 1; i < daily.length; i++) {
