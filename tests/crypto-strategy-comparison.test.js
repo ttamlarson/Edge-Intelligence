@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCryptoStrategyComparison } from "../crypto-strategy-comparison.js";
 
-const sample = (trades, pnl, profitFactor, drawdown) => ({
-  trades, netPnlQuote: pnl, profitFactor, maxDrawdownPct: drawdown, winRatePct: 55,
+const sample = (trades, pnl, profitFactor, drawdown, returnPct = null) => ({
+  trades, netPnlQuote: pnl, returnPct, profitFactor, maxDrawdownPct: drawdown, winRatePct: 55,
   dateRange: { from: "2026-01-01T00:00:00.000Z", to: "2026-06-30T00:00:00.000Z" }
 });
 
 test("strategy comparison reports each available OOS variant with a common research screen", () => {
   const result = buildCryptoStrategyComparison({
-    legacy: { outOfSample: sample(40, 5, 1.5, 8), assessment: "CANDIDATE_FOR_FORWARD_PAPER_REVIEW" },
+    legacy: { outOfSample: sample(40, 5, 1.5, 8, 6.25), assessment: "CANDIDATE_FOR_FORWARD_PAPER_REVIEW" },
     adaptive: {
       outOfSample: sample(12, 2, 1.4, 7),
       assessment: "INSUFFICIENT_OUT_OF_SAMPLE_TRADES",
@@ -31,6 +31,9 @@ test("strategy comparison reports each available OOS variant with a common resea
   assert.equal(result.strategyCount, 8);
   assert.equal(result.meetsCommonResearchScreenCount, 4);
   assert.equal(result.strategies[0].commonScreen, "MEETS_COMMON_RESEARCH_SCREEN");
+  assert.equal(result.strategies[0].netPnlQuote, 5);
+  assert.equal(result.strategies[0].returnPct, 6.25);
+  assert.equal(result.strategies[1].returnPct, null);
   assert.equal(result.strategies[1].commonScreen, "INSUFFICIENT_OUT_OF_SAMPLE_TRADES");
   assert.equal(result.strategies[2].commonScreen, "DOES_NOT_MEET_COMMON_RESEARCH_SCREEN");
   assert.equal(result.strategies[5].timeframe, "1h");
