@@ -161,9 +161,6 @@ export async function evaluateAsxAiDecision({
   }
   const validated = validateInput(candidate, bars, sourceMetadata, reviewClock);
   if (!validated.valid) return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: validated.reason };
-  
-    return { status: "AI_BLOCKED_INVALID_INPUT", approved: false, reason: "AI review clock, model or timeout configuration is invalid." };
-  }
 
   const recentBars = validated.bars.slice(-MAX_BARS);
   let fingerprint;
