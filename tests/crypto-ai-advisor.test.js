@@ -142,6 +142,14 @@ test("crypto AI provider and schema failures remain retryable and never advance 
   assert.equal(malformed.status, "AI_BLOCKED_INVALID_DECISION");
   assert.equal(malformed.advanceAllowed, false);
   assert.equal(malformed.retryable, true);
+  const weakAnalysis = await reviewCryptoWalkForward({
+    ...base, apiKey: "test-only",
+    fetchImpl: async () => new Response(JSON.stringify({
+      output_text: JSON.stringify({ ...decision, thesis: " ", counter_thesis: "too short" })
+    }), { status: 200 })
+  });
+  assert.equal(weakAnalysis.status, "AI_BLOCKED_INVALID_DECISION");
+  assert.equal(weakAnalysis.advanceAllowed, false);
 });
 
 test("crypto review identifiers separate model versions while retaining full-data provenance",async()=>{
