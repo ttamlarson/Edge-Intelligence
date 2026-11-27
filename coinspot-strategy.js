@@ -121,7 +121,7 @@ export function backtestCoinSpotTrend({ candles, startingCapital = 100, starting
     outOfSample.netPnlQuote > 0 && outOfSample.profitFactor > 1.2 && outOfSample.maxDrawdownPct < 10
       ? "CANDIDATE_FOR_FORWARD_PAPER_TEST" : "NOT_PROVEN_PROFITABLE";
   return { strategy: "EMA_TREND_PULLBACK_1H_V1", marketDataSource: "user_supplied_historical_ohlcv",
-    startingCapital: 100, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs,
+    startingCapital, quoteCurrency, ...(quoteCurrency === "AUD" ? { startingCapitalAud: 100 } : {}), costs,
     sample: { totalCandles: validated.length, splitIndex: split, trainFraction, inSampleCandles: split - 60, outOfSampleCandles: validated.length - split,
       minimumOutOfSampleTrades, assessmentRule: "At least 30 completed out-of-sample trades; then positive net P&L, profit factor > 1.2 and max drawdown < 10%." },
     splitIndex: split, inSample, outOfSample, assessment, liveTradingEnabled: false };
@@ -239,7 +239,7 @@ export function walkForwardCoinSpotTrend({
       outOfSampleBars
     },
     methodology: "Fixed EMA20/EMA50 trend and RSI 50–68 pullback screen; next-hour-open entries; 1% equity risk budget, 50% allocation ceiling, daily realised-loss pause, 0.1% fee, configured slippage and spread; stop-first hourly OHLC exits with worse-open gap handling; fold-end liquidation.",
-    comparison: "Each fold resets the same virtual 100-unit quote-currency capital. The buy-and-hold reference uses a separate 50-unit allocation and is not risk-matched.",
+    comparison: "Each fold resets the same configured virtual quote-currency capital. The buy-and-hold reference uses a separate 50% starting-capital allocation; it is a benchmark, not a risk-matched strategy.",
     parameterPolicy: "FIXED_RULES_NO_FITTING",
     startingCapital: 100,
     costs,
