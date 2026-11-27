@@ -217,7 +217,7 @@ function simulateFold({ candles, dailyCandles, startIndex, endIndex, spreadBps, 
                 entryCost,
                 stopPrice,
                 highestPrice: entryPrice,
-                holdingBars: 0
+                holdingBars: 1
               };
               // The entry bar is checked against the initial stop, but a high
               // printed later in this bar only tightens the stop for the next bar.
