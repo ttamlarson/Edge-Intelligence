@@ -1,0 +1,69 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { evaluateEarlyReversalShadow } from "../early-reversal-shadow.js";
+
+function fixtures() {
+  const dailyCandles = Array.from({ length: 120 }, (_, i) => {
+    const close = 100 + i * 0.45 + Math.sin(i * 0.45) * 0.18;
+    return { timestamp: new Date(Date.UTC(2025, 0, 1 + i)).toISOString(),
+      open: close - 0.08, high: close + 0.25, low: close - 0.25, close, volume: 1000 };
+  });
+  const fourHourCandles = Array.from({ length: 240 }, (_, i) => {
+    const close = 200 + i * 0.055 + Math.sin(i * 0.72) * 0.42;
+    return { timestamp: new Date(Date.UTC(2025, 3, 1) + i * 4 * 3600000).toISOString(),
+      open: close - 0.04, high: close + 0.2, low: close - 0.2, close, volume: 100 };
+  });
+  const asOf = Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000;
+  return { dailyCandles, fourHourCandles, asOf };
+}
+
+test("early-reversal shadow engine emits a strictly gated, paper-only candidate", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const signal = evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles, asOf, spreadBps: 10 });
+  assert.equal(signal.strategy, "EDGE_MTF_EARLY_REVERSAL_SHADOW_V1");
+  assert.equal(signal.execution.orderIntent, "NONE");
+  assert.equal(signal.execution.paperOnly, true);
+  assert.equal(signal.execution.shadowOnly, true);
+  assert.equal(signal.execution.eligibleForPaperLedger, false);
+  assert.equal(signal.execution.liveTradingEnabled, false);
+  assert.ok(["SHADOW_CANDIDATE_PAPER_ONLY", "WATCH", "NO_SETUP"].includes(signal.status));
+  assert.equal(signal.checks.liquidity, true);
+  assert.equal(signal.checks.volatility, true);
+});
+
+test("wide spreads and missing volume block an otherwise improving shadow setup", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const wide = evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles, asOf, spreadBps: 50.01 });
+  assert.equal(wide.checks.liquidity, false);
+  assert.equal(wide.execution.eligibleForPaperLedger, false);
+  const thin = evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles: fourHourCandles.map(c => ({ ...c, volume: 0 })),
+    asOf, spreadBps: 10, minimumVolume: 1
+  });
+  assert.equal(thin.checks.liquidity, false);
+  assert.notEqual(thin.status, "SHADOW_CANDIDATE_PAPER_ONLY");
+});
+
+test("shadow engine rejects incomplete, future, misaligned and gapped candle history", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  assert.throws(() => evaluateEarlyReversalShadow({
+    dailyCandles, fourHourCandles, asOf: asOf - 1
+  }), /closed/i);
+  const gap = fourHourCandles.map(c => ({ ...c }));
+  gap[100].timestamp = new Date(Date.parse(gap[100].timestamp) + 4 * 3600000).toISOString();
+  assert.throws(() => evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles: gap, asOf }), /contiguous/i);
+  const malformed = dailyCandles.map(c => ({ ...c }));
+  malformed[10].close = 0;
+  assert.throws(() => evaluateEarlyReversalShadow({ dailyCandles: malformed, fourHourCandles, asOf }), /invalid/i);
+});
+
+test("shadow risk references the same conservative ATR stop envelope and never authorises orders", () => {
+  const { dailyCandles, fourHourCandles, asOf } = fixtures();
+  const signal = evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles, asOf, spreadBps: 10 });
+  assert.equal(signal.risk.initialStopAtr, 2.5);
+  assert.equal(signal.risk.trailingStopAtr, 3);
+  assert.equal(signal.risk.riskBudgetPct, 0.5);
+  assert.equal(signal.risk.maximumNotionalAllocationPct, 25);
+  assert.equal(signal.execution.orderIntent, "NONE");
+  assert.equal(signal.execution.eligibleForPaperLedger, false);
+});

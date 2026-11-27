@@ -6,6 +6,7 @@ import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.js";
 import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
+import { evaluateEarlyReversalShadow } from "./early-reversal-shadow.js";
 import { createMtfPaperAccount, processMtfPaperAccount, validateMtfPaperAccount } from "./coinspot-mtf-paper.js";
 import { calculateMtfPaperPerformance } from "./coinspot-mtf-performance.js";
 import { createCoinSpotPaperAccount, normalizePaperAccount, openCoinSpotPaperPosition, closeCoinSpotPaperPosition, markCoinSpotPaperAccount } from "./coinspot-paper.js";
@@ -1471,6 +1472,8 @@ async function runCoinSpotMtfPaper(env, now = new Date(), backfillDays = 4) {
       lastCompletedDailyAt: m.history?.lastCompletedDailyAt || null,
       lastCompletedFourHourAt: m.history?.lastCompletedFourHourAt || null,
       lastCompletedFourHourClose: m.history?.lastCompletedFourHourClose ?? null,
+      shadowSignal: m.shadowSignal || null,
+      shadowSignalError: m.shadowSignalError || null,
       entryModel: m.signal?.entryModel || null,
       triggerModel: m.signal?.triggerModel || null,
       marketRegime: m.signal?.marketRegime || null,
@@ -1567,7 +1570,7 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
   const clock=now instanceof Date?now.getTime():Date.parse(now),markets=[];
   for(const coin of COINSPOT_MTF_COINS){
     const history=state.markets?.[coin]||{dailyCandles:[],fourHourCandles:[]};
-    let quote=null,signal=null,signalError=null;
+    let quote=null,signal=null,signalError=null,shadowSignal=null,shadowSignalError=null;
     const storedDaily=Array.isArray(history.dailyCandles)?history.dailyCandles:[];
     const storedFourHour=Array.isArray(history.fourHourCandles)?history.fourHourCandles:[];
     const daily=storedDaily.filter(bar=>Date.parse(bar.timestamp)+COINSPOT_INTERVALS.daily<=clock);
@@ -1698,8 +1701,20 @@ async function getCoinSpotMtfStrategy(env,now=new Date()) {
         asOf:clock,spreadBps:quote.spreadBps
       }); }
       catch(error) { signalError=String(error?.message||"CANDLE_VALIDATION_FAILED").slice(0,180); }
+      // Shadow research is deliberately isolated from the production ledger.
+      // It uses only the latest fully contiguous actual-candle runs; it cannot
+      // create or modify the deterministic entry signal.
+      try {
+        shadowSignal=evaluateEarlyReversalShadow({
+          dailyCandles:dailyContinuity.candles.slice(-120),
+          fourHourCandles:fourHourContinuity.candles.slice(-240),
+          asOf:clock,spreadBps:quote.spreadBps
+        });
+      } catch(error) {
+        shadowSignalError=String(error?.message||"EARLY_REVERSAL_SHADOW_UNAVAILABLE").slice(0,180);
+      }
     }
-    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
+    markets.push({coin,pair:coin+"/AUD",quote,history:historySummary,signal,shadowSignal,shadowSignalError,signalStatus:signal?.status||signalError||"NO_SIGNAL",signalError,execution:"NO_ORDER_PAPER_CANDIDATE_ONLY",liveTradingEnabled:false});
   }
   return {provider:"CoinSpot Read Only market history + public bid/ask",mode:state.mode,status:state.status,nextDate:state.nextDate,lastSyncAt:state.lastSyncAt,lastBatch:state.lastBatch||[],markets,liveTradingEnabled:false,disclaimer:"Candles are aggregated only from actual CoinSpot BTC/AUD and ETH/AUD completed market orders. Empty intervals are not fabricated. A signal is withheld until sufficient fresh, contiguous history is available. This endpoint never places orders."};
 }
