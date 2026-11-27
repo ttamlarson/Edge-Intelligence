@@ -446,4 +446,6 @@ test("validates MTF signal idempotency state and prevents re-entry after a close
  assert.equal(closed.closedTrades.length,1);
  assert.equal(closed.lastProcessed.BTC,p.signalAt);
  assert.equal(validateMtfPaperAccount(closed),true);
+ assert.throws(()=>validateMtfPaperAccount({...closed,lastProcessed:{}}),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({...closed,lastProcessed:{BTC:"2026-11-25T03:59:59.999Z"}}),/ledger failed validation/);
 });
