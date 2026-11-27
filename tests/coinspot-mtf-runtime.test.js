@@ -425,14 +425,17 @@ test("CoinSpot sync rewinds legacy dates whose prior batches had raw rows but ze
 });
 
 
-test("CoinSpot MTF cron slots are isolated from other scheduled provider workloads",()=>{
+test("CoinSpot MTF cron slots run every five minutes except the reserved top-of-hour slot",()=>{
  const env={EDGE_KV:{},COINSPOT_READONLY_KEY:"read-only",COINSPOT_READONLY_SECRET:"read-only-secret"};
  const at=minute=>({scheduledTime:Date.parse("2026-11-25T09:"+String(minute).padStart(2,"0")+":00.000Z")});
  assert.equal(__test.isCoinSpotMtfScheduleSlot(at(0),env),false);
- assert.equal(__test.isCoinSpotMtfScheduleSlot(at(15),env),true);
- assert.equal(__test.isCoinSpotMtfScheduleSlot(at(30),env),true);
- assert.equal(__test.isCoinSpotMtfScheduleSlot(at(45),env),true);
+ for(const minute of [5,10,15,20,25,30,35,40,45,50,55]){
+  assert.equal(__test.isCoinSpotMtfScheduleSlot(at(minute),env),true,"minute "+minute+" must run the bounded MTF backfill");
+ }
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(1),env),false);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(59),env),false);
  assert.equal(__test.isCoinSpotMtfScheduleSlot(at(15),{EDGE_KV:{},COINSPOT_READONLY_KEY:"",COINSPOT_READONLY_SECRET:""}),false);
+ assert.equal(__test.isCoinSpotMtfScheduleSlot(at(15),{COINSPOT_READONLY_KEY:"read-only",COINSPOT_READONLY_SECRET:"read-only-secret"}),false);
 });
 
 
