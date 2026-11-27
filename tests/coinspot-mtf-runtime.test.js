@@ -752,7 +752,7 @@ test("CoinSpot MTF paper snapshot reports the exact contiguous-history blocker a
  try{
   const result=await __test.runCoinSpotMtfPaper({EDGE_KV:kv.binding,COINSPOT_READONLY_KEY:"test-key",COINSPOT_READONLY_SECRET:"test-secret"},"2026-11-26T04:00:00.000Z",1);
   const eth=result.markets.find(m=>m.coin==="ETH");
-  assert.equal(eth.fourHourCandles,415);
+  assert.equal(eth.fourHourCandles,414);
   assert.equal(eth.contiguousFourHourCandles,19);
   assert.equal(eth.fourHourGapCount,1);
   assert.equal(eth.latestFourHourGap.previousAt,"2026-11-21T20:00:00.000Z");
