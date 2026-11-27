@@ -136,7 +136,7 @@
         </div>
         <div class="panel" id="coinSpotMtfPanel">
           <div class="panel-head"><div><h3>EDGE multi-timeframe breakout · CoinSpot AUD</h3><p>Native CoinSpot completed orders · daily trend + 4-hour Donchian breakout · automated historical warm-up</p></div><button class="secondary-btn" id="coinSpotMtfSyncBtn">Sync next history day</button></div>
-          <div class="notice"><span>ⓘ</span><div><b>READ-ONLY DATA · PAPER CANDIDATES ONLY</b><p>CoinSpot history is being backfilled one UTC day per 15-minute Worker run. The strategy needs at least 110 completed daily candles and 210 completed 4-hour candles per market. Missing intervals are not invented. No exchange orders are submitted.</p></div></div>
+          <div class="notice"><span>ⓘ</span><div><b>READ-ONLY DATA · PAPER CANDIDATES ONLY</b><p>Automatic history backfill processes up to four UTC days per 15-minute Worker run; manual sync advances one day at a time. The strategy needs at least 110 completed daily candles and 210 completed 4-hour candles per market. Missing intervals are not invented. No exchange orders are submitted.</p></div></div>
           <div class="result-section"><h4 id="coinSpotMtfStatus">HISTORY SYNC NOT STARTED</h4><p id="coinSpotMtfProgress">Waiting for the first CoinSpot history sync.</p><div id="coinSpotMtfMarkets" class="integration-grid"><div class="empty">No validated CoinSpot history yet.</div></div></div>
         </div>
         <div class="panel" id="coinSpotMtfPaperPanel">
