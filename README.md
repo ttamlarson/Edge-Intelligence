@@ -280,3 +280,8 @@ Crypto strategy comparison now keeps quote-currency net P&L separate from percen
 - A missing credential, failed/invalid sync, or revision mismatch blocks new entries and AI review for that scan. Current public AUD quotes remain available so an existing simulated position can still be marked and protected by its stop and daily-loss controls.
 - CoinSpot history KV writes remain serialized within each Worker isolate and now retry transient per-key HTTP 429 responses up to three times with bounded exponential backoff and jitter. Persistent quota failures still fail closed; they do not advance the cursor or reset stored history/ledger data.
 - Fee/slippage assumptions, sizing, stops, loss limits and paper-only/live-trading safety flags are unchanged. No real exchange order, withdrawal or transfer is submitted.
+
+
+### CoinSpot MTF history-readiness remediation
+
+The paper scanner allocates up to 30 CoinSpot history subrequests per scan (15 per AUD market), while retaining the reduced budget when a provider probe runs. Cached candles that fail completed-order date-ledger reconciliation remain excluded from all strategy calculations and are reported in diagnostics; they no longer veto a signal once the independently validated, contiguous daily and four-hour history windows meet the strategy's minimum requirements. The 110-daily/210-four-hour warm-up, quote-spread ceiling, risk limits, paper-only execution and live-order lock remain unchanged.
