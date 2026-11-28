@@ -410,4 +410,4 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Add regression coverage for an intraday low that recovers by the close and for partial benchmark coverage.
 - [x] Surface per-fold and mean daily adverse drawdown plus benchmark coverage in the ASX walk-forward UI.
 - [x] Add interface and smoke-check coverage for the new research diagnostics.
-- [ ] Re-run CI and inspect the branch Pages preview; no production Worker or Pages deployment is authorised by this change.
+- [x] GitHub Actions run #1435 passed all 408 deterministic tests, JavaScript syntax checks, ASX research-module checks and the 19-asset Pages build; branch Pages preview `https://e93b27a5.edge-intelligence-486.pages.dev` completed successfully. No production Worker or Pages deployment was made.
