@@ -44,6 +44,23 @@ function validPaperQuote(market, now) {
     actualSpreadBps <= MTF_PAPER_CONFIG.maxSpreadBps;
 }
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
+function hasValidatedFourHourHistory(history) {
+  return history?.historyIntegrityStatus === "VALIDATED" &&
+    Number.isSafeInteger(history.validatedFourHourCandles) && history.validatedFourHourCandles >= 210 &&
+    Number.isSafeInteger(history.signalWindowFourHourCandles) && history.signalWindowFourHourCandles >= 210 &&
+    Number.isSafeInteger(history.indicatorFourHourCandles) && history.indicatorFourHourCandles >= 210 &&
+    history.unverifiedFourHourDays === 0 &&
+    ["READY_CONTIGUOUS", "READY_WITH_CONFIRMED_ZERO_TRADE_GAP"].includes(history.signalWindowStatus);
+}
+function hasValidatedMtfEntryHistory(market) {
+  const history = market?.history;
+  return hasValidatedFourHourHistory(history) &&
+    Number.isSafeInteger(history.validatedDailyCandles) && history.validatedDailyCandles >= 110 &&
+    Number.isSafeInteger(history.contiguousDailyCandles) && history.contiguousDailyCandles >= 110 &&
+    history.unverifiedDailyDays === 0 &&
+    validTimestamp(history.lastCompletedFourHourAt) &&
+    history.lastCompletedFourHourAt === market?.signal?.signalAt;
+}
 export function createMtfPaperAccount(now = new Date().toISOString()) {
   return { mode:"COINSPOT_MTF_AUTOMATED_PAPER", paperOnly:true, riskAccountingVersion:2, currency:"AUD", startingCapitalAud:100,
     cashAud:100, realizedPnlAud:0, unrealizedPnlAud:0, equityAud:100, dailyLossAud:0,
@@ -232,6 +249,7 @@ function isMtfEntryCandidate(m, now) {
     (checks?.pullbackReclaim === true ? "PULLBACK_RECLAIM" : "DONCHIAN_BREAKOUT");
   const requiredChecks = ["dailyTrend", "fourHourTrend", "positiveLongTrendSlope", "entryTrigger", "liquidity", "volatility"];
   return validPaperQuote(m, now) &&
+    hasValidatedMtfEntryHistory(m) &&
     signal?.strategy === "EDGE_MTF_DONCHIAN_ENSEMBLE_V1" &&
     signal?.status === "BUY_CANDIDATE_PAPER_ONLY" &&
     signal?.execution?.orderIntent === "NONE" &&
@@ -399,11 +417,14 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       // The trailing-stop high-water mark advances only on a completed four-hour
       // close that occurred after this position was opened. Intrabar quotes still
       // trigger an existing stop, but cannot tighten it using an unfinished candle.
-      const completedFourHourClose = Number(m?.history?.lastCompletedFourHourClose);
-      const completedFourHourAt = Date.parse(m?.history?.lastCompletedFourHourAt || "");
+      const history = m?.history;
+      const completedFourHourClose = Number(history?.lastCompletedFourHourClose);
+      const completedFourHourAt = Date.parse(history?.lastCompletedFourHourAt || "");
       const openedAt = Date.parse(p.openedAt || "");
       const completedFourHourCloseAt = completedFourHourAt + FOUR_HOUR_MS;
-      if (Number.isFinite(completedFourHourClose) && completedFourHourClose > 0 &&
+      if (hasValidatedFourHourHistory(history) &&
+          validTimestamp(history?.lastCompletedFourHourAt) &&
+          Number.isFinite(completedFourHourClose) && completedFourHourClose > 0 &&
           Number.isFinite(completedFourHourAt) && Number.isFinite(openedAt) &&
           completedFourHourCloseAt > openedAt && completedFourHourCloseAt <= Date.parse(now)) {
         p.highestPrice = Math.max(p.highestPrice, completedFourHourClose);
