@@ -201,10 +201,8 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
       const targetHit = bar.high >= sizing.targetPrice;
 
       // Daily OHLC does not reveal the order of intraday highs and lows. Keep
-      // the existing close-to-close drawdown unchanged, and add a separate
-      // conservative adverse mark: daily low while still exposed, or the
-      // gap-aware stop fill on a stop-hit bar. This is not an intraday equity
-      // curve and never assumes a favourable fill.
+      // close-to-close drawdown separate from a conservative adverse mark:
+      // daily low while exposed, or the gap-aware stop fill on a stop-hit bar.
       const adverseMarkPrice = stopHit ? Math.min(sizing.stopPrice, bar.open) : bar.low;
       const adverseMarkValue = sizing.shares * adverseMarkPrice;
       const adverseExitCost = estimateAsxSideCost(adverseMarkValue, costs);
@@ -221,14 +219,6 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
         );
       }
 
-      const markedValue = sizing.shares * bar.close;
-      const estimatedExitCost = estimateAsxSideCost(markedValue, costs);
-      const markedEquity = estimatedExitCost
-        ? cashAfterEntry + markedValue - estimatedExitCost.totalAud
-        : cashAfterEntry;
-      peak = Math.max(peak, markedEquity);
-      maxDrawdownAud = Math.max(maxDrawdownAud, peak - markedEquity);
-      if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - markedEquity) / peak * 100);
       if (stopHit || targetHit) {
         exitIndex = index;
         const gapBelowStop = stopHit && bar.open < sizing.stopPrice;
@@ -240,6 +230,18 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
             : stopHit ? "STOP" : "TARGET";
         break;
       }
+
+      // Only mark at the daily close while the position is still open. On a
+      // stop/target bar the simulated exit has already happened, so the later
+      // close cannot create a fictitious equity peak or drawdown.
+      const markedValue = sizing.shares * bar.close;
+      const estimatedExitCost = estimateAsxSideCost(markedValue, costs);
+      const markedEquity = estimatedExitCost
+        ? cashAfterEntry + markedValue - estimatedExitCost.totalAud
+        : cashAfterEntry;
+      peak = Math.max(peak, markedEquity);
+      maxDrawdownAud = Math.max(maxDrawdownAud, peak - markedEquity);
+      if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - markedEquity) / peak * 100);
     }
 
     const exitValue = sizing.shares * exitPrice;

@@ -236,3 +236,49 @@ test("ASX walk-forward refuses a pooled benchmark when any fold lacks a valid re
   assert.equal(result.summary.meanBenchmarkReturnPct, null);
   assert.notEqual(result.summary.assessment, "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW");
 });
+
+
+test("ASX walk-forward does not mark a post-exit daily close as open-position equity", () => {
+  const bars = makeBars();
+  const testStart = Math.floor(bars.length * 0.6);
+  const foldEnd = testStart + Math.floor((bars.length - testStart) / 3);
+  const signalIndex = testStart - 1;
+  const signalBar = bars[signalIndex];
+  const noFees = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
+  const candidate = evaluateAsxSwingSetup({
+    symbol: "BHP", bars: bars.slice(0, signalIndex + 1),
+    source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: signalBar.timestamp, equityAud: 5000, cashAud: 5000,
+    openPositions: 0, now: Date.parse(signalBar.timestamp) + 10 * 60 * 60 * 1000,
+    costs: noFees
+  });
+  assert.equal(candidate.status, "PAPER_CANDIDATE");
+  const entryIndex = signalIndex + 1;
+  const entryPrice = bars[entryIndex].open;
+  for (let index = entryIndex; index < foldEnd - 1; index++) {
+    bars[index] = {
+      timestamp: bars[index].timestamp,
+      open: entryPrice, high: entryPrice + 0.01,
+      low: entryPrice - 0.01, close: entryPrice
+    };
+  }
+  const exitIndex = foldEnd - 1;
+  bars[exitIndex] = {
+    timestamp: bars[exitIndex].timestamp,
+    open: entryPrice,
+    high: candidate.targetPrice + 0.05,
+    low: candidate.stopPrice + 0.01,
+    close: candidate.targetPrice + 0.04
+  };
+  const result = walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    startingCapitalAud: 5000, costs: noFees
+  });
+  const firstFold = result.folds[0];
+  assert.equal(firstFold.tradeCount, 1);
+  assert.equal(firstFold.trades[0].exitReason, "TARGET");
+  assert.equal(firstFold.trades[0].exitPrice, candidate.targetPrice);
+  assert.equal(firstFold.maxDrawdownAud, 0);
+  assert.equal(firstFold.maxDrawdownPct, 0);
+  assert.ok(firstFold.maxIntradayAdverseDrawdownAud > 0);
+});

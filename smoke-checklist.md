@@ -94,6 +94,7 @@
 - Import an authorised AUD daily OHLC dataset with at least 150 completed bars for a ticker; verify the source label and date range shown in the walk-forward report.
 - Run chronological walk-forward validation. Confirm each fold reports prior-history and test windows, next-session-open entry timestamps, modeled costs, stop-first exits, a buy-and-hold reference and a separate reset virtual account.
 - [ ] Confirm close-to-close drawdown and the separate conservative daily-low adverse-drawdown proxy are both reported; a stop-hit bar uses the gap-aware simulated stop fill and no intraday path is inferred.
+- [ ] On a target-hit bar whose later close is higher than the target, confirm close-to-close drawdown uses the simulated target proceeds, not the post-exit close.
 - [ ] Make one fold's buy-and-hold reference unavailable; confirm pooled benchmark return becomes null, coverage is marked incomplete and the research assessment cannot pass.
 - [ ] Confirm the ASX walk-forward screen displays each fold's close drawdown and daily adverse drawdown, the mean daily adverse drawdown, and available/total benchmark-fold coverage.
 - Confirm datasets shorter than the minimum history, unordered timestamps, invalid OHLC and non-AUD assumptions are rejected.

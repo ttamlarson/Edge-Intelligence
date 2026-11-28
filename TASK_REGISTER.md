@@ -407,6 +407,8 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Preserve the existing close-to-close drawdown metric and add a separate conservative daily-low adverse-drawdown proxy, using the gap-aware stop fill on stop-hit bars.
 - [x] Explicitly state that daily OHLC cannot reconstruct intraday sequencing; the new metric is a conservative proxy, not an intraday equity curve.
 - [x] Require a valid buy-and-hold reference in every chronological fold before reporting a pooled benchmark return or passing the common research assessment.
+- [x] Keep close-to-close equity marking on exit bars tied to the simulated stop/target fill; the later daily close cannot create a fictitious peak after the position has closed.
+- [x] Add a regression test for a target fill followed by a higher same-day close.
 - [x] Add regression coverage for an intraday low that recovers by the close and for partial benchmark coverage.
 - [x] Surface per-fold and mean daily adverse drawdown plus benchmark coverage in the ASX walk-forward UI.
 - [x] Add interface and smoke-check coverage for the new research diagnostics.
