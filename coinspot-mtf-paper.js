@@ -15,7 +15,7 @@ const validTimestamp = value => typeof value === "string" && Number.isFinite(Dat
 const positiveFinite = value => Number.isFinite(value) && value > 0;
 const nonNegativeFinite = value => Number.isFinite(value) && value >= 0;
 const withinMoneyTolerance = (actual, expected) =>
-  Number.isFinite(actual) && Number.isFinite(expected) && Math.abs(actual - expected) <= 0.01;
+  Number.isFinite(actual) && Number.isFinite(expected) && Math.abs(actual - expected) <= 1e-8;
 const withinPriceTolerance = (actual, expected) =>
   Number.isFinite(actual) && Number.isFinite(expected) &&
   Math.abs(actual - expected) <= Math.max(1e-8, Math.abs(expected) * 1e-10);
@@ -99,16 +99,17 @@ export function validateMtfPaperAccount(a) {
     );
     const costModelVersion = trade.costModelVersion ?? null;
     if (costModelVersion !== null && costModelVersion !== 1) return false;
-    if (costModelVersion === 1) {
+    const expectedEntryFee = round(trade.quantity * trade.entryPrice * MTF_PAPER_CONFIG.feeRate);
+    const expectedExitFee = round(trade.quantity * trade.exitPrice * MTF_PAPER_CONFIG.feeRate);
+    if (!withinMoneyTolerance(trade.entryFeeAud, expectedEntryFee) ||
+        !withinMoneyTolerance(trade.exitFeeAud, expectedExitFee)) return false;
+    const hasReferencePrices = positiveFinite(trade.referenceAsk) || positiveFinite(trade.referenceBid);
+    if (costModelVersion === 1 || hasReferencePrices) {
       const expectedEntryPrice = trade.referenceAsk * (1 + MTF_PAPER_CONFIG.slippageBps / 10000);
       const expectedExitPrice = trade.referenceBid * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
-      const expectedEntryFee = round(trade.quantity * trade.entryPrice * MTF_PAPER_CONFIG.feeRate);
-      const expectedExitFee = round(trade.quantity * trade.exitPrice * MTF_PAPER_CONFIG.feeRate);
       if (!positiveFinite(trade.referenceAsk) || !positiveFinite(trade.referenceBid) ||
           !withinPriceTolerance(trade.entryPrice, expectedEntryPrice) ||
-          !withinPriceTolerance(trade.exitPrice, expectedExitPrice) ||
-          !withinMoneyTolerance(trade.entryFeeAud, expectedEntryFee) ||
-          !withinMoneyTolerance(trade.exitFeeAud, expectedExitFee)) return false;
+          !withinPriceTolerance(trade.exitPrice, expectedExitPrice)) return false;
     }
     return Math.abs(trade.pnlAud - expectedNetPnl) <= 0.03;
   };
@@ -198,12 +199,16 @@ export function validateMtfPaperAccount(a) {
       Math.abs(p.entryCost - (p.notionalAud + p.entryFeeAud)) <= 0.02 &&
       Math.abs(p.notionalAud - p.quantity * p.entryPrice) <= 0.02;
     const costModelVersion = p.costModelVersion ?? null;
-    const costModelMatches = costModelVersion === null || (costModelVersion === 1 &&
-      positiveFinite(p.referenceAsk) &&
-      withinPriceTolerance(p.entryPrice,
-        p.referenceAsk * (1 + MTF_PAPER_CONFIG.slippageBps / 10000)) &&
+    const hasReferenceAsk = p.referenceAsk !== undefined && p.referenceAsk !== null;
+    const entrySlippageMatches = costModelVersion === 1 || hasReferenceAsk
+      ? positiveFinite(p.referenceAsk) &&
+        withinPriceTolerance(p.entryPrice,
+          p.referenceAsk * (1 + MTF_PAPER_CONFIG.slippageBps / 10000))
+      : true;
+    const costModelMatches = (costModelVersion === null || costModelVersion === 1) &&
+      entrySlippageMatches &&
       withinMoneyTolerance(p.entryFeeAud,
-        round(p.quantity * p.entryPrice * MTF_PAPER_CONFIG.feeRate)));
+        round(p.quantity * p.entryPrice * MTF_PAPER_CONFIG.feeRate));
     if (!validCoin(p.coin) || p.pair !== p.coin + "/AUD" ||
         p.id !== p.coin + "-" + p.signalAt ||
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
@@ -247,7 +252,8 @@ function closePosition(a, bid, now, reason) {
   a.realizedPnlAud = round(a.realizedPnlAud + pnl);
   a.closedTrades.push({ id:p.id, coin:p.coin, pair:p.pair, openedAt:p.openedAt, closedAt:now,
     signalAt:p.signalAt, costModelVersion:p.costModelVersion ?? null,
-    referenceAsk:p.referenceAsk ?? null, referenceBid:bid,
+    referenceAsk:p.referenceAsk ?? null,
+    referenceBid:positiveFinite(p.referenceAsk) ? bid : null,
     entryPrice:p.entryPrice, exitPrice:exit, quantity:p.quantity,
     entryModel:p.entryModel || null,
     candidateRank:p.candidateRank ?? null,
