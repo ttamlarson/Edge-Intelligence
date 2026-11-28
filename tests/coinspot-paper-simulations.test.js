@@ -13,10 +13,17 @@ function validCandidate() {
     coin: "BTC", pair: "BTC/AUD",
     quote: { pair: "BTC/AUD", bid, ask, last: 100050, spreadBps: (ask - bid) / ((ask + bid) / 2) * 10000, retrievedAt: openedAt },
     history: {
-      dailyCandles: 122, fourHourCandles: 420, contiguousDailyCandles: 120, contiguousFourHourCandles: 418,
-      dailyGapCount: 1, fourHourGapCount: 2, signalWindowMissingIntervals: 0,
-      signalWindowConfirmedZeroTradeIntervals: 3, signalWindowStatus: "COMPLETE",
-      indicatorFourHourHistoryMode: "CONTIGUOUS"
+      historyIntegrityStatus: "VALIDATED",
+      dailyCandles: 122, fourHourCandles: 420,
+      validatedDailyCandles: 122, contiguousDailyCandles: 120,
+      validatedFourHourCandles: 420, contiguousFourHourCandles: 418,
+      dailyGapCount: 1, fourHourGapCount: 2, signalWindowMissingIntervals: 1,
+      signalWindowFourHourCandles: 240, indicatorFourHourCandles: 420,
+      signalWindowConfirmedZeroTradeIntervals: 1,
+      unverifiedDailyDays: 0, unverifiedFourHourDays: 0,
+      signalWindowStatus: "READY_WITH_CONFIRMED_ZERO_TRADE_GAP",
+      indicatorFourHourHistoryMode: "FULL_VALIDATED_HISTORY",
+      lastCompletedFourHourAt: signalAt, lastCompletedFourHourClose: 100000
     },
     signal: {
       strategy: "EDGE_MTF_DONCHIAN_ENSEMBLE_V1", status: "BUY_CANDIDATE_PAPER_ONLY",
