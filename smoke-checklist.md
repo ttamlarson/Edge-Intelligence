@@ -290,3 +290,9 @@
 - [x] Confirm Worker routes serving that ledger, shared MTF history/strategy and private CoinSpot read-only account data require a verified Access email matching `COINSPOT_MTF_OPERATOR_EMAIL`.
 - [ ] Verify missing or mismatched operator email receives HTTP 403 in production and the configured operator can read the paper ledger.
 - [ ] Keep the Worker Access application policy limited to the same operator; do not use broad account-member access for the global ledger.
+
+
+## CoinSpot MTF mixed malformed history rows
+- [ ] Return one valid and one malformed BTC/AUD or ETH/AUD completed-order row in the same provider response; confirm `COINSPOT_HISTORY_SCHEMA_MISMATCH`, the target UTC date remains pending, and no daily/four-hour candles or trade counts are committed.
+- [ ] Confirm the paper runner reports `DATA_OR_SYNC_WARNING`, blocks new entries and AI review for that scan, and preserves the A$100 paper ledger and all paper-only/live-disabled flags.
+- [ ] Confirm fresh quotes remain available for protective management of an already-open paper position while malformed history blocks entries.
