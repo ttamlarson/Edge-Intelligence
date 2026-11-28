@@ -127,7 +127,7 @@
 - [ ] Confirm candles are derived only from actual CoinSpot AUD completed orders; missing 4h/daily intervals are not filled. The strategy may use a newer contiguous tail after an older gap, but must not bridge or fabricate the missing interval.
 - [ ] Confirm 110 completed daily and 210 completed 4h candles in the latest contiguous runs plus freshness and spread checks are required before any candidate signal; verify exact gap timestamps and contiguous counts are surfaced when blocked.
 - [ ] Confirm strategy status is authenticated, rate-limited, and never places an exchange order.
-- [ ] Confirm scheduled backfill advances one UTC day per 15-minute cron and preserves history on errors.
+- [ ] Confirm scheduled backfill advances up to four historical UTC dates per CoinSpot MTF slot (:05 through :55 UTC in five-minute increments); :00 remains reserved for other scheduled workloads, and history is preserved on errors.
 
 
 ## CoinSpot MTF paper runtime remediation
@@ -135,17 +135,17 @@
 - [x] Branch CI passed the read-only allowlist, retry, timeout, fee/slippage sizing, daily-loss and global-lease regression tests on commit `8e3b144c` (2026-11-27 10:18 UTC).
 - [x] Regression test covers the 20-minute global Durable Object lease, exclusivity beyond 15 minutes, expiry recovery and owner-only release of a successor lease.
 - [ ] After Worker deployment, call authenticated `GET /api/crypto/coinspot/readonly/status`; it must report `AUTHENTICATED` and `READ_ONLY` without exposing key material.
-- [ ] Call authenticated `POST /api/crypto/coinspot/strategy/sync` or wait for the 15-minute schedule; confirm the response reports raw buy/sell counts and accepted BTC/AUD or ETH/AUD trades.
+- [ ] Call authenticated `POST /api/crypto/coinspot/strategy/sync` or verify a scheduled MTF scan in one of the eleven five-minute slots; confirm the response reports raw buy/sell counts and accepted BTC/AUD or ETH/AUD trades.
 - [ ] Confirm a transient transport failure retries once with a higher nonce and records `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` rather than silently advancing the history cursor.
 - [ ] Confirm each persisted candle is derived from validated CoinSpot BTC/AUD or ETH/AUD completed orders, with no fabricated missing buckets.
 - [ ] Confirm the paper ledger remains AUD 100, live trading disabled, no more than one open position, 0.5% round-trip-cost-aware risk, 25% allocation and AUD 3 daily-loss cap including unrealized losses.
 - [ ] Confirm current quotes are still fetched during history warm-up so existing positions remain marked and stop-managed, and new positions immediately reflect bid-side fees/slippage in equity and daily loss.
-- [ ] Do not call the engine operational until at least 110 completed daily and 210 completed four-hour candles per market are fresh, contiguous and validated; then complete forward paper validation before any separate live-trading decision.
+- [ ] Do not treat a market as entry-ready until at least 110 completed daily and 210 completed four-hour candles are fresh, contiguous and validated; continue forward paper validation. Live trading remains disabled and is outside this paper workflow.
 
 
 ### CoinSpot runtime subrequest and history-integrity checks
 
-- [ ] Verify scheduled runner processes exactly one historical UTC day per 15-minute invocation and stays below Cloudflare's subrequest limit.
+- [ ] Verify the scheduled runner processes up to four historical UTC dates per five-minute MTF slot and stays below Cloudflare's per-invocation subrequest limit; :00 must not start an MTF scan.
 - [ ] Verify provider diagnostics are sampled no more than once per 24 hours.
 - [ ] Verify recursive completed-order history requests stop at the 15-request per-market/day safety budget and do not advance incomplete dates.
 - [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
