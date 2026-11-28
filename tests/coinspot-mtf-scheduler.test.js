@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { __test } from "../index.js";
 
 const configuredEnv = {
@@ -53,4 +54,15 @@ test("CoinSpot MTF scheduler fails closed without KV or both read-only credentia
     false
   );
   assert.equal(__test.isCoinSpotMtfScheduleSlot(atFive, {}), false);
+});
+
+
+test("CoinSpot MTF operational documentation matches the eleven deployed five-minute slots", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const checklist = await readFile(new URL("../smoke-checklist.md", import.meta.url), "utf8");
+  const slots = ":05, :10, :15, :20, :25, :30, :35, :40, :45, :50 and :55";
+  assert.ok(readme.includes(slots), "README must document all eleven MTF slots");
+  assert.ok(checklist.includes(slots), "smoke checklist must document all eleven MTF slots");
+  assert.doesNotMatch(readme, /CoinSpot runs at UTC :15, :30 and :45/);
+  assert.doesNotMatch(checklist, /Verify :15, :30 and :45 run CoinSpot MTF alone/);
 });
