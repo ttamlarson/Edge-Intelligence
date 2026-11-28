@@ -152,6 +152,7 @@
 - [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.
 
 - [ ] Verify each half-day epoch probe returns only trades inside its requested UTC interval; check `outOfRangeTrades` remains zero.
+- [ ] Verify each partition's top-level probe summary mirrors the `epoch-ms` variant; a legacy seconds-based summary must trigger a one-time provider re-probe before the probe is considered current.
 - [ ] Confirm a saturated full-day response with empty child partitions fails as `COINSPOT_HISTORY_PARTITION_EMPTY` and preserves the date cursor.
 
 - [ ] Verify full-day and 12-hour probes count only trades within their requested UTC range; any out-of-range record must be diagnosed and rejected by the backfill.
