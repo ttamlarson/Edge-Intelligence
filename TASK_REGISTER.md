@@ -443,3 +443,11 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Reject booleans, arrays, hexadecimal-style values and non-positive quote prices before spread calculation; a malformed quote cannot create a deterministic candidate or paper entry.
 - [x] Add regression coverage for decimal-string compatibility and malformed quote rejection while keeping the quote unavailable and live trading disabled.
 - Public quote validation is separate from historical OHLCV validation. No strategy thresholds, fee/slippage assumptions, sizing, stops, daily-loss limits or live-trading safety flags are changed. No real order, withdrawal or transfer is submitted.
+
+
+## 2026-11-28 — Shared CoinSpot quote validation across paper routes
+
+- [x] Centralize strict bid/ask/last validation and use it in the automated MTF strategy plus per-user paper mark, open and close routes.
+- [x] Reject malformed or crossed books before a simulated fill, stop check or account mark; preserve the existing paper ledger when the quote is invalid.
+- [x] Add regression coverage for decimal strings, coercible values, non-positive prices, arrays and inverted bid/ask books.
+- No exchange order route, trading credential, strategy threshold, fee/slippage assumption, sizing rule, stop or daily-loss limit is added or changed. Live trading remains disabled and CoinSpot credentials remain read-only.
