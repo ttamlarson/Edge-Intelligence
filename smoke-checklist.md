@@ -93,6 +93,8 @@
 
 - Import an authorised AUD daily OHLC dataset with at least 150 completed bars for a ticker; verify the source label and date range shown in the walk-forward report.
 - Run chronological walk-forward validation. Confirm each fold reports prior-history and test windows, next-session-open entry timestamps, modeled costs, stop-first exits, a buy-and-hold reference and a separate reset virtual account.
+- [ ] Confirm close-to-close drawdown and the separate conservative daily-low adverse-drawdown proxy are both reported; a stop-hit bar uses the gap-aware simulated stop fill and no intraday path is inferred.
+- [ ] Make one fold's buy-and-hold reference unavailable; confirm pooled benchmark return becomes null, coverage is marked incomplete and the research assessment cannot pass.
 - Confirm datasets shorter than the minimum history, unordered timestamps, invalid OHLC and non-AUD assumptions are rejected.
 - Confirm fewer than 30 pooled out-of-sample trades is labelled insufficient and never presented as evidence of profitability.
 - For automated AI review, verify strict structured output, SHA-256 bar fingerprint, model/review ID, subjective confidence and separate uncalibrated win-probability fields.

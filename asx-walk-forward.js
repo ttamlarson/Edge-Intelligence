@@ -151,6 +151,8 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
   let peak = startingCapitalAud;
   let maxDrawdownAud = 0;
   let maxDrawdownPct = 0;
+  let maxIntradayAdverseDrawdownAud = 0;
+  let maxIntradayAdverseDrawdownPct = 0;
   let signalIndex = startIndex - 1;
   let noSignalCount = 0;
   let screeningRejectCount = 0;
@@ -195,6 +197,30 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
     let exitReason = "WINDOW_END";
     for (let index = signalIndex + 1; index < endIndex; index++) {
       const bar = bars[index];
+      const stopHit = bar.low <= sizing.stopPrice;
+      const targetHit = bar.high >= sizing.targetPrice;
+
+      // Daily OHLC does not reveal the order of intraday highs and lows. Keep
+      // the existing close-to-close drawdown unchanged, and add a separate
+      // conservative adverse mark: daily low while still exposed, or the
+      // gap-aware stop fill on a stop-hit bar. This is not an intraday equity
+      // curve and never assumes a favourable fill.
+      const adverseMarkPrice = stopHit ? Math.min(sizing.stopPrice, bar.open) : bar.low;
+      const adverseMarkValue = sizing.shares * adverseMarkPrice;
+      const adverseExitCost = estimateAsxSideCost(adverseMarkValue, costs);
+      const adverseEquity = adverseExitCost
+        ? cashAfterEntry + adverseMarkValue - adverseExitCost.totalAud
+        : cashAfterEntry;
+      maxIntradayAdverseDrawdownAud = Math.max(
+        maxIntradayAdverseDrawdownAud, peak - adverseEquity
+      );
+      if (peak > 0) {
+        maxIntradayAdverseDrawdownPct = Math.max(
+          maxIntradayAdverseDrawdownPct,
+          (peak - adverseEquity) / peak * 100
+        );
+      }
+
       const markedValue = sizing.shares * bar.close;
       const estimatedExitCost = estimateAsxSideCost(markedValue, costs);
       const markedEquity = estimatedExitCost
@@ -203,9 +229,6 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
       peak = Math.max(peak, markedEquity);
       maxDrawdownAud = Math.max(maxDrawdownAud, peak - markedEquity);
       if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - markedEquity) / peak * 100);
-
-      const stopHit = bar.low <= sizing.stopPrice;
-      const targetHit = bar.high >= sizing.targetPrice;
       if (stopHit || targetHit) {
         exitIndex = index;
         const gapBelowStop = stopHit && bar.open < sizing.stopPrice;
@@ -273,6 +296,8 @@ function simulateFold({ bars, symbol, source, startIndex, endIndex, startingCapi
     returnPct: round4((cash - startingCapitalAud) / startingCapitalAud * 100),
     maxDrawdownAud: round2(maxDrawdownAud),
     maxDrawdownPct: round4(maxDrawdownPct),
+    maxIntradayAdverseDrawdownAud: round2(maxIntradayAdverseDrawdownAud),
+    maxIntradayAdverseDrawdownPct: round4(maxIntradayAdverseDrawdownPct),
     averageTradeProfitLossAud: trades.length ? round2(trades.reduce((sum, trade) => sum + trade.profitLossAud, 0) / trades.length) : null,
     benchmark,
     noSignalCount,
@@ -326,8 +351,15 @@ export function walkForwardAsxStrategy({
   const grossLoss = -trades.filter(trade => trade.profitLossAud < 0).reduce((sum, trade) => sum + trade.profitLossAud, 0);
   const meanFoldReturnPct = mean(folds.map(fold => fold.returnPct));
   const benchmarkReturns = folds.map(fold => fold.benchmark.returnPct).filter(Number.isFinite);
-  const meanBenchmarkReturnPct = mean(benchmarkReturns);
+  const benchmarkCoverage = {
+    availableFolds: benchmarkReturns.length,
+    totalFolds: folds.length,
+    complete: benchmarkReturns.length === folds.length
+  };
+  // Never compare all strategy folds with only a subset of benchmark folds.
+  const meanBenchmarkReturnPct = benchmarkCoverage.complete ? mean(benchmarkReturns) : null;
   const meanFoldMaxDrawdownPct = mean(folds.map(fold => fold.maxDrawdownPct));
+  const meanFoldIntradayAdverseDrawdownPct = mean(folds.map(fold => fold.maxIntradayAdverseDrawdownPct));
   const sortedReturns = folds.map(fold => fold.returnPct).sort((a, b) => a - b);
   const medianFoldReturnPct = sortedReturns.length ? sortedReturns[Math.floor(sortedReturns.length / 2)] : null;
   const pooledProfitFactor = grossLoss > 0 ? round4(grossProfit / grossLoss) : null;
@@ -336,7 +368,7 @@ export function walkForwardAsxStrategy({
     : null;
   const assessment = trades.length < minimumOutOfSampleTrades
     ? "INSUFFICIENT_OUT_OF_SAMPLE_TRADES"
-    : meanFoldReturnPct > 0 && meanBenchmarkReturnPct !== null &&
+    : benchmarkCoverage.complete && meanFoldReturnPct > 0 && meanBenchmarkReturnPct !== null &&
       meanFoldReturnPct > meanBenchmarkReturnPct && pooledProfitFactor !== null &&
       pooledProfitFactor > 1.2 && meanFoldMaxDrawdownPct < 10
       ? "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW"
@@ -355,8 +387,8 @@ export function walkForwardAsxStrategy({
       lastBarAt: data.at(-1).timestamp,
       priorHistoryFraction: trainFraction
     },
-    methodology: "Expanding-history rolling-origin validation. Fixed 20/50-day trend and 20-session breakout rules; prior bars only; next-session open entries; re-sized positions under the existing 1% net-equity risk cap, AUD 200 position cap and AUD 100 cash reserve; modeled commission, GST and slippage; stop-first OHLC exits with worse-open gap handling; window-end liquidation.",
-    comparison: "Each fold resets the same virtual AUD capital. The benchmark is a separate AUD 200 allocation-capped buy-and-hold reference, not a risk-matched strategy.",
+    methodology: "Expanding-history rolling-origin validation. Fixed 20/50-day trend and 20-session breakout rules; prior bars only; next-session open entries; re-sized positions under the existing 1% net-equity risk cap, AUD 200 position cap and AUD 100 cash reserve; modeled commission, GST and slippage; stop-first OHLC exits with worse-open gap handling; daily-low adverse drawdown proxy; window-end liquidation.",
+    comparison: "Each fold resets the same virtual AUD capital. The benchmark is a separate AUD 200 allocation-capped buy-and-hold reference, not a risk-matched strategy. A pooled benchmark comparison is available only when every fold has a valid reference position.",
     parameterPolicy: "FIXED_RULES_NO_FITTING",
     startingCapitalAud,
     costAssumptions: feeAssumptions,
@@ -368,13 +400,15 @@ export function walkForwardAsxStrategy({
       meanFoldReturnPct: meanFoldReturnPct === null ? null : round4(meanFoldReturnPct),
       medianFoldReturnPct: medianFoldReturnPct === null ? null : round4(medianFoldReturnPct),
       meanBenchmarkReturnPct: meanBenchmarkReturnPct === null ? null : round4(meanBenchmarkReturnPct),
+      benchmarkCoverage,
       meanFoldMaxDrawdownPct: meanFoldMaxDrawdownPct === null ? null : round4(meanFoldMaxDrawdownPct),
+      meanFoldIntradayAdverseDrawdownPct: meanFoldIntradayAdverseDrawdownPct === null ? null : round4(meanFoldIntradayAdverseDrawdownPct),
       positiveReturnFolds: folds.filter(fold => fold.returnPct > 0).length,
       foldCount,
       minimumOutOfSampleTrades,
       assessment
     },
-    disclaimer: "This is a deterministic historical simulation, not a trained predictive model, executable fill record or profitability guarantee. Historical source labels and data-use rights are not independently verified. No sample data is generated or substituted.",
+    disclaimer: "This is a deterministic historical simulation, not a trained predictive model, executable fill record or profitability guarantee. Close-to-close drawdown is reported separately from a conservative daily-low adverse-drawdown proxy; daily OHLC cannot reconstruct the intraday price path. A partial buy-and-hold benchmark is not pooled or used to pass the assessment gate. Historical source labels and data-use rights are not independently verified. No sample data is generated or substituted.",
     liveTradingEnabled: false
   };
 }

@@ -400,3 +400,12 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Correct README: the scheduled MTF paper account is deployment-wide/global, not partitioned by Cloudflare Access subject.
 - [x] Add an operational smoke-check item to prevent accidental multi-user assumptions.
 - [ ] If multi-user access is required, design and test subject-scoped paper ledgers and locks before widening the Cloudflare Access policy. Keep the scheduled paper engine and every account paper-only.
+
+
+## 2026-11-28 — ASX walk-forward drawdown and benchmark-coverage integrity
+
+- [x] Preserve the existing close-to-close drawdown metric and add a separate conservative daily-low adverse-drawdown proxy, using the gap-aware stop fill on stop-hit bars.
+- [x] Explicitly state that daily OHLC cannot reconstruct intraday sequencing; the new metric is a conservative proxy, not an intraday equity curve.
+- [x] Require a valid buy-and-hold reference in every chronological fold before reporting a pooled benchmark return or passing the common research assessment.
+- [x] Add regression coverage for an intraday low that recovers by the close and for partial benchmark coverage.
+- [ ] Re-run CI and inspect the branch Pages preview; no production Worker or Pages deployment is authorised by this change.

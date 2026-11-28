@@ -175,3 +175,64 @@ test("ASX walk-forward excludes an unavailable buy-and-hold benchmark when no wh
   assert.ok(result.folds.every(fold => fold.benchmark.returnPct === null));
   assert.equal(result.summary.meanBenchmarkReturnPct, null);
 });
+
+
+test("ASX walk-forward reports conservative daily-low adverse drawdown separately from close-to-close drawdown", () => {
+  const bars = makeBars();
+  const testStart = Math.floor(bars.length * 0.6);
+  const signalIndex = testStart - 1;
+  const signalBar = bars[signalIndex];
+  const noFees = { commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0 };
+  const candidate = evaluateAsxSwingSetup({
+    symbol: "BHP", bars: bars.slice(0, signalIndex + 1),
+    source: "Synthetic test fixture only", currency: "AUD",
+    observedAt: signalBar.timestamp, equityAud: 5000, cashAud: 5000,
+    openPositions: 0, now: Date.parse(signalBar.timestamp) + 10 * 60 * 60 * 1000,
+    costs: noFees
+  });
+  assert.equal(candidate.status, "PAPER_CANDIDATE");
+  const adverseIndex = signalIndex + 2;
+  bars[adverseIndex] = {
+    ...bars[adverseIndex],
+    low: candidate.stopPrice + 0.01
+  };
+  const result = walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    startingCapitalAud: 5000, costs: noFees
+  });
+  const firstFold = result.folds[0];
+  assert.ok(firstFold.maxIntradayAdverseDrawdownAud > firstFold.maxDrawdownAud);
+  assert.ok(firstFold.maxIntradayAdverseDrawdownPct > firstFold.maxDrawdownPct);
+  assert.ok(result.summary.meanFoldIntradayAdverseDrawdownPct > 0);
+  assert.equal(result.liveTradingEnabled, false);
+});
+
+test("ASX walk-forward refuses a pooled benchmark when any fold lacks a valid reference position", () => {
+  const bars = makeBars();
+  const testStart = Math.floor(bars.length * 0.6);
+  const secondFoldStart = testStart + Math.floor((bars.length - testStart) / 3);
+  for (let index = secondFoldStart; index < bars.length; index++) {
+    const bar = bars[index];
+    bars[index] = {
+      ...bar,
+      open: bar.open * 30,
+      high: bar.high * 30,
+      low: bar.low * 30,
+      close: bar.close * 30
+    };
+  }
+  const result = walkForwardAsxStrategy({
+    symbol: "BHP", bars, source: "Synthetic test fixture only",
+    startingCapitalAud: 5000, costs: {
+      commissionRate: 0, minimumCommissionAud: 0, gstRate: 0, slippageBps: 0
+    }
+  });
+  assert.equal(result.folds[0].benchmark.status, "SIMULATED_BUY_AND_HOLD_REFERENCE");
+  assert.equal(result.folds[1].benchmark.status, "NO_BENCHMARK_POSITION");
+  assert.equal(result.folds[2].benchmark.status, "NO_BENCHMARK_POSITION");
+  assert.deepEqual(result.summary.benchmarkCoverage, {
+    availableFolds: 1, totalFolds: 3, complete: false
+  });
+  assert.equal(result.summary.meanBenchmarkReturnPct, null);
+  assert.notEqual(result.summary.assessment, "CANDIDATE_FOR_EXTENDED_FORWARD_PAPER_REVIEW");
+});
