@@ -217,7 +217,8 @@
 
 ## CoinSpot MTF quote and ledger integrity
 - [ ] Confirm the paper execution layer recomputes midpoint spread from bid/ask and rejects a quote whose reported spread is missing, inconsistent or understated.
-- [ ] Confirm the CoinSpot public quote parser accepts finite JSON numbers and plain positive decimal strings, but rejects booleans, arrays, hexadecimal strings and non-positive values before calculating spread.
+- [ ] Confirm the shared CoinSpot public quote parser accepts finite JSON numbers and plain positive decimal strings, but rejects booleans, arrays, hexadecimal strings, non-positive values and crossed books.
+- [ ] Confirm manual per-user paper account marking, entry and exit routes reject malformed public quotes without saving or changing the paper ledger.
 - [ ] Confirm persisted open-position entry cost equals notional plus entry fee within rounding tolerance, and stop/ATR/timestamps are valid before a position is managed.
 - [ ] Confirm closed trades require finite net P&L, entry/exit fees, prices, quantity and chronological timestamps before daily-loss calculations.
 - [ ] Confirm invalid KV ledger data is rejected without resetting or overwriting the existing record; paper-only and live-trading safety flags remain unchanged.
