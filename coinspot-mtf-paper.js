@@ -50,7 +50,7 @@ function validPaperQuote(market, now) {
 }
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
 
-function validMtfRiskEvidence(record, isOpenPosition = false) {
+function validMtfRiskEvidence(record, isOpenPosition = false, expectedEntryEquityAud = null) {
   const riskModelVersion = record?.riskModelVersion ?? null;
   const costModelVersion = record?.costModelVersion ?? null;
   // Ledgers created before versioned execution-cost records remain readable.
@@ -100,7 +100,12 @@ function validMtfRiskEvidence(record, isOpenPosition = false) {
     highestPrice - MTF_PAPER_CONFIG.trailingStopAtr * atr
   );
 
-  return withinMoneyTolerance(riskBudgetAud, expectedRiskBudgetAud) &&
+  const entryEquityAnchored = expectedEntryEquityAud === null || (
+    withinMoneyTolerance(entryEquityAud, round(expectedEntryEquityAud)) &&
+    withinMoneyTolerance(entryCashAvailableAud, round(expectedEntryEquityAud))
+  );
+  return entryEquityAnchored &&
+    withinMoneyTolerance(riskBudgetAud, expectedRiskBudgetAud) &&
     withinMoneyTolerance(estimatedNetStopLossAud, expectedStopLossAud) &&
     withinMoneyTolerance(riskBudgetUsePct, expectedRiskBudgetUsePct) &&
     estimatedNetStopLossAud <= riskBudgetAud + 0.02 &&
@@ -135,7 +140,17 @@ export function createMtfPaperAccount(now = new Date().toISOString()) {
     liveTradingEnabled:false, updatedAt:now };
 }
 export function validateMtfPaperAccount(a) {
-  const validClosedTrade = trade => {
+  const closedTradePnlTotal = Array.isArray(a?.closedTrades)
+    ? a.closedTrades.reduce((sum, trade) => sum + Number(trade?.pnlAud), 0)
+    : NaN;
+  // Closed-trade history is bounded to the newest 200 records. The difference
+  // between total realised P&L and retained trade P&L is the realised baseline
+  // before the first retained trade, so every retained entry-equity snapshot
+  // can still be reconciled without storing an unbounded ledger.
+  const closedTradeBasePnlAud = Number.isFinite(a?.realizedPnlAud) &&
+      Number.isFinite(closedTradePnlTotal)
+    ? a.realizedPnlAud - closedTradePnlTotal : NaN;
+  const validClosedTrade = (trade, expectedEntryEquityAud = null) => {
     if (!trade || !validCoin(trade.coin) || trade.pair !== trade.coin + "/AUD" ||
         !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
         !validTimestamp(trade.signalAt) || trade.id !== trade.coin + "-" + trade.signalAt ||
@@ -161,7 +176,7 @@ export function validateMtfPaperAccount(a) {
     );
     const costModelVersion = trade.costModelVersion ?? null;
     if (costModelVersion !== null && costModelVersion !== 1) return false;
-    if (!validMtfRiskEvidence(trade, false)) return false;
+    if (!validMtfRiskEvidence(trade, false, expectedEntryEquityAud)) return false;
     const expectedEntryFee = round(trade.quantity * trade.entryPrice * MTF_PAPER_CONFIG.feeRate);
     const expectedExitFee = round(trade.quantity * trade.exitPrice * MTF_PAPER_CONFIG.feeRate);
     if (!withinMoneyTolerance(trade.entryFeeAud, expectedEntryFee) ||
@@ -176,6 +191,18 @@ export function validateMtfPaperAccount(a) {
     }
     return Math.abs(trade.pnlAud - expectedNetPnl) <= 0.03;
   };
+  const chronologicalClosedTrades = Array.isArray(a?.closedTrades) &&
+    a.closedTrades.every((trade, index) => index === 0 ||
+      Date.parse(a.closedTrades[index - 1]?.closedAt) <= Date.parse(trade?.openedAt));
+  let realizedBeforeRetainedTrade = closedTradeBasePnlAud;
+  const validClosedTradeLedger = Array.isArray(a?.closedTrades) &&
+    Number.isFinite(realizedBeforeRetainedTrade) &&
+    a.closedTrades.every(trade => {
+      const expectedEntryEquityAud = round(a.startingCapitalAud + realizedBeforeRetainedTrade);
+      const valid = validClosedTrade(trade, expectedEntryEquityAud);
+      realizedBeforeRetainedTrade += Number(trade?.pnlAud);
+      return valid;
+    });
   const ledgerDay = typeof a?.day === "string" ? a.day : "";
   const realizedLossForLedgerDay = Array.isArray(a?.closedTrades)
     ? a.closedTrades.filter(trade => String(trade?.closedAt || "").slice(0, 10) === ledgerDay)
@@ -250,7 +277,7 @@ export function validateMtfPaperAccount(a) {
       !Number.isFinite(realizedLossForLedgerDay) || a.dailyLossAud + 0.02 < realizedLossForLedgerDay ||
       (!legacyRiskAccounting && (!Number.isFinite(minimumDailyLossForLedgerDay) || a.dailyLossAud + 0.02 < minimumDailyLossForLedgerDay)) ||
       !Array.isArray(a.closedTrades) || a.closedTrades.length>200 ||
-      a.closedTrades.some(trade => !validClosedTrade(trade)) ||
+      !chronologicalClosedTrades || !validClosedTradeLedger ||
       !validLastProcessed || !openPositionSignalConsumed || !closedTradeSignalsConsumed ||
       !uniqueClosedTradeLedger || !openPositionSignalNotPreviouslyClosed ||
       !openPositionIdNotPreviouslyClosed || !validCandidateRanking)
@@ -277,7 +304,7 @@ export function validateMtfPaperAccount(a) {
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
         !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
         !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches || !costModelMatches ||
-        !validMtfRiskEvidence(p, true) ||
+        !validMtfRiskEvidence(p, true, round(a.startingCapitalAud + a.realizedPnlAud)) ||
         !positiveFinite(p.stopPrice) || p.stopPrice >= p.entryPrice ||
         !positiveFinite(p.atr) || !positiveFinite(p.highestPrice) || p.highestPrice < p.entryPrice ||
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
