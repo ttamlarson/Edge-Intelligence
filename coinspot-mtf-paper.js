@@ -49,6 +49,68 @@ function validPaperQuote(market, now) {
     actualSpreadBps <= MTF_PAPER_CONFIG.maxSpreadBps;
 }
 const quoteCost = price => price * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
+
+function validMtfRiskEvidence(record, isOpenPosition = false) {
+  const riskModelVersion = record?.riskModelVersion ?? null;
+  const costModelVersion = record?.costModelVersion ?? null;
+  // Ledgers created before versioned execution-cost records remain readable.
+  // Once a record has the current execution-cost version, its risk evidence is
+  // mandatory and cannot be stripped to downgrade it to the legacy path.
+  if (riskModelVersion === null) return costModelVersion !== 1;
+  if (riskModelVersion !== 1 || costModelVersion !== 1) return false;
+
+  const quantity = record.quantity;
+  const entryPrice = record.entryPrice;
+  const entryFeeAud = record.entryFeeAud;
+  const notionalAud = isOpenPosition ? record.notionalAud : quantity * entryPrice;
+  const entryCostAud = isOpenPosition ? record.entryCost : notionalAud + entryFeeAud;
+  const entryEquityAud = record.entryEquityAud;
+  const entryCashAvailableAud = record.entryCashAvailableAud;
+  const dailyLossAtEntryAud = record.dailyLossAtEntryAud;
+  const riskBudgetAud = record.riskBudgetAud;
+  const estimatedNetStopLossAud = record.estimatedNetStopLossAud;
+  const riskBudgetUsePct = record.riskBudgetUsePct;
+  const stopPrice = record.stopPrice;
+  const atr = record.atr;
+  const highestPrice = record.highestPrice;
+  const trailingStop = record.trailingStop;
+
+  if (!positiveFinite(entryEquityAud) || !positiveFinite(entryCashAvailableAud) ||
+      !nonNegativeFinite(dailyLossAtEntryAud) || !positiveFinite(riskBudgetAud) ||
+      !positiveFinite(estimatedNetStopLossAud) || !nonNegativeFinite(riskBudgetUsePct) ||
+      !positiveFinite(notionalAud) || !positiveFinite(entryCostAud) ||
+      !positiveFinite(stopPrice) || !positiveFinite(atr) ||
+      !positiveFinite(highestPrice) || !positiveFinite(trailingStop)) return false;
+
+  const expectedRiskBudgetAud = round(Math.min(
+    entryEquityAud * MTF_PAPER_CONFIG.riskBudgetPct / 100,
+    Math.max(0, MTF_PAPER_CONFIG.maxDailyLossAud - dailyLossAtEntryAud)
+  ));
+  const stopExitPerUnit = quoteCost(stopPrice) * (1 - MTF_PAPER_CONFIG.feeRate);
+  const entryCostPerUnit = entryPrice * (1 + MTF_PAPER_CONFIG.feeRate);
+  const expectedStopLossAud = round(quantity * (entryCostPerUnit - stopExitPerUnit));
+  const expectedRiskBudgetUsePct = expectedRiskBudgetAud > 0
+    ? round(expectedStopLossAud / expectedRiskBudgetAud * 100) : 0;
+  const allocationLimitAud = Math.min(
+    entryEquityAud * MTF_PAPER_CONFIG.maxAllocationPct / 100,
+    entryCashAvailableAud
+  );
+  const expectedTrailingStop = Math.max(
+    stopPrice,
+    highestPrice - MTF_PAPER_CONFIG.trailingStopAtr * atr
+  );
+
+  return withinMoneyTolerance(riskBudgetAud, expectedRiskBudgetAud) &&
+    withinMoneyTolerance(estimatedNetStopLossAud, expectedStopLossAud) &&
+    withinMoneyTolerance(riskBudgetUsePct, expectedRiskBudgetUsePct) &&
+    estimatedNetStopLossAud <= riskBudgetAud + 0.02 &&
+    dailyLossAtEntryAud + estimatedNetStopLossAud <= MTF_PAPER_CONFIG.maxDailyLossAud + 0.02 &&
+    entryCostAud <= allocationLimitAud + 0.02 &&
+    notionalAud <= entryEquityAud * MTF_PAPER_CONFIG.maxAllocationPct / 100 + 0.02 &&
+    entryCostAud <= entryCashAvailableAud + 0.02 &&
+    withinPriceTolerance(entryPrice - stopPrice, atr * MTF_PAPER_CONFIG.initialStopAtr) &&
+    withinPriceTolerance(trailingStop, expectedTrailingStop);
+}
 function hasValidatedFourHourHistory(history) {
   return history?.historyIntegrityStatus === "VALIDATED" &&
     Number.isSafeInteger(history.validatedFourHourCandles) && history.validatedFourHourCandles >= 210 &&
@@ -99,6 +161,7 @@ export function validateMtfPaperAccount(a) {
     );
     const costModelVersion = trade.costModelVersion ?? null;
     if (costModelVersion !== null && costModelVersion !== 1) return false;
+    if (!validMtfRiskEvidence(trade, false)) return false;
     const expectedEntryFee = round(trade.quantity * trade.entryPrice * MTF_PAPER_CONFIG.feeRate);
     const expectedExitFee = round(trade.quantity * trade.exitPrice * MTF_PAPER_CONFIG.feeRate);
     if (!withinMoneyTolerance(trade.entryFeeAud, expectedEntryFee) ||
@@ -214,6 +277,7 @@ export function validateMtfPaperAccount(a) {
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
         !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
         !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches || !costModelMatches ||
+        !validMtfRiskEvidence(p, true) ||
         !positiveFinite(p.stopPrice) || p.stopPrice >= p.entryPrice ||
         !positiveFinite(p.atr) || !positiveFinite(p.highestPrice) || p.highestPrice < p.entryPrice ||
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
@@ -252,6 +316,11 @@ function closePosition(a, bid, now, reason) {
   a.realizedPnlAud = round(a.realizedPnlAud + pnl);
   a.closedTrades.push({ id:p.id, coin:p.coin, pair:p.pair, openedAt:p.openedAt, closedAt:now,
     signalAt:p.signalAt, costModelVersion:p.costModelVersion ?? null,
+    riskModelVersion:p.riskModelVersion ?? null,
+    entryEquityAud:p.entryEquityAud ?? null,
+    entryCashAvailableAud:p.entryCashAvailableAud ?? null,
+    dailyLossAtEntryAud:p.dailyLossAtEntryAud ?? null,
+    stopPrice:p.stopPrice, trailingStop:p.trailingStop, highestPrice:p.highestPrice, atr:p.atr,
     referenceAsk:p.referenceAsk ?? null,
     referenceBid:positiveFinite(p.referenceAsk) ? bid : null,
     entryPrice:p.entryPrice, exitPrice:exit, quantity:p.quantity,
@@ -372,6 +441,8 @@ function rankMtfEntryCandidate(m, account, now) {
   return {
     market: m, coin: m.coin, pair: m.pair, signalAt, entryModel,
     entryPrice, stopPrice, quantity, notionalAud: round(notional),
+    entryEquityAud: round(equity), entryCashAvailableAud: round(account.cashAud),
+    dailyLossAtEntryAud: round(dailyLoss),
     entryFeeAud: round(entryFeeAud), entryCostAud: round(entryCostAud),
     estimatedNetStopLossAud: round(estimatedNetStopLossAud),
     riskBudgetAud: round(riskBudgetAud), dailyLossRemainingAud: round(dailyLossRemainingAud),
@@ -512,7 +583,11 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         candidateRank:ranked.rank, riskBudgetAud:ranked.riskBudgetAud,
         riskBudgetUsePct:ranked.riskBudgetUsePct, estimatedNetStopLossAud:ranked.estimatedNetStopLossAud,
         spreadBps:ranked.spreadBps, costDragBps:ranked.costDragBps,
-        referenceAsk:ask, costModelVersion:1, entryPrice:entry, quantity, notionalAud:notional,
+        referenceAsk:ask, costModelVersion:1, riskModelVersion:1,
+        entryEquityAud:ranked.entryEquityAud,
+        entryCashAvailableAud:ranked.entryCashAvailableAud,
+        dailyLossAtEntryAud:ranked.dailyLossAtEntryAud,
+        entryPrice:entry, quantity, notionalAud:notional,
         entryFeeAud:fee, entryCost:entryCost,
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
         highestPrice:entry, lastMarkAt:now, markStatus:"CURRENT", status:"OPEN_PAPER_ONLY" };
