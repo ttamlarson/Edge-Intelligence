@@ -808,3 +808,64 @@ test("legacy MTF positions without versioned execution-cost evidence remain read
    "dailyLossAtEntryAud","referenceAsk"]) delete p[key];
  assert.equal(validateMtfPaperAccount(legacy),true);
 });
+
+
+test("persisted open MTF risk budget cannot be inflated by changing its recorded entry equity", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const tampered=structuredClone(opened);
+ const p=tampered.openPosition;
+ p.entryEquityAud=200;
+ p.entryCashAvailableAud=200;
+ p.riskBudgetAud=1;
+ p.riskBudgetUsePct=Math.round((p.estimatedNetStopLossAud/p.riskBudgetAud+Number.EPSILON)*10000)/100;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/position failed validation/);
+});
+
+test("persisted closed-trade risk budget is anchored to cumulative realised equity", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const stop=opened.openPosition.stopPrice;
+ const exitMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[exitMarket],now:"2026-11-25T09:00:00.000Z"});
+ const tampered=structuredClone(closed);
+ const trade=tampered.closedTrades[0];
+ trade.entryEquityAud=200;
+ trade.entryCashAvailableAud=200;
+ trade.riskBudgetAud=1;
+ trade.riskBudgetUsePct=Math.round((trade.estimatedNetStopLossAud/trade.riskBudgetAud+Number.EPSILON)*10000)/100;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/ledger failed validation/);
+});
+
+test("closed paper trades remain chronological and later entry equity includes earlier realised P&L", () => {
+ const first=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const firstStop=first.openPosition.stopPrice;
+ const firstClosed=processMtfPaperAccount(first,{markets:[{...candidate(),quote:{
+  pair:"BTC/AUD",bid:firstStop*.9,ask:firstStop,last:firstStop,
+  spreadBps:(firstStop-firstStop*.9)/((firstStop+firstStop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }}],now:"2026-11-25T09:00:00.000Z"});
+ assert.equal(validateMtfPaperAccount(firstClosed),true);
+ assert.equal(firstClosed.closedTrades.length,1);
+
+ const secondSignal=candidate("BTC","2026-11-25T08:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T12:15:00.000Z");
+ const second=processMtfPaperAccount(firstClosed,{markets:[secondSignal],now:"2026-11-25T12:15:00.000Z"});
+ assert.ok(second.openPosition);
+ assert.equal(second.openPosition.entryEquityAud,firstClosed.equityAud);
+ const secondStop=second.openPosition.stopPrice;
+ const secondClosed=processMtfPaperAccount(second,{markets:[{...secondSignal,quote:{
+  pair:"BTC/AUD",bid:secondStop*.9,ask:secondStop,last:secondStop,
+  spreadBps:(secondStop-secondStop*.9)/((secondStop+secondStop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T13:00:00.000Z"
+ }}],now:"2026-11-25T13:00:00.000Z"});
+ assert.equal(secondClosed.closedTrades.length,2);
+ assert.equal(secondClosed.closedTrades[1].entryEquityAud,firstClosed.equityAud);
+ assert.equal(validateMtfPaperAccount(secondClosed),true);
+
+ const outOfOrder=structuredClone(secondClosed);
+ outOfOrder.closedTrades.reverse();
+ assert.throws(()=>validateMtfPaperAccount(outOfOrder),/ledger failed validation/);
+});
