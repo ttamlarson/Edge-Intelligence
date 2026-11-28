@@ -348,7 +348,14 @@ function uniqueCoinSpotMtfMarkets(markets) {
 }
 
 function buildMtfCandidateRanking(markets, account, now) {
-  const ranked = uniqueCoinSpotMtfMarkets(markets).filter(m => isMtfEntryCandidate(m, now))
+  const ranked = uniqueCoinSpotMtfMarkets(markets).filter(m => {
+    if (!isMtfEntryCandidate(m, now)) return false;
+    const processedAt = Date.parse(account.lastProcessed?.[m.coin] || "");
+    const signalAt = Date.parse(m.signal.signalAt);
+    // Signal consumption is monotonic per market. A delayed/stale snapshot
+    // must never re-enter an older four-hour setup after a newer one was used.
+    return !Number.isFinite(processedAt) || signalAt > processedAt;
+  })
     .map(m => rankMtfEntryCandidate(m, account, now))
     .sort((a, b) =>
       Number(a.status !== "ELIGIBLE") - Number(b.status !== "ELIGIBLE") ||
@@ -438,7 +445,8 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
       if (ranked.status !== "ELIGIBLE") continue;
       const m = ranked.market;
       const signalAt = ranked.signalAt;
-      if (!signalAt || a.lastProcessed[m.coin] === signalAt) continue;
+      const processedAt = Date.parse(a.lastProcessed[m.coin] || "");
+      if (!signalAt || (Number.isFinite(processedAt) && Date.parse(signalAt) <= processedAt)) continue;
       const ask = m.quote.ask, entry = ranked.entryPrice;
       const quantity = ranked.quantity, notional = ranked.notionalAud;
       const fee = ranked.entryFeeAud, entryCost = ranked.entryCostAud;
