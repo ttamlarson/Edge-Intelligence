@@ -393,3 +393,10 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Reject a closed trade whose optional strategy provenance names a strategy other than `EDGE_MTF_DONCHIAN_ENSEMBLE_V1`.
 - [x] Add regression coverage for corrupted open-position IDs, closed-trade IDs and strategy attribution.
 - Risk settings, signal thresholds, fee/slippage assumptions, stops, loss limits and live-trading safety flags are unchanged.
+
+
+## 2026-11-28 — CoinSpot MTF ledger tenancy documentation
+
+- [x] Correct README: the scheduled MTF paper account is deployment-wide/global, not partitioned by Cloudflare Access subject.
+- [x] Add an operational smoke-check item to prevent accidental multi-user assumptions.
+- [ ] If multi-user access is required, design and test subject-scoped paper ledgers and locks before widening the Cloudflare Access policy. Keep the scheduled paper engine and every account paper-only.

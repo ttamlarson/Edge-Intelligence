@@ -278,3 +278,8 @@
 ## CoinSpot MTF canonical ledger identity
 - [x] Confirm persisted open-position and closed-trade IDs equal the canonical market plus four-hour signal timestamp (`<coin>-<signalAt>`).
 - [x] Confirm a stored closed-trade strategy identity, when present, must equal `EDGE_MTF_DONCHIAN_ENSEMBLE_V1`; malformed IDs and unrelated strategy provenance fail closed without modifying the ledger.
+
+
+## CoinSpot MTF ledger tenancy boundary
+- [x] Confirm the automated MTF paper account uses deployment-wide global KV keys; do not describe it as per-Access-user isolated.
+- [ ] Before admitting multiple unrelated Access users, implement subject-scoped ledgers and concurrency locks or explicitly restrict Access to the single intended operator.

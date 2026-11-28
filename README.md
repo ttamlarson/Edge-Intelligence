@@ -28,7 +28,7 @@ CSV source labels are user-declared, not independently authenticated. Only impor
 
 ## CoinSpot crypto research and paper trading
 
-The **CoinSpot Crypto · Paper** workspace supports public BTC/AUD and ETH/AUD quotes, a persistent per-Cloudflare-Access-user AUD 100 paper ledger, and a separate CoinSpot read-only account adapter.
+The **CoinSpot Crypto · Paper** workspace supports public BTC/AUD and ETH/AUD quotes, one persistent deployment-wide AUD 100 paper ledger, and a separate CoinSpot read-only account adapter. The automated MTF ledger is currently global rather than partitioned by Cloudflare Access subject; Access protects the API, but it does not create separate paper accounts.
 
 - Automated MTF ledger safety: the persisted AUD paper account carries `paperOnly: true` and `liveTradingEnabled: false`. Legacy accounts without the marker are upgraded on the next scan; an explicit `paperOnly: false` value is rejected without resetting stored data.
 
