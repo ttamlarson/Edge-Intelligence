@@ -67,4 +67,11 @@ test("CoinSpot MTF operational documentation matches the eleven deployed five-mi
   assert.doesNotMatch(checklist, /Verify :15, :30 and :45 run CoinSpot MTF alone/);
   assert.match(checklist, /up to four historical UTC dates per CoinSpot MTF slot/);
   assert.doesNotMatch(checklist, /one UTC day per 15-minute cron|15-minute schedule|one historical UTC day per 15-minute invocation/);
+  assert.match(readme, /36-request history-backfill budget per scan/);
+  assert.match(readme, /18-request cap per market\/date sync chunk/);
+  assert.match(checklist, /18 per market\/date sync chunk/);
+  assert.match(checklist, /36 total history-backfill requests per scan/);
+  assert.match(checklist, /follow-on backfill to two requests/);
+  assert.doesNotMatch(readme, /15-request cap|15-request budget|worst-case 120 history requests|up to 30 CoinSpot history subrequests/);
+  assert.doesNotMatch(checklist, /15-request per-market\/day safety budget|maximum history request budget of 30|15 requests per AUD market/);
 });
