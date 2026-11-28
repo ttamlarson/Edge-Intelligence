@@ -54,3 +54,12 @@ test("CoinSpot MTF paper panel distinguishes an eligible entry from a blocked tr
   assert.match(app, /Trigger only/);
   assert.match(app, /Blocked by/);
 });
+
+
+test("ASX walk-forward UI exposes daily adverse drawdown and benchmark coverage", async () => {
+  const app = await readFile(resolve(root, "app.js"), "utf8");
+  assert.match(app, /maxIntradayAdverseDrawdownPct/);
+  assert.match(app, /meanFoldIntradayAdverseDrawdownPct/);
+  assert.match(app, /benchmarkCoverage/);
+  assert.match(app, /daily adverse drawdown/);
+});

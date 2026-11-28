@@ -408,4 +408,6 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Explicitly state that daily OHLC cannot reconstruct intraday sequencing; the new metric is a conservative proxy, not an intraday equity curve.
 - [x] Require a valid buy-and-hold reference in every chronological fold before reporting a pooled benchmark return or passing the common research assessment.
 - [x] Add regression coverage for an intraday low that recovers by the close and for partial benchmark coverage.
+- [x] Surface per-fold and mean daily adverse drawdown plus benchmark coverage in the ASX walk-forward UI.
+- [x] Add interface and smoke-check coverage for the new research diagnostics.
 - [ ] Re-run CI and inspect the branch Pages preview; no production Worker or Pages deployment is authorised by this change.
