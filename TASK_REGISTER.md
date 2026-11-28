@@ -426,3 +426,12 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Updated the operational README and smoke checklist to describe eleven MTF slots per hour and the four-day-per-slot maximum (up to 44 history dates per hour).
 - [x] Added a regression test that keeps the operational schedule documentation aligned with the tested scheduler predicate.
 - The schedule, history request limits, strategy gates, fees, slippage, sizing, stops, daily-loss circuit and paper-only/live-disabled flags are unchanged.
+
+
+## 2026-11-28 — Persisted CoinSpot MTF candle numeric integrity
+
+- [x] Validate persisted daily and four-hour OHLCV values as actual finite JSON numbers with positive prices/volume, positive integer trade counts and coherent high/low ranges before a UTC date is marked validated.
+- [x] Reject booleans, arrays and numeric strings instead of allowing JavaScript `Number()` coercion to turn malformed cached values into market prices.
+- [x] Apply the same strict numeric boundary to the deterministic Donchian and early-reversal shadow strategy validators.
+- [x] Add regression coverage for malformed daily and four-hour cached candles while preserving matching date trade counts; affected dates are withheld and cannot generate signals.
+- No history is synthesized or repaired by coercion. No strategy thresholds, entry gates, fee/slippage assumptions, sizing, stops, daily-loss limits or live-trading safety flags are changed. Paper-only execution remains enforced.

@@ -1,7 +1,7 @@
 // Experimental early-reversal signal research. Shadow-only: never accepted by the paper ledger.
 const DAY = 86400000;
 const FOUR_HOURS = 14400000;
-const finite = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = value => typeof value === "number" && Number.isFinite(value) ? value : null;
 const round = value => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 
 function confirmedGapMap(gaps, interval, label) {

@@ -351,3 +351,16 @@ test("time-adjusted EMAs carry the previous close through a confirmed zero-trade
   assert.equal(gapAware.indicators.fourHourActualCandles, 220, "the live series must retain only actual candles");
   assert.equal(gapBars.length, 220, "indicator carry-forward must not create a stored or signal candle");
 });
+
+
+test("rejects coercible non-number OHLCV inputs instead of silently normalizing them", () => {
+  for (const value of [true, ["200"], "200"]) {
+    const { dailyCandles, fourHourCandles } = fixtures();
+    fourHourCandles[0].close = value;
+    const asOf = Date.parse(fourHourCandles.at(-1).timestamp) + 4 * 3600000;
+    assert.throws(
+      () => evaluateEdgeBreakoutSignal({ dailyCandles, fourHourCandles, asOf, spreadBps: 10 }),
+      /invalid|OHLCV/i
+    );
+  }
+});

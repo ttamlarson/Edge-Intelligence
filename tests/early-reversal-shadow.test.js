@@ -135,3 +135,15 @@ test("shadow engine time-adjusts multiple individually reconciled zero-trade int
   assert.equal(signal.execution.orderIntent, "NONE");
   assert.equal(signal.execution.eligibleForPaperLedger, false);
 });
+
+
+test("shadow signal validation rejects coercible non-number OHLCV values", () => {
+  for (const value of [true, ["100"], "100"]) {
+    const { dailyCandles, fourHourCandles, asOf } = fixtures();
+    dailyCandles[0].close = value;
+    assert.throws(
+      () => evaluateEarlyReversalShadow({ dailyCandles, fourHourCandles, asOf }),
+      /invalid|OHLCV/i
+    );
+  }
+});
