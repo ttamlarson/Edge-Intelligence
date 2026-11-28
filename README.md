@@ -190,7 +190,7 @@ The CoinSpot AUD MTF breakout candidate is now connected to a separate automated
 
 ## CoinSpot MTF paper runtime hardening
 
-- The authenticated CoinSpot adapter now has an explicit read-only endpoint allowlist: status, balances, open market orders and completed market-order history only. Order placement, cancellation, withdrawals and transfers are rejected before any upstream request.
+- The authenticated CoinSpot adapter now has an explicit read-only endpoint allowlist: status, balances, open market orders and completed market-order history only. Order placement, cancellation, withdrawals and transfers are rejected before any upstream request. The MTF public bid/ask/last quote parser accepts only finite JSON numbers or plain positive decimal strings; booleans, arrays and hexadecimal-style coercions are rejected before spread calculation.
 - `GET /api/crypto/coinspot/readonly/status` verifies the configured Read Only key against CoinSpot's documented `/status` endpoint without returning credentials.
 - Transient CoinSpot transport failures are retried once with a fresh monotonic nonce and matching HMAC-SHA512 signature. Requests have a bounded 15-second timeout and persist explicit `COINSPOT_TIMEOUT` or `COINSPOT_NETWORK_ERROR` diagnostics.
 - Paper position sizing now includes both entry and stop-exit fees and modeled slippage in its risk budget. The daily-loss circuit includes open mark-to-market losses as well as realized losses and closes an open paper position when the limit is reached.
