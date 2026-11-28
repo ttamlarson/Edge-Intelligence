@@ -30,6 +30,50 @@ test("normalizes authenticated CoinSpot AUD completed orders and rejects other q
  assert.throws(()=>normalizeCoinSpotCompletedOrders({coin:"BTC",payload:{status:"error"}}));
 });
 
+test("rejects coercible non-numeric CoinSpot fields while accepting decimal strings", () => {
+ const base = {
+  market: "BTC/AUD",
+  solddate: "2026-11-24T00:10:00.000Z",
+  rate: 100,
+  amount: 0.5,
+  total: 50
+ };
+ for (const field of ["rate", "amount", "total"]) {
+  for (const invalid of [true, [1], "0x10", "Infinity", "NaN", {}]) {
+   const payload = { status: "ok", buyorders: [{ ...base, [field]: invalid }], sellorders: [] };
+   assert.throws(
+    () => normalizeCoinSpotCompletedOrders({ coin: "BTC", payload }),
+    /COINSPOT_HISTORY_SCHEMA_MISMATCH/,
+    `expected invalid ${field} value ${JSON.stringify(invalid)} to be rejected`
+   );
+  }
+ }
+ const decimalPayload = {
+  status: "ok",
+  buyorders: [{ ...base, rate: "100.25", amount: "0.5", total: "50.125" }],
+  sellorders: []
+ };
+ const [trade] = normalizeCoinSpotCompletedOrders({ coin: "BTC", payload: decimalPayload });
+ assert.equal(trade.price, 100.25);
+ assert.equal(trade.amount, 0.5);
+ assert.equal(trade.totalAud, 50.125);
+});
+
+test("aggregates only canonical numeric timestamps and normalized numeric trade fields", () => {
+ const timestamp = Date.parse("2026-11-24T00:10:00.000Z");
+ const valid = { timestamp, price: 100, amount: 0.5, totalAud: 50 };
+ assert.equal(aggregateCoinSpotTrades([valid], 4 * 60 * 60 * 1000).length, 1);
+ for (const invalid of [
+  { ...valid, timestamp: String(timestamp) },
+  { ...valid, timestamp: true },
+  { ...valid, price: true },
+  { ...valid, amount: [0.5] },
+  { ...valid, totalAud: "0x32" }
+ ]) {
+  assert.throws(() => aggregateCoinSpotTrades([invalid], 4 * 60 * 60 * 1000), /Invalid normalized CoinSpot trade/);
+ }
+});
+
 test("aggregates native CoinSpot trades into 4h and daily OHLCV without filling empty buckets",()=>{
  const start=Date.parse("2026-11-24T00:00:00Z");
  const trades=[
