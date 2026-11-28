@@ -14,6 +14,19 @@ function btcMarket(now, signalAt, { dailyTrend = true, bid = 1000, ask = 1000.1 
   return {
     coin: "BTC",
     pair: "BTC/AUD",
+    history: {
+      historyIntegrityStatus: "VALIDATED",
+      validatedDailyCandles: 123,
+      contiguousDailyCandles: 123,
+      validatedFourHourCandles: 720,
+      signalWindowFourHourCandles: 240,
+      indicatorFourHourCandles: 720,
+      unverifiedDailyDays: 0,
+      unverifiedFourHourDays: 0,
+      signalWindowStatus: "READY_CONTIGUOUS",
+      lastCompletedFourHourAt: signalAt,
+      lastCompletedFourHourClose: 1000
+    },
     quote: {
       pair: "BTC/AUD",
       bid,
