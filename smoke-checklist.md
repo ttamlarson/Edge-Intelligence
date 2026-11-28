@@ -202,6 +202,8 @@
 - [ ] Confirm a missing four-hour bucket is classified `CONFIRMED_NO_TRADES` only when the UTC daily trade count exactly equals the sum of validated stored four-hour trade counts for that date.
 - [ ] Confirm missing or mismatched trade-count metadata remains `UNVERIFIED_GAP`.
 - [ ] Confirm both confirmed-zero-trade and unverified gaps remain unfilled, and the 210-contiguous-four-hour-candle readiness gate still blocks entries.
+- [ ] Corrupt a persisted daily/four-hour candle with boolean, array or numeric-string OHLCV values, or an impossible high/low range while leaving trade counts unchanged; verify the affected UTC date becomes unverified and is withheld from strategy inputs.
+- [ ] Confirm the deterministic breakout and shadow strategy validators reject coercible non-number OHLCV values rather than converting them to prices.
 - [ ] Confirm the paper ledger, fee/slippage model, position sizing, stops, daily-loss limit, `paperOnly: true` and `liveTradingEnabled: false` remain unchanged.
 
 
