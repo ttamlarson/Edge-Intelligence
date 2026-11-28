@@ -118,3 +118,35 @@ export function mergeCoinSpotCandles(existing=[],incoming=[],maxBars=400) {
 }
 
 export const COINSPOT_INTERVALS={fourHour:4*HOUR,daily:DAY};
+
+// The authenticated sub-day probe validates Unix epoch-millisecond filters.
+// Keep the top-level partition summary aligned with that exact variant; the
+// legacy seconds-based variants can legitimately return empty responses.
+const COINSPOT_EPOCH_MS_PARTITION_SUMMARY_FIELDS = Object.freeze([
+  "format", "status", "message", "rawBuyOrders", "rawSellOrders",
+  "validAudTrades", "outOfRangeTrades", "sampleOrderAt"
+]);
+
+export function selectCoinSpotEpochMsPartitionSummary(variants) {
+  if (!Array.isArray(variants)) return null;
+  const selected = variants.find(variant => variant?.format === "epoch-ms");
+  return selected ? { ...selected } : null;
+}
+
+export function coinSpotEpochMsPartitionSummaryMatches(partition) {
+  const selected = selectCoinSpotEpochMsPartitionSummary(partition?.variants);
+  if (!selected) return false;
+  // Older test/legacy snapshots may retain the full variants without a
+  // top-level summary. That is incomplete but not misleading; only a present
+  // summary that disagrees with the validated epoch-ms variant is stale.
+  const hasTopLevelSummary = COINSPOT_EPOCH_MS_PARTITION_SUMMARY_FIELDS.some(
+    field => partition?.[field] !== undefined
+  );
+  if (!hasTopLevelSummary) return true;
+  return COINSPOT_EPOCH_MS_PARTITION_SUMMARY_FIELDS.every(field =>
+    Object.prototype.hasOwnProperty.call(selected, field)
+      ? partition?.[field] === selected[field]
+      : partition?.[field] === undefined
+  );
+}
+

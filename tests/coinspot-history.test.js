@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_FOUR_HOUR_HISTORY_LIMIT } from "../coinspot-history.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_FOUR_HOUR_HISTORY_LIMIT, selectCoinSpotEpochMsPartitionSummary, coinSpotEpochMsPartitionSummaryMatches } from "../coinspot-history.js";
 
 test("normalizes authenticated CoinSpot AUD completed orders and rejects other quote markets",()=>{
  const payload={status:"ok",buyorders:[
@@ -177,3 +177,44 @@ test("builds documented UTC-date and exact Unix-epoch CoinSpot history ranges", 
  assert.throws(() => coinSpotHistoryRangeParams(end, start, "date"), /Invalid CoinSpot history date range/);
  assert.throws(() => coinSpotHistoryRangeParams(start, end, "milliseconds"), /format must be date, epoch, epoch-string or epoch-ms/);
 });
+
+test("selects epoch-millisecond partition diagnostics and detects legacy or mismatched summaries", () => {
+ const variants = [
+  { format: "epoch", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0, sampleOrderAt: null },
+  { format: "epoch-string", rawBuyOrders: 0, rawSellOrders: 0, validAudTrades: 0, outOfRangeTrades: 0, sampleOrderAt: null },
+  { format: "epoch-ms", rawBuyOrders: 303, rawSellOrders: 303, validAudTrades: 606, outOfRangeTrades: 0, sampleOrderAt: "2026-11-28T10:30:00.141Z" }
+ ];
+ const selected = selectCoinSpotEpochMsPartitionSummary(variants);
+ assert.deepEqual(selected, variants[2]);
+
+ const legacySecondsSummary = {
+  startAt: "2026-11-28T00:00:00.000Z",
+  endAt: "2026-11-28T12:00:00.000Z",
+  ...variants[0],
+  variants
+ };
+ assert.equal(coinSpotEpochMsPartitionSummaryMatches(legacySecondsSummary), false);
+
+ const currentEpochMsSummary = {
+  startAt: legacySecondsSummary.startAt,
+  endAt: legacySecondsSummary.endAt,
+  ...selected,
+  variants
+ };
+ assert.equal(coinSpotEpochMsPartitionSummaryMatches(currentEpochMsSummary), true);
+
+ const staleCountSummary = { ...currentEpochMsSummary, validAudTrades: 0 };
+ assert.equal(coinSpotEpochMsPartitionSummaryMatches(staleCountSummary), false);
+
+ const errorVariants = [
+  variants[0],
+  variants[1],
+  { format: "epoch-ms", status: "ERROR", message: "provider timeout" }
+ ];
+ const selectedError = selectCoinSpotEpochMsPartitionSummary(errorVariants);
+ assert.deepEqual(selectedError, errorVariants[2]);
+ assert.equal(coinSpotEpochMsPartitionSummaryMatches({ ...selectedError, variants: errorVariants }), true);
+ assert.equal(selectCoinSpotEpochMsPartitionSummary(null), null);
+ assert.equal(coinSpotEpochMsPartitionSummaryMatches({ variants: [] }), false);
+});
+

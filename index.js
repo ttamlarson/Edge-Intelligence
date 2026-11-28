@@ -4,7 +4,7 @@ import { fetchDataCedarBars, normalizeDataCedarSymbols } from "./datacedar.js";
 import { readAsxAutopilot, runAsxAutopilot } from "./asx-autopilot.js";
 import { reviewCryptoWalkForward } from "./crypto-ai-advisor.js";
 import { normalizeCoinSpotMarket, calculateCoinSpotSpreadBps } from "./coinspot.js";
-import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS, COINSPOT_FOUR_HOUR_HISTORY_LIMIT } from "./coinspot-history.js";
+import { normalizeCoinSpotCompletedOrders, aggregateCoinSpotTrades, mergeCoinSpotCandles, coinSpotHistoryRangeParams, COINSPOT_INTERVALS, COINSPOT_FOUR_HOUR_HISTORY_LIMIT, selectCoinSpotEpochMsPartitionSummary, coinSpotEpochMsPartitionSummaryMatches } from "./coinspot-history.js";
 import { evaluateEdgeBreakoutSignal, latestContiguousCandleRun } from "./edge-mtf-breakout-strategy.js";
 import { evaluateEarlyReversalShadow } from "./early-reversal-shadow.js";
 import { walkForwardEarlyReversalShadow } from "./early-reversal-walk-forward.js";
@@ -934,11 +934,15 @@ async function probeCoinSpotHistory(env, coin, clock) {
         variants.push({ format, status: "ERROR", message: String(error?.message || error).slice(0, 180) });
       }
     }
-    const numericEpoch = variants.find(variant => variant.format === "epoch") || {};
+    const epochMsSummary = selectCoinSpotEpochMsPartitionSummary(variants);
     partitionHistory.push({
       startAt: new Date(windowStart).toISOString(),
       endAt: new Date(windowEnd).toISOString(),
-      ...numericEpoch,
+      ...(epochMsSummary || {
+        format: "epoch-ms",
+        status: "UNVERIFIED",
+        message: "Epoch-millisecond partition response was not available."
+      }),
       variants
     });
   }
@@ -1005,7 +1009,10 @@ function coinSpotMtfProviderProbeRequired(state, clock) {
     state.providerProbe.markets.some(market =>
       !Array.isArray(market.readOnlyHistory?.partitionHistory) ||
       market.readOnlyHistory.partitionHistory.length !== 2 ||
-      market.readOnlyHistory.partitionHistory.some(window => !Array.isArray(window.variants) || window.variants.length !== 3)
+      market.readOnlyHistory.partitionHistory.some(window =>
+        !Array.isArray(window.variants) || window.variants.length !== 3 ||
+        !coinSpotEpochMsPartitionSummaryMatches(window)
+      )
     );
   return !Number.isFinite(previousProbeAt) ||
     clock - previousProbeAt >= 24 * 60 * 60 * 1000 ||
