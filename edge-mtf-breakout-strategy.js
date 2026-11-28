@@ -1,6 +1,6 @@
 // EDGE multi-timeframe crypto trend/breakout research engine.
 // Pure signal/risk functions only: no exchange calls and no order placement.
-const finite = value => Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = value => typeof value === "number" && Number.isFinite(value) ? value : null;
 const round = value => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
 const PERIOD_4H = 4 * 60 * 60 * 1000;
 const PERIOD_1D = 24 * 60 * 60 * 1000;
