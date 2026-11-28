@@ -417,3 +417,12 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Reject rows without a usable market identity so an unclassified record cannot enter the AUD trade tape.
 - [x] Add unit and end-to-end scheduled-paper regression coverage proving the history cursor remains on the affected date, no derived candles are written, new entries/AI review are blocked for that scan, and paper-only/live-disabled flags remain intact.
 - This hardening does not alter strategy thresholds, fees, slippage, position sizing, stops or loss limits. Existing-position quote-driven protective management remains available during a history-sync warning.
+
+
+## 2026-11-28 — Reconcile CoinSpot MTF cron documentation with production
+
+- [x] Confirmed the deployed Worker cron is `*/5 * * * *`; the scheduler runs CoinSpot MTF at UTC minutes :05 through :55 in five-minute increments and reserves :00 for the other scheduled engines.
+- [x] Verified production telemetry for Worker version 175: the 07:05 UTC scheduled invocation completed `COINSPOT_MTF_SCAN` successfully; the 07:00 UTC cron tick did not start an MTF scan.
+- [x] Updated the operational README and smoke checklist to describe eleven MTF slots per hour and the four-day-per-slot maximum (up to 44 history dates per hour).
+- [x] Added a regression test that keeps the operational schedule documentation aligned with the tested scheduler predicate.
+- The schedule, history request limits, strategy gates, fees, slippage, sizing, stops, daily-loss circuit and paper-only/live-disabled flags are unchanged.
