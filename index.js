@@ -1987,6 +1987,15 @@ function parseCoinSpotPublicPrice(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseCoinSpotPublicQuote(prices) {
+  if (!prices || typeof prices !== "object" || Array.isArray(prices)) return null;
+  const bid = parseCoinSpotPublicPrice(prices.bid);
+  const ask = parseCoinSpotPublicPrice(prices.ask);
+  const last = parseCoinSpotPublicPrice(prices.last);
+  if (bid === null || ask === null || last === null || ask < bid) return null;
+  return { bid, ask, last };
+}
+
 async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null,options={}) {
   const includeShadowBacktest = options.includeShadowBacktest !== false;
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
@@ -2063,10 +2072,9 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null,opti
     try {
       const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
-      const bid=parseCoinSpotPublicPrice(latest.prices.bid);
-      const ask=parseCoinSpotPublicPrice(latest.prices.ask);
-      const last=parseCoinSpotPublicPrice(latest.prices.last);
-      if(bid===null||ask===null||last===null||ask<bid) throw new Error("CoinSpot bid/ask quote is invalid.");
+      const parsedQuote=parseCoinSpotPublicQuote(latest.prices);
+      if(!parsedQuote) throw new Error("CoinSpot bid/ask quote is invalid.");
+      const {bid,ask,last}=parsedQuote;
       quote={pair:coin+"/AUD",bid,ask,last,spreadBps:calculateCoinSpotSpreadBps(bid,ask),retrievedAt:new Date(clock).toISOString()};
     } catch(error) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
@@ -2348,7 +2356,9 @@ async function handle(request, env, ctx) {
       if(account.openPosition){
         const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
         if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
-        const bid=Number(q.prices?.bid),position=account.openPosition;
+        const quote=parseCoinSpotPublicQuote(q.prices);
+        if(!quote) throw new HttpError(502,"CoinSpot bid/ask quote is invalid.");
+        const {bid}=quote,position=account.openPosition;
         const exitReason=bid<=position.stopPrice?"PAPER_STOP_LOSS":bid>=position.targetPrice?"PAPER_TAKE_PROFIT":null;
         if(exitReason){account=closeCoinSpotPaperPosition(account,{bid,reason:exitReason});await saveAccount(account);}
         marked=markCoinSpotPaperAccount(account,{bid});
@@ -2361,7 +2371,9 @@ async function handle(request, env, ctx) {
       if(!["BTC","ETH"].includes(coin))throw new HttpError(400,"Only BTC and ETH AUD paper markets are enabled.");
       const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
-      let account;try{account=openCoinSpotPaperPosition(await loadAccount(),{coin,ask:Number(q.prices?.ask)});}catch(error){throw new HttpError(409,error.message);}
+      const quote=parseCoinSpotPublicQuote(q.prices);
+      if(!quote) throw new HttpError(502,"CoinSpot bid/ask quote is invalid.");
+      let account;try{account=openCoinSpotPaperPosition(await loadAccount(),{coin,ask:quote.ask});}catch(error){throw new HttpError(409,error.message);}
       return reply(await saveAccount(account),201);
     }
     if (requestUrl.pathname === "/api/crypto/coinspot/paper/close" && request.method === "POST") {
@@ -2369,7 +2381,9 @@ async function handle(request, env, ctx) {
       const account=await loadAccount();if(!account.openPosition)throw new HttpError(409,"There is no open paper position.");
       const q=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+account.openPosition.coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(q.status!=="ok")throw new HttpError(502,"CoinSpot quote unavailable.");
-      let next;try{next=closeCoinSpotPaperPosition(account,{bid:Number(q.prices?.bid)});}catch(error){throw new HttpError(409,error.message);}
+      const quote=parseCoinSpotPublicQuote(q.prices);
+      if(!quote) throw new HttpError(502,"CoinSpot bid/ask quote is invalid.");
+      let next;try{next=closeCoinSpotPaperPosition(account,{bid:quote.bid});}catch(error){throw new HttpError(409,error.message);}
       return reply(await saveAccount(next));
     }
     throw new HttpError(404,"Paper trading route not found.");
@@ -2703,5 +2717,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate, validateCoinSpotMtfMarketHistory, requireCoinSpotOperator };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate, validateCoinSpotMtfMarketHistory, requireCoinSpotOperator, parseCoinSpotPublicPrice, parseCoinSpotPublicQuote };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";
