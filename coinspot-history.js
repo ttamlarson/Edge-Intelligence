@@ -14,6 +14,28 @@ const finite = value => {
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+// Provider timestamps must be unambiguous ISO-8601 instants. Date.parse alone
+// accepts locale-like and timezone-less strings whose meaning can vary by runtime.
+function parseCoinSpotTimestamp(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/i);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , zone] = match;
+  const year = Number(yearText), month = Number(monthText), day = Number(dayText);
+  const hour = Number(hourText), minute = Number(minuteText), second = Number(secondText);
+  if (year < 1970 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return null;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth) return null;
+  if (zone.toUpperCase() !== "Z") {
+    const offset = zone.slice(1).split(":").map(Number);
+    if (offset[0] > 23 || offset[1] > 59) return null;
+  }
+  const timestamp = Date.parse(normalized);
+  return Number.isSafeInteger(timestamp) ? timestamp : null;
+}
+
 export function coinSpotHistoryRangeParams(startMs, endMs, format = "date") {
   if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) || startMs < 0 || endMs <= startMs) {
     throw new Error("Invalid CoinSpot history date range.");
@@ -54,8 +76,8 @@ export function normalizeCoinSpotCompletedOrders({coin,payload}={}) {
       throw new Error("COINSPOT_HISTORY_SCHEMA_MISMATCH: CoinSpot completed-order row is missing its market identity.");
     }
     if(row.market!==symbol+"/AUD") continue;
-    const timestamp=Date.parse(row.solddate),price=finite(row.rate),amount=finite(row.amount),total=finite(row.total);
-    if(typeof row.solddate !== "string" || !Number.isFinite(timestamp) ||
+    const timestamp=parseCoinSpotTimestamp(row.solddate),price=finite(row.rate),amount=finite(row.amount),total=finite(row.total);
+    if(timestamp===null ||
         price===null || price<=0 || amount===null || amount<=0 || total===null || total<=0) {
       throw new Error("COINSPOT_HISTORY_SCHEMA_MISMATCH: malformed "+symbol+"/AUD completed-order row.");
     }

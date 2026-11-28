@@ -30,6 +30,45 @@ test("normalizes authenticated CoinSpot AUD completed orders and rejects other q
  assert.throws(()=>normalizeCoinSpotCompletedOrders({coin:"BTC",payload:{status:"error"}}));
 });
 
+test("requires explicit ISO-8601 timezone and rejects ambiguous or invalid CoinSpot timestamps", () => {
+ const base = {
+  market: "BTC/AUD",
+  rate: 100,
+  amount: 0.5,
+  total: 50
+ };
+ const utc = normalizeCoinSpotCompletedOrders({
+  coin: "BTC",
+  payload: { status: "ok", buyorders: [{ ...base, solddate: "2026-11-24T00:10:00.000Z" }], sellorders: [] }
+ });
+ const offset = normalizeCoinSpotCompletedOrders({
+  coin: "BTC",
+  payload: { status: "ok", buyorders: [{ ...base, solddate: "2026-11-24T10:10:00+10:00" }], sellorders: [] }
+ });
+ assert.equal(offset[0].timestamp, utc[0].timestamp);
+ for (const solddate of [
+  "2026-11-24T00:10:00",
+  "2026-11-24 00:10:00Z",
+  "2026-11-24",
+  "11/24/2026 00:10:00",
+  "2026-02-30T00:10:00Z",
+  "2026-11-24T24:00:00Z",
+  "2026-11-24T00:10:00+25:00",
+  "2026-11-24T00:10:00.1234Z",
+  "not-a-date",
+  1795488600000
+ ]) {
+  assert.throws(
+   () => normalizeCoinSpotCompletedOrders({
+    coin: "BTC",
+    payload: { status: "ok", buyorders: [{ ...base, solddate }], sellorders: [] }
+   }),
+   /COINSPOT_HISTORY_SCHEMA_MISMATCH/,
+   `expected invalid timestamp ${JSON.stringify(solddate)} to be rejected`
+  );
+ }
+});
+
 test("rejects coercible non-numeric CoinSpot fields while accepting decimal strings", () => {
  const base = {
   market: "BTC/AUD",
