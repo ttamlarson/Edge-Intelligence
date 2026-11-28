@@ -5,13 +5,13 @@ import { createAutoPaperAccount } from "../crypto-auto-paper.js";
 import { webcrypto } from "node:crypto";
 
 const ORIGIN = "https://edge.example.au";
-const access = sub => ({ access: { getIdentity: async () => ({ id: sub }) } });
+const access = sub => ({ access: { getIdentity: async () => ({ id: sub, email: "operator@example.com" }) } });
 const limiter = answer => ({ limit: async ({ key }) => ({ success: typeof answer === "function" ? answer(key) : answer }) });
 const kv = () => {
   const values = new Map();
   return { values, binding: { get: async key => values.get(key) ?? null, put: async (key, value) => values.set(key, value) } };
 };
-const baseEnv = extra => ({ FRONTEND_ORIGINS: ORIGIN, DATA_LIMITER: limiter(true), AI_LIMITER: limiter(true), WRITE_LIMITER: limiter(true), ...extra });
+const baseEnv = extra => ({ FRONTEND_ORIGINS: ORIGIN, COINSPOT_MTF_OPERATOR_EMAIL: "operator@example.com", DATA_LIMITER: limiter(true), AI_LIMITER: limiter(true), WRITE_LIMITER: limiter(true), ...extra });
 
 test("API fails closed when Cloudflare Access is not configured", async () => {
   const response = await worker.fetch(new Request("https://api.example.au/api/health"), {});
