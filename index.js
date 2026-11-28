@@ -1982,7 +1982,7 @@ function parseCoinSpotPublicPrice(value) {
   if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
   if (typeof value !== "string") return null;
   const text = value.trim();
-  if (!/^(?:\\d+(?:\\.\\d*)?|\\.\\d+)$/.test(text)) return null;
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return null;
   const parsed = Number(text);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
