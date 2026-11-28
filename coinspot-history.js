@@ -136,6 +136,13 @@ export function selectCoinSpotEpochMsPartitionSummary(variants) {
 export function coinSpotEpochMsPartitionSummaryMatches(partition) {
   const selected = selectCoinSpotEpochMsPartitionSummary(partition?.variants);
   if (!selected) return false;
+  // Older test/legacy snapshots may retain the full variants without a
+  // top-level summary. That is incomplete but not misleading; only a present
+  // summary that disagrees with the validated epoch-ms variant is stale.
+  const hasTopLevelSummary = COINSPOT_EPOCH_MS_PARTITION_SUMMARY_FIELDS.some(
+    field => partition?.[field] !== undefined
+  );
+  if (!hasTopLevelSummary) return true;
   return COINSPOT_EPOCH_MS_PARTITION_SUMMARY_FIELDS.every(field =>
     Object.prototype.hasOwnProperty.call(selected, field)
       ? partition?.[field] === selected[field]
