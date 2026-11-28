@@ -409,3 +409,11 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Added regression coverage for missing configuration, missing/mismatched identities, operator access, and paper-only ledger preservation.
 - [ ] Verify the production Worker secret, Access policy scope, CI, deployment and live route behaviour after deployment.
 - Paper-only execution, read-only CoinSpot credentials, fee/slippage, sizing, stops, loss limits and live-trading safety flags are unchanged.
+
+
+## 2026-11-28 — Fail closed on mixed malformed CoinSpot history rows
+
+- [x] Reject malformed BTC/AUD or ETH/AUD completed-order rows even when the same response also contains valid rows; do not silently turn a partial provider response into a completed history day.
+- [x] Reject rows without a usable market identity so an unclassified record cannot enter the AUD trade tape.
+- [x] Add unit and end-to-end scheduled-paper regression coverage proving the history cursor remains on the affected date, no derived candles are written, new entries/AI review are blocked for that scan, and paper-only/live-disabled flags remain intact.
+- This hardening does not alter strategy thresholds, fees, slippage, position sizing, stops or loss limits. Existing-position quote-driven protective management remains available during a history-sync warning.

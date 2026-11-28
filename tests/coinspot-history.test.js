@@ -6,11 +6,26 @@ test("normalizes authenticated CoinSpot AUD completed orders and rejects other q
  const payload={status:"ok",buyorders:[
   {market:"BTC/AUD",solddate:"2026-11-24T00:10:00Z",rate:100,amount:2,total:200},
   {market:"BTC/USDT",solddate:"2026-11-24T00:11:00Z",rate:1,amount:2,total:2},
-  {market:"BTC/AUD",solddate:"bad",rate:100,amount:1,total:100}
  ],sellorders:[{market:"BTC/AUD",solddate:"2026-11-24T00:10:00Z",rate:100,amount:2,total:200}]};
  const trades=normalizeCoinSpotCompletedOrders({coin:"BTC",payload});
  assert.equal(trades.length,1);
  assert.equal(trades[0].totalAud,200);
+ const malformedMixedPayload = {
+  status:"ok",
+  buyorders:[
+   {market:"BTC/AUD",solddate:"2026-11-24T00:10:00Z",rate:100,amount:2,total:200},
+   {market:"BTC/AUD",solddate:"bad",rate:100,amount:1,total:100}
+  ],
+  sellorders:[]
+ };
+ assert.throws(
+  ()=>normalizeCoinSpotCompletedOrders({coin:"BTC",payload:malformedMixedPayload}),
+  /COINSPOT_HISTORY_SCHEMA_MISMATCH/
+ );
+ assert.throws(
+  ()=>normalizeCoinSpotCompletedOrders({coin:"BTC",payload:{status:"ok",buyorders:[{solddate:"2026-11-24T00:10:00Z",rate:100,amount:1,total:100}],sellorders:[]}}),
+  /COINSPOT_HISTORY_SCHEMA_MISMATCH/
+ );
  assert.throws(()=>normalizeCoinSpotCompletedOrders({coin:"DOGE",payload}));
  assert.throws(()=>normalizeCoinSpotCompletedOrders({coin:"BTC",payload:{status:"error"}}));
 });

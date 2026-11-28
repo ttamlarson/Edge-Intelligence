@@ -40,9 +40,16 @@ export function normalizeCoinSpotCompletedOrders({coin,payload}={}) {
   if(payload?.status!=="ok"||!Array.isArray(payload.buyorders)||!Array.isArray(payload.sellorders)) throw new Error("CoinSpot completed market-order response is malformed.");
   const rows=[...payload.buyorders,...payload.sellorders],seen=new Set(),trades=[];
   for(const row of rows){
-    if(row?.market!==symbol+"/AUD") continue;
+    if(!row || typeof row !== "object" || Array.isArray(row) ||
+        typeof row.market !== "string" || row.market.trim().length === 0) {
+      throw new Error("COINSPOT_HISTORY_SCHEMA_MISMATCH: CoinSpot completed-order row is missing its market identity.");
+    }
+    if(row.market!==symbol+"/AUD") continue;
     const timestamp=Date.parse(row.solddate),price=finite(row.rate),amount=finite(row.amount),total=finite(row.total);
-    if(!Number.isFinite(timestamp)||price===null||price<=0||amount===null||amount<=0||total===null||total<=0) continue;
+    if(typeof row.solddate !== "string" || !Number.isFinite(timestamp) ||
+        price===null || price<=0 || amount===null || amount<=0 || total===null || total<=0) {
+      throw new Error("COINSPOT_HISTORY_SCHEMA_MISMATCH: malformed "+symbol+"/AUD completed-order row.");
+    }
     const key=[timestamp,price,amount,total].join("|");
     if(seen.has(key)) continue;
     seen.add(key);

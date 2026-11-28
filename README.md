@@ -290,3 +290,8 @@ The paper scanner allocates up to 30 CoinSpot history subrequests per scan (15 p
 ### CoinSpot MTF paper-ledger identity integrity
 
 Version-2 paper positions and closed trades must use the canonical `<coin>-<signalAt>` identity, and any stored strategy provenance must match `EDGE_MTF_DONCHIAN_ENSEMBLE_V1`. This rejects corrupted or misattributed ledger records without changing signal thresholds, fees, slippage, position sizing, stops, loss limits or paper-only execution.
+
+
+### CoinSpot MTF malformed-history fail-closed handling — 28 November 2026
+
+Completed-order normalization now rejects a BTC/AUD or ETH/AUD response when any row for the requested pair has a missing/invalid timestamp, price, amount or total, or when a row lacks its market identity. A mixed response is not silently reduced to the valid subset: the date remains pending, no daily/four-hour candles are written, and the paper runner blocks new entries and AI review for that scan. Fresh quote-driven protective management for any existing paper position remains available. Fee/slippage, sizing, stops, loss limits and live-trading safety flags are unchanged.
