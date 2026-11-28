@@ -446,7 +446,7 @@ function rankMtfEntryCandidate(m, account, now) {
     entryFeeAud: round(entryFeeAud), entryCostAud: round(entryCostAud),
     estimatedNetStopLossAud: round(estimatedNetStopLossAud),
     riskBudgetAud: round(riskBudgetAud), dailyLossRemainingAud: round(dailyLossRemainingAud),
-    riskBudgetUsePct: riskBudgetAud > 0 ? round(estimatedNetStopLossAud / riskBudgetAud * 100) : 0,
+    riskBudgetUsePct: round(riskBudgetAud) > 0 ? round(round(estimatedNetStopLossAud) / round(riskBudgetAud) * 100) : 0,
     spreadBps: round(m.quote.spreadBps), costDragBps: round(costDragBps),
     breakoutVotes, signalAgeMinutes: round(signalAgeMinutes),
     longTrendSlopePct: Number.isFinite(m.signal.indicators?.longTrendSlopePct) ? m.signal.indicators.longTrendSlopePct : 0,
