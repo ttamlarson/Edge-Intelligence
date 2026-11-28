@@ -534,3 +534,30 @@ test("an open position cannot reuse a four-hour signal already present in closed
  };
  assert.throws(()=>validateMtfPaperAccount(reopenedCorruption),/ledger failed validation/);
 });
+
+
+test("open-position and closed-trade IDs must match their canonical market signal identity",()=>{
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const position=opened.openPosition;
+ assert.equal(position.id,position.coin+"-"+position.signalAt);
+ assert.throws(()=>validateMtfPaperAccount({
+  ...opened,openPosition:{...position,id:"BTC-manual-id"}
+ }),/position failed validation/);
+
+ const stopMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:position.stopPrice*.9,ask:position.stopPrice,last:position.stopPrice,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[stopMarket],now:"2026-11-25T09:00:00.000Z"});
+ const trade=closed.closedTrades.at(-1);
+ assert.ok(trade);
+ assert.equal(trade.id,trade.coin+"-"+trade.signalAt);
+ assert.equal(validateMtfPaperAccount(closed),true);
+ assert.throws(()=>validateMtfPaperAccount({
+  ...closed,closedTrades:[{...trade,id:"BTC-manual-id"}]
+ }),/ledger failed validation/);
+ assert.throws(()=>validateMtfPaperAccount({
+  ...closed,closedTrades:[{...trade,strategy:"UNRELATED_STRATEGY"}]
+ }),/ledger failed validation/);
+});
