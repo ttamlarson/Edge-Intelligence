@@ -257,14 +257,14 @@ test("legacy open positions acquire a conservative stale-mark timestamp when quo
 test("trailing-stop high-water mark advances only on completed post-entry four-hour closes",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  const entryHigh=a.openPosition.highestPrice;
- const intrabar={...candidate(),history:{lastCompletedFourHourAt:"2026-11-25T04:00:00.000Z",lastCompletedFourHourClose:120000},
-  quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:120000,spreadBps:10,retrievedAt:"2026-11-25T08:30:00.000Z"}};
- a=processMtfPaperAccount(a,{markets:[intrabar],now:"2026-11-25T08:30:00.000Z"});
+ const unverifiedCompleted={...candidate(),history:{...validatedHistory("2026-11-25T08:00:00.000Z",120000),historyIntegrityStatus:"UNVERIFIED",unverifiedFourHourDays:1},
+  quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:120000,spreadBps:10,retrievedAt:"2026-11-25T12:15:00.000Z"}};
+ a=processMtfPaperAccount(a,{markets:[unverifiedCompleted],now:"2026-11-25T12:15:00.000Z"});
  assert.equal(a.openPosition.highestPrice,entryHigh);
  assert.equal(a.openPosition.trailingStop,entryHigh-2500);
- const completed={...intrabar,history:validatedHistory("2026-11-25T08:00:00.000Z",104000),
-  quote:{pair:"BTC/AUD",bid:102000,ask:102100,last:104000,spreadBps:9.8,retrievedAt:"2026-11-25T12:15:00.000Z"}};
- a=processMtfPaperAccount(a,{markets:[completed],now:"2026-11-25T12:15:00.000Z"});
+ const completed={...unverifiedCompleted,history:validatedHistory("2026-11-25T12:00:00.000Z",104000),
+  quote:{pair:"BTC/AUD",bid:102000,ask:102100,last:104000,spreadBps:9.8,retrievedAt:"2026-11-25T16:15:00.000Z"}};
+ a=processMtfPaperAccount(a,{markets:[completed],now:"2026-11-25T16:15:00.000Z"});
  assert.equal(a.openPosition.highestPrice,104000);
  assert.equal(a.openPosition.trailingStop,101000);
 });
