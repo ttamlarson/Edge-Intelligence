@@ -630,3 +630,64 @@ test("open-position and closed-trade IDs must match their canonical market signa
   ...closed,closedTrades:[{...trade,strategy:"UNRELATED_STRATEGY"}]
  }),/ledger failed validation/);
 });
+
+
+test("persisted open positions cannot remove modeled entry fees while keeping the ledger balanced", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const tampered=structuredClone(opened);
+ const position=tampered.openPosition;
+ const removedFee=position.entryFeeAud;
+ assert.ok(removedFee>0.01);
+ position.entryFeeAud=0;
+ position.entryCost=Math.round((position.notionalAud+position.entryFeeAud+Number.EPSILON)*100)/100;
+ tampered.cashAud=Math.round((tampered.cashAud+removedFee+Number.EPSILON)*100)/100;
+ tampered.equityAud=Math.round((tampered.cashAud+position.entryCost+tampered.unrealizedPnlAud+Number.EPSILON)*100)/100;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/position failed validation/);
+});
+
+test("persisted open positions must retain the configured entry slippage", () => {
+ const market=candidate();
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[market],now});
+ const tampered=structuredClone(opened);
+ const position=tampered.openPosition;
+ position.entryPrice=position.referenceAsk;
+ position.notionalAud=Math.round((position.quantity*position.entryPrice+Number.EPSILON)*100)/100;
+ position.entryFeeAud=Math.round((position.quantity*position.entryPrice*MTF_PAPER_CONFIG.feeRate+Number.EPSILON)*100)/100;
+ position.entryCost=Math.round((position.notionalAud+position.entryFeeAud+Number.EPSILON)*100)/100;
+ tampered.cashAud=Math.round((tampered.startingCapitalAud-tampered.realizedPnlAud-position.entryCost+Number.EPSILON)*100)/100;
+ const marked=position.quantity*market.quote.bid*(1-MTF_PAPER_CONFIG.slippageBps/10000);
+ const markFee=marked*MTF_PAPER_CONFIG.feeRate;
+ tampered.unrealizedPnlAud=Math.round((marked-markFee-position.entryCost+Number.EPSILON)*100)/100;
+ tampered.dailyLossAud=Math.round((Math.max(0,-tampered.unrealizedPnlAud)+Number.EPSILON)*100)/100;
+ tampered.equityAud=Math.round((tampered.cashAud+marked-markFee+Number.EPSILON)*100)/100;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/position failed validation/);
+});
+
+test("closed paper trades reconcile both configured fees and entry/exit slippage", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const stop=opened.openPosition.stopPrice;
+ const exitMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[exitMarket],now:"2026-11-25T09:00:00.000Z"});
+ assert.equal(closed.closedTrades.length,1);
+ assert.equal(validateMtfPaperAccount(closed),true);
+
+ const noExitSlippage=structuredClone(closed);
+ noExitSlippage.closedTrades[0].referenceBid=noExitSlippage.closedTrades[0].exitPrice;
+ assert.throws(()=>validateMtfPaperAccount(noExitSlippage),/ledger failed validation/);
+
+ const noFees=structuredClone(closed);
+ const trade=noFees.closedTrades[0];
+ const removedFees=trade.entryFeeAud+trade.exitFeeAud;
+ trade.entryFeeAud=0;
+ trade.exitFeeAud=0;
+ trade.pnlAud=Math.round((trade.quantity*trade.exitPrice-trade.quantity*trade.entryPrice+Number.EPSILON)*100)/100;
+ noFees.cashAud=Math.round((noFees.cashAud+removedFees+Number.EPSILON)*100)/100;
+ noFees.realizedPnlAud=Math.round((noFees.realizedPnlAud+removedFees+Number.EPSILON)*100)/100;
+ noFees.equityAud=noFees.cashAud;
+ noFees.dailyLossAud=Math.round((Math.max(0,-trade.pnlAud)+Number.EPSILON)*100)/100;
+ assert.throws(()=>validateMtfPaperAccount(noFees),/ledger failed validation/);
+});
