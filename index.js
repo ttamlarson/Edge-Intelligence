@@ -1978,6 +1978,15 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
   };
 }
 
+function parseCoinSpotPublicPrice(value) {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!/^(?:\\d+(?:\\.\\d*)?|\\.\\d+)$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null,options={}) {
   const includeShadowBacktest = options.includeShadowBacktest !== false;
   if(!env.EDGE_KV) throw new HttpError(503,"Persistent CoinSpot strategy storage is not configured.");
@@ -2054,8 +2063,10 @@ async function getCoinSpotMtfStrategy(env,now=new Date(),stateOverride=null,opti
     try {
       const latest=await providerJson("https://www.coinspot.com.au/pubapi/v2/latest/"+coin.toLowerCase(),{headers:{Accept:"application/json"}},128*1024);
       if(latest.status!=="ok"||!latest.prices) throw new Error("CoinSpot quote response is invalid.");
-      const bid=Number(latest.prices.bid),ask=Number(latest.prices.ask),last=Number(latest.prices.last);
-      if(![bid,ask,last].every(Number.isFinite)||bid<=0||ask<bid||last<=0) throw new Error("CoinSpot bid/ask quote is invalid.");
+      const bid=parseCoinSpotPublicPrice(latest.prices.bid);
+      const ask=parseCoinSpotPublicPrice(latest.prices.ask);
+      const last=parseCoinSpotPublicPrice(latest.prices.last);
+      if(bid===null||ask===null||last===null||ask<bid) throw new Error("CoinSpot bid/ask quote is invalid.");
       quote={pair:coin+"/AUD",bid,ask,last,spreadBps:calculateCoinSpotSpreadBps(bid,ask),retrievedAt:new Date(clock).toISOString()};
     } catch(error) {
       signalError=String(error?.message||"COINSPOT_QUOTE_UNAVAILABLE").slice(0,180);
