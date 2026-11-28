@@ -187,7 +187,9 @@ test("CoinSpot sync retries empty full-day history with epoch seconds and record
       if (typeof body.startdate === "string") {
         return new Response(JSON.stringify({ status: "ok", buyorders: [], sellorders: [] }), { status: 200 });
       }
-      const date = new Date(Number(body.startdate) * 1000).toISOString().slice(0, 10);
+      const startValue = Number(body.startdate);
+      const startMs = startValue >= 1e12 ? startValue : startValue * 1000;
+      const date = new Date(startMs).toISOString().slice(0, 10);
       const row = {
         market: coin + "/AUD",
         solddate: date + "T10:00:00.000Z",
@@ -239,7 +241,9 @@ test("CoinSpot sync retries empty full-day history with epoch seconds and record
   assert.equal(result.providerProbe.readOnlyStatus, "AUTHENTICATED");
   assert.equal(result.providerProbe.markets[0].readOnlyHistory.validAudTrades, 1);
   assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory.length, 2);
+  assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].format, "epoch-ms");
   assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[0].validAudTrades, 1);
+  assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].format, "epoch-ms");
   assert.equal(result.providerProbe.markets[0].readOnlyHistory.partitionHistory[1].outOfRangeTrades, 1);
   assert.equal(result.providerProbe.markets[0].publicHistory.validAudTrades, 1);
 
