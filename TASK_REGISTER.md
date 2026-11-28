@@ -435,3 +435,11 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Apply the same strict numeric boundary to the deterministic Donchian and early-reversal shadow strategy validators.
 - [x] Add regression coverage for malformed daily and four-hour cached candles while preserving matching date trade counts; affected dates are withheld and cannot generate signals.
 - No history is synthesized or repaired by coercion. No strategy thresholds, entry gates, fee/slippage assumptions, sizing, stops, daily-loss limits or live-trading safety flags are changed. Paper-only execution remains enforced.
+
+
+## 2026-11-28 — CoinSpot MTF public quote numeric integrity
+
+- [x] Replace broad JavaScript `Number()` coercion for CoinSpot public bid/ask/last with a strict parser accepting finite JSON numbers or plain positive decimal strings only.
+- [x] Reject booleans, arrays, hexadecimal-style values and non-positive quote prices before spread calculation; a malformed quote cannot create a deterministic candidate or paper entry.
+- [x] Add regression coverage for decimal-string compatibility and malformed quote rejection while keeping the quote unavailable and live trading disabled.
+- Public quote validation is separate from historical OHLCV validation. No strategy thresholds, fee/slippage assumptions, sizing, stops, daily-loss limits or live-trading safety flags are changed. No real order, withdrawal or transfer is submitted.
