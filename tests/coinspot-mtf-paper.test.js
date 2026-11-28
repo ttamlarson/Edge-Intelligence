@@ -850,9 +850,22 @@ test("closed paper trades remain chronological and later entry equity includes e
  }}],now:"2026-11-25T09:00:00.000Z"});
  assert.equal(validateMtfPaperAccount(firstClosed),true);
  assert.equal(firstClosed.closedTrades.length,1);
- assert.ok(firstClosed.closedTrades[0].entryEquityAud>0);
- assert.throws(()=>validateMtfPaperAccount({
-  ...firstClosed,
-  closedTrades:[{...firstClosed.closedTrades[0],openedAt:"2026-11-25T03:00:00.000Z"}]
- }),/ledger failed validation/);
+
+ const secondSignal=candidate("BTC","2026-11-25T08:00:00.000Z",100000,"DONCHIAN_BREAKOUT","2026-11-25T12:15:00.000Z");
+ const second=processMtfPaperAccount(firstClosed,{markets:[secondSignal],now:"2026-11-25T12:15:00.000Z"});
+ assert.ok(second.openPosition);
+ assert.equal(second.openPosition.entryEquityAud,firstClosed.equityAud);
+ const secondStop=second.openPosition.stopPrice;
+ const secondClosed=processMtfPaperAccount(second,{markets:[{...secondSignal,quote:{
+  pair:"BTC/AUD",bid:secondStop*.9,ask:secondStop,last:secondStop,
+  spreadBps:(secondStop-secondStop*.9)/((secondStop+secondStop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T13:00:00.000Z"
+ }}],now:"2026-11-25T13:00:00.000Z"});
+ assert.equal(secondClosed.closedTrades.length,2);
+ assert.equal(secondClosed.closedTrades[1].entryEquityAud,firstClosed.equityAud);
+ assert.equal(validateMtfPaperAccount(secondClosed),true);
+
+ const outOfOrder=structuredClone(secondClosed);
+ outOfOrder.closedTrades.reverse();
+ assert.throws(()=>validateMtfPaperAccount(outOfOrder),/ledger failed validation/);
 });
