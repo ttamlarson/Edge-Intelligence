@@ -97,7 +97,7 @@ test("MTF entry risk is capped by remaining daily-loss headroom before minimum-n
  account.equityAud=97.08;
  account.dailyLossAud=2.92;
  account.closedTrades=[{
-  id:"prior-loss",coin:"BTC",pair:"BTC/AUD",
+  id:"BTC-2026-11-25T00:00:00.000Z",coin:"BTC",pair:"BTC/AUD",
   openedAt:"2026-11-25T04:00:00.000Z",closedAt:"2026-11-25T05:00:00.000Z",
   signalAt:"2026-11-25T00:00:00.000Z",entryPrice:100000,exitPrice:88000,
   quantity:0.00024,entryFeeAud:0.02,exitFeeAud:0.02,pnlAud:-2.92,reason:"STOP"
@@ -162,10 +162,10 @@ test("open paper positions remain within the completed four-hour signal freshnes
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(opened.openPosition);
  const exactSignalAt="2026-11-24T20:00:00.000Z";
- const exactBoundary={...opened,openPosition:{...opened.openPosition,signalAt:exactSignalAt},lastProcessed:{...opened.lastProcessed,BTC:exactSignalAt}};
+ const exactBoundary={...opened,openPosition:{...opened.openPosition,signalAt:exactSignalAt,id:"BTC-"+exactSignalAt},lastProcessed:{...opened.lastProcessed,BTC:exactSignalAt}};
  assert.equal(validateMtfPaperAccount(exactBoundary),true);
  const staleSignalAt="2026-11-24T19:59:59.999Z";
- const tooOld={...opened,openPosition:{...opened.openPosition,signalAt:staleSignalAt},lastProcessed:{...opened.lastProcessed,BTC:staleSignalAt}};
+ const tooOld={...opened,openPosition:{...opened.openPosition,signalAt:staleSignalAt,id:"BTC-"+staleSignalAt},lastProcessed:{...opened.lastProcessed,BTC:staleSignalAt}};
  assert.throws(()=>validateMtfPaperAccount(tooOld),/position failed validation/);
 });
 test("rejects malformed or inconsistent persisted position mark metadata",()=>{
@@ -236,7 +236,7 @@ test("position sizing caps stop-loss risk after round-trip fees and slippage",()
 test("daily loss circuit includes open mark-to-market loss and closes at the limit",()=>{
  let a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  assert.ok(a.openPosition);
- a.closedTrades.push({id:"ETH-test",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
+ a.closedTrades.push({id:"ETH-2026-11-25T02:00:00.000Z",coin:"ETH",pair:"ETH/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP",strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1"});
  a.lastProcessed.ETH="2026-11-25T02:00:00.000Z";
  a.dailyLossAud=2.9+Math.max(0,-a.unrealizedPnlAud);
  const p=a.openPosition;
@@ -321,7 +321,7 @@ test("rejects persisted positions with invalid cost, fee or timestamp accounting
 });
 
 test("reconciles closed-trade P&L to modeled prices and fees and prevents realized-loss understatement",()=>{
- const trade={id:"BTC-test",coin:"BTC",pair:"BTC/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,
+ const trade={id:"BTC-2026-11-25T02:00:00.000Z",coin:"BTC",pair:"BTC/AUD",openedAt:"2026-11-25T06:00:00.000Z",closedAt:now,
   signalAt:"2026-11-25T02:00:00.000Z",entryPrice:2500,exitPrice:2215,quantity:0.01,
   entryFeeAud:0.03,exitFeeAud:0.02,pnlAud:-2.9,reason:"TRAILING_STOP"};
  const base=createMtfPaperAccount(now);
