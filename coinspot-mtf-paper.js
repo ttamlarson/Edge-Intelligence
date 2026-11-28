@@ -14,6 +14,11 @@ const validTimestamp = value => typeof value === "string" && Number.isFinite(Dat
   new Date(Date.parse(value)).toISOString() === value;
 const positiveFinite = value => Number.isFinite(value) && value > 0;
 const nonNegativeFinite = value => Number.isFinite(value) && value >= 0;
+const withinMoneyTolerance = (actual, expected) =>
+  Number.isFinite(actual) && Number.isFinite(expected) && Math.abs(actual - expected) <= 0.01;
+const withinPriceTolerance = (actual, expected) =>
+  Number.isFinite(actual) && Number.isFinite(expected) &&
+  Math.abs(actual - expected) <= Math.max(1e-8, Math.abs(expected) * 1e-10);
 function quoteIsFresh(market, now) {
   const retrievedAt = market?.quote?.retrievedAt;
   const retrievedMs = Date.parse(retrievedAt || "");
@@ -92,6 +97,19 @@ export function validateMtfPaperAccount(a) {
       trade.quantity * trade.exitPrice - trade.exitFeeAud -
       (trade.quantity * trade.entryPrice + trade.entryFeeAud)
     );
+    const costModelVersion = trade.costModelVersion ?? null;
+    if (costModelVersion !== null && costModelVersion !== 1) return false;
+    if (costModelVersion === 1) {
+      const expectedEntryPrice = trade.referenceAsk * (1 + MTF_PAPER_CONFIG.slippageBps / 10000);
+      const expectedExitPrice = trade.referenceBid * (1 - MTF_PAPER_CONFIG.slippageBps / 10000);
+      const expectedEntryFee = round(trade.quantity * trade.entryPrice * MTF_PAPER_CONFIG.feeRate);
+      const expectedExitFee = round(trade.quantity * trade.exitPrice * MTF_PAPER_CONFIG.feeRate);
+      if (!positiveFinite(trade.referenceAsk) || !positiveFinite(trade.referenceBid) ||
+          !withinPriceTolerance(trade.entryPrice, expectedEntryPrice) ||
+          !withinPriceTolerance(trade.exitPrice, expectedExitPrice) ||
+          !withinMoneyTolerance(trade.entryFeeAud, expectedEntryFee) ||
+          !withinMoneyTolerance(trade.exitFeeAud, expectedExitFee)) return false;
+    }
     return Math.abs(trade.pnlAud - expectedNetPnl) <= 0.03;
   };
   const ledgerDay = typeof a?.day === "string" ? a.day : "";
@@ -179,11 +197,18 @@ export function validateMtfPaperAccount(a) {
       Number.isFinite(p.entryFeeAud) &&
       Math.abs(p.entryCost - (p.notionalAud + p.entryFeeAud)) <= 0.02 &&
       Math.abs(p.notionalAud - p.quantity * p.entryPrice) <= 0.02;
+    const costModelVersion = p.costModelVersion ?? null;
+    const costModelMatches = costModelVersion === null || (costModelVersion === 1 &&
+      positiveFinite(p.referenceAsk) &&
+      withinPriceTolerance(p.entryPrice,
+        p.referenceAsk * (1 + MTF_PAPER_CONFIG.slippageBps / 10000)) &&
+      withinMoneyTolerance(p.entryFeeAud,
+        round(p.quantity * p.entryPrice * MTF_PAPER_CONFIG.feeRate)));
     if (!validCoin(p.coin) || p.pair !== p.coin + "/AUD" ||
         p.id !== p.coin + "-" + p.signalAt ||
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
         !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
-        !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches ||
+        !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches || !costModelMatches ||
         !positiveFinite(p.stopPrice) || p.stopPrice >= p.entryPrice ||
         !positiveFinite(p.atr) || !positiveFinite(p.highestPrice) || p.highestPrice < p.entryPrice ||
         !positiveFinite(p.trailingStop) || p.trailingStop < p.stopPrice || p.trailingStop >= p.highestPrice ||
@@ -221,7 +246,9 @@ function closePosition(a, bid, now, reason) {
   a.cashAud = round(a.cashAud + proceeds);
   a.realizedPnlAud = round(a.realizedPnlAud + pnl);
   a.closedTrades.push({ id:p.id, coin:p.coin, pair:p.pair, openedAt:p.openedAt, closedAt:now,
-    signalAt:p.signalAt, entryPrice:p.entryPrice, exitPrice:exit, quantity:p.quantity,
+    signalAt:p.signalAt, costModelVersion:p.costModelVersion ?? null,
+    referenceAsk:p.referenceAsk ?? null, referenceBid:bid,
+    entryPrice:p.entryPrice, exitPrice:exit, quantity:p.quantity,
     entryModel:p.entryModel || null,
     candidateRank:p.candidateRank ?? null,
     riskBudgetAud:p.riskBudgetAud ?? null,
@@ -479,7 +506,7 @@ export function processMtfPaperAccount(account, {markets=[], now=new Date().toIS
         candidateRank:ranked.rank, riskBudgetAud:ranked.riskBudgetAud,
         riskBudgetUsePct:ranked.riskBudgetUsePct, estimatedNetStopLossAud:ranked.estimatedNetStopLossAud,
         spreadBps:ranked.spreadBps, costDragBps:ranked.costDragBps,
-        referenceAsk:ask, entryPrice:entry, quantity, notionalAud:notional,
+        referenceAsk:ask, costModelVersion:1, entryPrice:entry, quantity, notionalAud:notional,
         entryFeeAud:fee, entryCost:entryCost,
         stopPrice, trailingStop:stopPrice, atr:Number(m.signal.indicators.atr20),
         highestPrice:entry, lastMarkAt:now, markStatus:"CURRENT", status:"OPEN_PAPER_ONLY" };
