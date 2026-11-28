@@ -10,7 +10,7 @@ const finite = value => {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value !== "string") return null;
   const normalized = value.trim();
-  if (!/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?$/i.test(normalized)) return null;
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -20,7 +20,7 @@ const finite = value => {
 function parseCoinSpotTimestamp(value) {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
-  const match = normalized.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?(Z|[+-]\\d{2}:\\d{2})$/i);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/i);
   if (!match) return null;
   const [, yearText, monthText, dayText, hourText, minuteText, secondText, , zone] = match;
   const year = Number(yearText), month = Number(monthText), day = Number(dayText);
