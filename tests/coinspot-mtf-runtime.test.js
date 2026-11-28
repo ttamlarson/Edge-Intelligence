@@ -102,6 +102,29 @@ test("CoinSpot MTF status keeps signals blocked during warm-up but still retriev
  }finally{globalThis.fetch=originalFetch;}
 });
 
+test("CoinSpot MTF public quote accepts decimal strings but rejects coercible non-number values", async () => {
+ const kv=kvStore(),originalFetch=globalThis.fetch;
+ kv.values.set("coinspot-mtf-history-global-v1",JSON.stringify({
+  mode:"COINSPOT_AUD_RESEARCH_ONLY",status:"BACKFILLING",nextDate:"2026-07-29",liveTradingEnabled:false,
+  markets:{BTC:{dailyCandles:[],fourHourCandles:[],tradesFetched:0},ETH:{dailyCandles:[],fourHourCandles:[],tradesFetched:0}}
+ }));
+ try {
+  globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:"100.00",ask:"101.00",last:"100.50"}}),{status:200,headers:{"Content-Type":"application/json"}});
+  const decimalStrings=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-25T08:00:00.000Z");
+  assert.equal(decimalStrings.markets[0].quote.bid,100);
+  assert.equal(decimalStrings.markets[0].quote.ask,101);
+  assert.equal(decimalStrings.markets[0].quote.last,100.5);
+
+  for (const invalid of [true, ["100"], "0x64"]) {
+   globalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",prices:{bid:invalid,ask:"101",last:"100.50"}}),{status:200,headers:{"Content-Type":"application/json"}});
+   const rejected=await __test.getCoinSpotMtfStrategy({EDGE_KV:kv.binding},"2026-11-25T08:00:00.000Z");
+   assert.equal(rejected.markets[0].quote,null);
+   assert.match(rejected.markets[0].signalError,/CoinSpot bid\/ask quote is invalid/);
+   assert.equal(rejected.liveTradingEnabled,false);
+  }
+ } finally { globalThis.fetch=originalFetch; }
+});
+
 test("CoinSpot MTF paper runner backfills after a validated provider probe and creates a paper-only AUD ledger",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
  const now="2026-11-25T08:00:00.000Z";
