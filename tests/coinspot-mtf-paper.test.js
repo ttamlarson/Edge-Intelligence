@@ -636,9 +636,9 @@ test("persisted open positions cannot remove modeled entry fees while keeping th
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
  const tampered=structuredClone(opened);
  const position=tampered.openPosition;
- const removedFee=position.entryFeeAud;
- assert.ok(removedFee>0.01);
- position.entryFeeAud=0;
+ const removedFee=0.01;
+ assert.ok(position.entryFeeAud>=removedFee);
+ position.entryFeeAud=Math.round((position.entryFeeAud-removedFee+Number.EPSILON)*100)/100;
  position.entryCost=Math.round((position.notionalAud+position.entryFeeAud+Number.EPSILON)*100)/100;
  tampered.cashAud=Math.round((tampered.cashAud+removedFee+Number.EPSILON)*100)/100;
  tampered.equityAud=Math.round((tampered.cashAud+position.entryCost+tampered.unrealizedPnlAud+Number.EPSILON)*100)/100;
@@ -690,4 +690,30 @@ test("closed paper trades reconcile both configured fees and entry/exit slippage
  noFees.equityAud=noFees.cashAud;
  noFees.dailyLossAud=Math.round((Math.max(0,-trade.pnlAud)+Number.EPSILON)*100)/100;
  assert.throws(()=>validateMtfPaperAccount(noFees),/ledger failed validation/);
+});
+
+
+test("legacy closed trades still reconcile configured fees without reference-price provenance", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const stop=opened.openPosition.stopPrice;
+ const exitMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[exitMarket],now:"2026-11-25T09:00:00.000Z"});
+ const tampered=structuredClone(closed);
+ const trade=tampered.closedTrades[0];
+ delete trade.costModelVersion;
+ delete trade.referenceAsk;
+ delete trade.referenceBid;
+ const removedFees=trade.entryFeeAud+trade.exitFeeAud;
+ trade.entryFeeAud=0;
+ trade.exitFeeAud=0;
+ trade.pnlAud=Math.round((trade.quantity*trade.exitPrice-trade.quantity*trade.entryPrice+Number.EPSILON)*100)/100;
+ tampered.cashAud=Math.round((tampered.cashAud+removedFees+Number.EPSILON)*100)/100;
+ tampered.realizedPnlAud=Math.round((tampered.realizedPnlAud+removedFees+Number.EPSILON)*100)/100;
+ tampered.equityAud=tampered.cashAud;
+ tampered.dailyLossAud=Math.round((Math.max(0,-trade.pnlAud)+Number.EPSILON)*100)/100;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/ledger failed validation/);
 });
