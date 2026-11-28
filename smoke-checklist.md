@@ -162,8 +162,8 @@
 ### CoinSpot isolated cron schedule
 
 - [ ] Verify :00 runs other research providers without CoinSpot MTF.
-- [ ] Verify :15, :30 and :45 run CoinSpot MTF alone and avoid the shared subrequest limit.
-- [ ] Verify the current 97-day backfill remains within the 24–48-hour target at three days per hour.
+- [ ] Verify all eleven CoinSpot MTF slots (:05, :10, :15, :20, :25, :30, :35, :40, :45, :50 and :55) run the MTF engine alone; non-five-minute invocations and :00 must not start it.
+- [ ] Verify each CoinSpot slot processes no more than four historical UTC dates (up to 44 dates/hour); a 120-day warm-up is approximately 2 hours 45 minutes at the full allowance, with retries extending the estimate.
 
 - [ ] Compare numeric seconds, string seconds and millisecond timestamps for each 12-hour history window; adopt only a representation with validated in-range BTC/AUD or ETH/AUD trades.
 
