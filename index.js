@@ -1808,6 +1808,19 @@ function coinSpotFourHourGapDiagnostics(dailyCandles, fourHourCandles) {
   return diagnostics;
 }
 
+function hasValidCoinSpotStoredOhlcv(candle) {
+  const { open, high, low, close, volume, tradeCount, quoteVolumeAud } = candle || {};
+  if (![open, high, low, close, volume].every(value =>
+    typeof value === "number" && Number.isFinite(value) && value > 0)) return false;
+  if (!Number.isSafeInteger(tradeCount) || tradeCount <= 0) return false;
+  if (high < Math.max(open, close) || low > Math.min(open, close) || high < low) return false;
+  // Older deterministic fixtures do not carry quote volume, but when present
+  // the persisted value must be a real positive number from the trade aggregate.
+  if (quoteVolumeAud !== undefined &&
+      (typeof quoteVolumeAud !== "number" || !Number.isFinite(quoteVolumeAud) || quoteVolumeAud <= 0)) return false;
+  return true;
+}
+
 function validateCoinSpotMtfMarketHistory(history = {}) {
   const storedDaily = Array.isArray(history.dailyCandles) ? history.dailyCandles : [];
   const storedFourHour = Array.isArray(history.fourHourCandles) ? history.fourHourCandles : [];
@@ -1865,7 +1878,7 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     const expected = trackedCounts.get(day);
     const candle = candles[0];
     if (expected === undefined || expected <= 0 || candles.length !== 1 ||
-        !Number.isSafeInteger(candle?.tradeCount) || candle.tradeCount !== expected) {
+        !hasValidCoinSpotStoredOhlcv(candle) || candle.tradeCount !== expected) {
       unverifiedDaily.add(day);
       continue;
     }
@@ -1899,11 +1912,10 @@ function validateCoinSpotMtfMarketHistory(history = {}) {
     }
     const day = new Date(timestamp).toISOString().slice(0, 10);
     const group = fourHourByDay.get(day) || { candles: [], count: 0, valid: true };
-    const count = candle?.tradeCount;
-    if (seenFourHourTimestamps.has(timestamp) || !Number.isSafeInteger(count) || count <= 0) {
+    if (seenFourHourTimestamps.has(timestamp) || !hasValidCoinSpotStoredOhlcv(candle)) {
       group.valid = false;
     } else {
-      group.count += count;
+      group.count += candle.tradeCount;
     }
     seenFourHourTimestamps.add(timestamp);
     group.candles.push(candle);
