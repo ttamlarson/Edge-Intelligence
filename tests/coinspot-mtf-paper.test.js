@@ -2,17 +2,86 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {MTF_PAPER_CONFIG,createMtfPaperAccount,processMtfPaperAccount,validateMtfPaperAccount} from "../coinspot-mtf-paper.js";
 const now="2026-11-25T08:00:00.000Z";
+function validatedHistory(lastCompletedFourHourAt, lastCompletedFourHourClose) {
+ return {
+  historyIntegrityStatus:"VALIDATED",
+  validatedDailyCandles:124,
+  contiguousDailyCandles:124,
+  validatedFourHourCandles:720,
+  signalWindowFourHourCandles:240,
+  indicatorFourHourCandles:720,
+  unverifiedDailyDays:0,
+  unverifiedFourHourDays:0,
+  signalWindowStatus:"READY_CONTIGUOUS",
+  lastCompletedFourHourAt,
+  lastCompletedFourHourClose
+ };
+}
 function candidate(coin="BTC",signalAt="2026-11-25T04:00:00.000Z",ask=100000,entryModel="DONCHIAN_BREAKOUT",retrievedAt=now){
  const bid=ask*.999;
  const breakoutVotes=entryModel==="DONCHIAN_BREAKOUT";
  const pullbackReclaim=entryModel==="PULLBACK_RECLAIM";
- return {coin,pair:coin+"/AUD",quote:{pair:coin+"/AUD",bid,ask,last:ask,spreadBps:(ask-bid)/((ask+bid)/2)*10000,retrievedAt},signal:{
+ return {coin,pair:coin+"/AUD",history:validatedHistory(signalAt,ask),quote:{pair:coin+"/AUD",bid,ask,last:ask,spreadBps:(ask-bid)/((ask+bid)/2)*10000,retrievedAt},signal:{
   strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt,entryModel,
   indicators:{breakoutVotes:breakoutVotes?3:0,atr20:1000},risk:{initialStopDistance:2500},
   checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes,pullbackReclaim,entryTrigger:true,liquidity:true,volatility:true},
   execution:{orderIntent:"NONE",paperOnly:true,liveTradingEnabled:false}
  }};
 }
+test("new entries require validated daily/four-hour provenance and the exact latest completed signal candle",()=>{
+ const base=candidate();
+ const invalidMarkets=[
+  {...base,history:{...base.history,historyIntegrityStatus:"UNVERIFIED"}},
+  {...base,history:{...base.history,unverifiedFourHourDays:1}},
+  {...base,history:{...base.history,unverifiedDailyDays:1}},
+  {...base,history:{...base.history,signalWindowStatus:"BLOCKED_UNVERIFIED_GAP"}},
+  {...base,history:{...base.history,contiguousDailyCandles:109}},
+  {...base,history:{...base.history,signalWindowFourHourCandles:209}},
+  {...base,history:{...base.history,lastCompletedFourHourAt:"2026-11-25T00:00:00.000Z"}}
+ ];
+ const missingHistory={...base};
+ delete missingHistory.history;
+ for(const market of [...invalidMarkets,missingHistory]){
+  const blocked=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[market],now});
+  assert.equal(blocked.openPosition,null);
+  assert.equal(blocked.cashAud,100);
+  assert.deepEqual(blocked.lastProcessed,{});
+  assert.deepEqual(blocked.lastCandidateRanking,[]);
+  assert.equal(blocked.paperOnly,true);
+  assert.equal(blocked.liveTradingEnabled,false);
+ }
+});
+
+test("unverified history cannot tighten a trailing stop but a fresh executable stop quote still exits",()=>{
+ let account=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const entryHigh=account.openPosition.highestPrice;
+ const stop=account.openPosition.stopPrice;
+ const invalidHistory={...candidate("BTC",account.openPosition.signalAt),history:{
+  historyIntegrityStatus:"UNVERIFIED",
+  validatedFourHourCandles:720,
+  signalWindowFourHourCandles:240,
+  indicatorFourHourCandles:720,
+  unverifiedFourHourDays:1,
+  signalWindowStatus:"READY_CONTIGUOUS",
+  lastCompletedFourHourAt:"2026-11-25T08:00:00.000Z",
+  lastCompletedFourHourClose:130000
+ },quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:99900,spreadBps:10,retrievedAt:"2026-11-25T12:15:00.000Z"}};
+ account=processMtfPaperAccount(account,{markets:[invalidHistory],now:"2026-11-25T12:15:00.000Z"});
+ assert.ok(account.openPosition);
+ assert.equal(account.openPosition.highestPrice,entryHigh);
+ assert.equal(account.openPosition.trailingStop,stop);
+ const stopQuote={...invalidHistory,quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T12:30:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(account,{markets:[stopQuote],now:"2026-11-25T12:30:00.000Z"});
+ assert.equal(closed.openPosition,null);
+ assert.equal(closed.closedTrades.at(-1).reason,"TRAILING_STOP");
+ assert.equal(closed.paperOnly,true);
+ assert.equal(closed.liveTradingEnabled,false);
+});
+
 test("starts with AUD 100 and immutable paper-only safety flags",()=>{const a=createMtfPaperAccount(now);assert.equal(a.cashAud,100);assert.equal(a.paperOnly,true);assert.equal(a.liveTradingEnabled,false);assert.equal(validateMtfPaperAccount(a),true);});
 test("migrates legacy ledgers to an explicit paper-only marker and rejects a false marker",()=>{const legacy=createMtfPaperAccount(now);delete legacy.paperOnly;assert.equal(validateMtfPaperAccount(legacy),true);const migrated=processMtfPaperAccount(legacy,{markets:[],now});assert.equal(migrated.paperOnly,true);assert.equal(migrated.liveTradingEnabled,false);assert.throws(()=>processMtfPaperAccount({...migrated,paperOnly:false},{markets:[],now}),/failed validation/);});
 test("opens a single risk-sized simulated CoinSpot position and retains reserve",()=>{const a=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});assert.ok(a.openPosition);assert.equal(a.openPosition.coin,"BTC");assert.ok(a.cashAud>=75);assert.ok(a.unrealizedPnlAud<0);assert.ok(a.equityAud<100);assert.ok(a.dailyLossAud>0);assert.equal(a.liveTradingEnabled,false);});
@@ -193,7 +262,7 @@ test("trailing-stop high-water mark advances only on completed post-entry four-h
  a=processMtfPaperAccount(a,{markets:[intrabar],now:"2026-11-25T08:30:00.000Z"});
  assert.equal(a.openPosition.highestPrice,entryHigh);
  assert.equal(a.openPosition.trailingStop,entryHigh-2500);
- const completed={...intrabar,history:{lastCompletedFourHourAt:"2026-11-25T08:00:00.000Z",lastCompletedFourHourClose:104000},
+ const completed={...intrabar,history:validatedHistory("2026-11-25T08:00:00.000Z",104000),
   quote:{pair:"BTC/AUD",bid:102000,ask:102100,last:104000,spreadBps:9.8,retrievedAt:"2026-11-25T12:15:00.000Z"}};
  a=processMtfPaperAccount(a,{markets:[completed],now:"2026-11-25T12:15:00.000Z"});
  assert.equal(a.openPosition.highestPrice,104000);
