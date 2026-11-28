@@ -65,4 +65,6 @@ test("CoinSpot MTF operational documentation matches the eleven deployed five-mi
   assert.match(checklist, slots, "smoke checklist must document all eleven MTF slots");
   assert.doesNotMatch(readme, /CoinSpot runs at UTC :15, :30 and :45/);
   assert.doesNotMatch(checklist, /Verify :15, :30 and :45 run CoinSpot MTF alone/);
+  assert.match(checklist, /up to four historical UTC dates per CoinSpot MTF slot/);
+  assert.doesNotMatch(checklist, /one UTC day per 15-minute cron|15-minute schedule|one historical UTC day per 15-minute invocation/);
 });
