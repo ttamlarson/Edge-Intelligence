@@ -705,6 +705,14 @@ test("legacy closed trades still reconcile configured fees without reference-pri
  const tampered=structuredClone(closed);
  const trade=tampered.closedTrades[0];
  delete trade.costModelVersion;
+ delete trade.riskModelVersion;
+ delete trade.entryEquityAud;
+ delete trade.entryCashAvailableAud;
+ delete trade.dailyLossAtEntryAud;
+ delete trade.stopPrice;
+ delete trade.trailingStop;
+ delete trade.highestPrice;
+ delete trade.atr;
  delete trade.referenceAsk;
  delete trade.referenceBid;
  const removedFees=trade.entryFeeAud+trade.exitFeeAud;
@@ -716,4 +724,87 @@ test("legacy closed trades still reconcile configured fees without reference-pri
  tampered.equityAud=tampered.cashAud;
  tampered.dailyLossAud=Math.round((Math.max(0,-trade.pnlAud)+Number.EPSILON)*100)/100;
  assert.throws(()=>validateMtfPaperAccount(tampered),/ledger failed validation/);
+});
+
+
+test("persisted MTF risk evidence rejects open positions above the allocation ceiling", () => {
+ const lowAtr=candidate("ETH");
+ lowAtr.signal.indicators.atr20=100;
+ lowAtr.signal.risk.initialStopDistance=250;
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[lowAtr],now});
+ assert.ok(opened.openPosition);
+ const tampered=structuredClone(opened);
+ const p=tampered.openPosition;
+ const quantity=0.00026;
+ const notional=quantity*p.entryPrice;
+ p.quantity=quantity;
+ p.notionalAud=Math.round((notional+Number.EPSILON)*100)/100;
+ p.entryFeeAud=Math.round((notional*MTF_PAPER_CONFIG.feeRate+Number.EPSILON)*100)/100;
+ p.entryCost=Math.round((p.notionalAud+p.entryFeeAud+Number.EPSILON)*100)/100;
+ const stopExitPerUnit=p.stopPrice*(1-MTF_PAPER_CONFIG.slippageBps/10000)*(1-MTF_PAPER_CONFIG.feeRate);
+ const entryCostPerUnit=p.entryPrice*(1+MTF_PAPER_CONFIG.feeRate);
+ p.estimatedNetStopLossAud=Math.round((quantity*(entryCostPerUnit-stopExitPerUnit)+Number.EPSILON)*100)/100;
+ p.riskBudgetUsePct=Math.round((p.estimatedNetStopLossAud/p.riskBudgetAud+Number.EPSILON)*10000)/100;
+ tampered.cashAud=Math.round((p.entryCashAvailableAud-p.entryCost+Number.EPSILON)*100)/100;
+ const mark=lowAtr.quote.bid*(1-MTF_PAPER_CONFIG.slippageBps/10000);
+ const markGross=quantity*mark;
+ const markFee=markGross*MTF_PAPER_CONFIG.feeRate;
+ tampered.unrealizedPnlAud=Math.round((markGross-markFee-p.entryCost+Number.EPSILON)*100)/100;
+ tampered.dailyLossAud=Math.max(0,-tampered.unrealizedPnlAud);
+ tampered.equityAud=Math.round((tampered.cashAud+p.entryCost+tampered.unrealizedPnlAud+Number.EPSILON)*100)/100;
+ assert.ok(p.entryCost>p.entryEquityAud*MTF_PAPER_CONFIG.maxAllocationPct/100);
+ assert.throws(()=>validateMtfPaperAccount(tampered),/position failed validation/);
+});
+
+test("persisted MTF risk evidence rejects excessive risk budgets and altered ATR stop distances", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const excessiveBudget=structuredClone(opened);
+ excessiveBudget.openPosition.riskBudgetAud=0.75;
+ excessiveBudget.openPosition.riskBudgetUsePct=Math.round((excessiveBudget.openPosition.estimatedNetStopLossAud/0.75+Number.EPSILON)*10000)/100;
+ assert.throws(()=>validateMtfPaperAccount(excessiveBudget),/position failed validation/);
+
+ const widenedStop=structuredClone(opened);
+ const p=widenedStop.openPosition;
+ p.stopPrice=p.entryPrice-3*p.atr;
+ p.trailingStop=p.stopPrice;
+ const stopExitPerUnit=p.stopPrice*(1-MTF_PAPER_CONFIG.slippageBps/10000)*(1-MTF_PAPER_CONFIG.feeRate);
+ const entryCostPerUnit=p.entryPrice*(1+MTF_PAPER_CONFIG.feeRate);
+ p.estimatedNetStopLossAud=Math.round((p.quantity*(entryCostPerUnit-stopExitPerUnit)+Number.EPSILON)*100)/100;
+ p.riskBudgetUsePct=Math.round((p.estimatedNetStopLossAud/p.riskBudgetAud+Number.EPSILON)*10000)/100;
+ assert.throws(()=>validateMtfPaperAccount(widenedStop),/position failed validation/);
+});
+
+test("closed MTF trades retain risk-budget, allocation and stop evidence", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ assert.ok(opened.openPosition);
+ const stop=opened.openPosition.stopPrice;
+ const exitMarket={...candidate(),quote:{
+  pair:"BTC/AUD",bid:stop*.9,ask:stop,last:stop,
+  spreadBps:(stop-stop*.9)/((stop+stop*.9)/2)*10000,
+  retrievedAt:"2026-11-25T09:00:00.000Z"
+ }};
+ const closed=processMtfPaperAccount(opened,{markets:[exitMarket],now:"2026-11-25T09:00:00.000Z"});
+ const trade=closed.closedTrades.at(-1);
+ assert.equal(trade.riskModelVersion,1);
+ assert.ok(trade.entryEquityAud>0);
+ assert.ok(trade.entryCashAvailableAud>0);
+ assert.ok(trade.stopPrice>0);
+ assert.ok(trade.atr>0);
+ assert.equal(validateMtfPaperAccount(closed),true);
+ const tampered=structuredClone(closed);
+ tampered.closedTrades[0].riskBudgetAud*=2;
+ assert.throws(()=>validateMtfPaperAccount(tampered),/ledger failed validation/);
+ const stripped=structuredClone(closed);
+ delete stripped.closedTrades[0].riskModelVersion;
+ assert.throws(()=>validateMtfPaperAccount(stripped),/ledger failed validation/);
+});
+
+test("legacy MTF positions without versioned execution-cost evidence remain readable", () => {
+ const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[candidate()],now});
+ const legacy=structuredClone(opened);
+ const p=legacy.openPosition;
+ for (const key of ["costModelVersion","riskModelVersion","entryEquityAud","entryCashAvailableAud",
+   "dailyLossAtEntryAud","referenceAsk"]) delete p[key];
+ assert.equal(validateMtfPaperAccount(legacy),true);
 });
