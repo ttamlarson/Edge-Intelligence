@@ -54,7 +54,10 @@ export function validateMtfPaperAccount(a) {
   const validClosedTrade = trade => {
     if (!trade || !validCoin(trade.coin) || trade.pair !== trade.coin + "/AUD" ||
         !validTimestamp(trade.openedAt) || !validTimestamp(trade.closedAt) ||
-        !validTimestamp(trade.signalAt) || Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
+        !validTimestamp(trade.signalAt) || trade.id !== trade.coin + "-" + trade.signalAt ||
+        (trade.strategy !== undefined && trade.strategy !== null &&
+          trade.strategy !== "EDGE_MTF_DONCHIAN_ENSEMBLE_V1") ||
+        Date.parse(trade.closedAt) < Date.parse(trade.openedAt) ||
         Date.parse(trade.closedAt) > Date.parse(a.updatedAt) ||
         Date.parse(trade.openedAt) < Date.parse(trade.signalAt) + FOUR_HOUR_MS ||
         Date.parse(trade.openedAt) > Date.parse(trade.signalAt) + FOUR_HOUR_MS + MAX_SIGNAL_AGE_AFTER_CLOSE_MS ||
@@ -160,7 +163,7 @@ export function validateMtfPaperAccount(a) {
       Math.abs(p.entryCost - (p.notionalAud + p.entryFeeAud)) <= 0.02 &&
       Math.abs(p.notionalAud - p.quantity * p.entryPrice) <= 0.02;
     if (!validCoin(p.coin) || p.pair !== p.coin + "/AUD" ||
-        typeof p.id !== "string" || p.id.length === 0 ||
+        p.id !== p.coin + "-" + p.signalAt ||
         !positiveFinite(p.quantity) || !positiveFinite(p.entryPrice) ||
         !positiveFinite(p.notionalAud) || !positiveFinite(p.entryCost) ||
         !nonNegativeFinite(p.entryFeeAud) || !entryCostMatches ||

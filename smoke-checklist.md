@@ -273,3 +273,8 @@
 - [ ] Confirm 110 validated daily candles and 210 validated four-hour candles can pass warm-up despite stale unverified cache tails.
 - [ ] Confirm 109 daily candles, fewer than 210 four-hour candles, invalid ledgers, unverified signal-window gaps, and excessive confirmed zero-trade gaps remain blocked.
 - [ ] Confirm the paper ledger remains simulated and `liveTradingEnabled` remains `false`.
+
+
+## CoinSpot MTF canonical ledger identity
+- [x] Confirm persisted open-position and closed-trade IDs equal the canonical market plus four-hour signal timestamp (`<coin>-<signalAt>`).
+- [x] Confirm a stored closed-trade strategy identity, when present, must equal `EDGE_MTF_DONCHIAN_ENSEMBLE_V1`; malformed IDs and unrelated strategy provenance fail closed without modifying the ledger.

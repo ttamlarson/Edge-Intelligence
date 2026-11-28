@@ -285,3 +285,8 @@ Crypto strategy comparison now keeps quote-currency net P&L separate from percen
 ### CoinSpot MTF history-readiness remediation
 
 The paper scanner allocates up to 30 CoinSpot history subrequests per scan (15 per AUD market), while retaining the reduced budget when a provider probe runs. Cached candles that fail completed-order date-ledger reconciliation remain excluded from all strategy calculations and are reported in diagnostics; they no longer veto a signal once the independently validated, contiguous daily and four-hour history windows meet the strategy's minimum requirements. The 110-daily/210-four-hour warm-up, quote-spread ceiling, risk limits, paper-only execution and live-order lock remain unchanged.
+
+
+### CoinSpot MTF paper-ledger identity integrity
+
+Version-2 paper positions and closed trades must use the canonical `<coin>-<signalAt>` identity, and any stored strategy provenance must match `EDGE_MTF_DONCHIAN_ENSEMBLE_V1`. This rejects corrupted or misattributed ledger records without changing signal thresholds, fees, slippage, position sizing, stops, loss limits or paper-only execution.
