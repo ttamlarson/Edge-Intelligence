@@ -268,7 +268,12 @@ test("existing paper positions remain stop-managed while historical candles are 
  const kv=kvStore(),originalFetch=globalThis.fetch;
  const now="2026-11-25T08:00:00.000Z";
  const opened=processMtfPaperAccount(createMtfPaperAccount(now),{markets:[{
-  coin:"BTC",pair:"BTC/AUD",quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:100000,spreadBps:10,retrievedAt:now},
+  coin:"BTC",pair:"BTC/AUD",
+  history:{historyIntegrityStatus:"VALIDATED",validatedDailyCandles:120,contiguousDailyCandles:120,
+   validatedFourHourCandles:420,signalWindowFourHourCandles:240,indicatorFourHourCandles:420,
+   unverifiedDailyDays:0,unverifiedFourHourDays:0,signalWindowStatus:"READY_CONTIGUOUS",
+   lastCompletedFourHourAt:"2026-11-25T04:00:00.000Z",lastCompletedFourHourClose:100000},
+  quote:{pair:"BTC/AUD",bid:99900,ask:100000,last:100000,spreadBps:10,retrievedAt:now},
   signal:{strategy:"EDGE_MTF_DONCHIAN_ENSEMBLE_V1",status:"BUY_CANDIDATE_PAPER_ONLY",signalAt:"2026-11-25T04:00:00.000Z",
    indicators:{breakoutVotes:3,atr20:1000},risk:{initialStopDistance:2500},
    checks:{dailyTrend:true,fourHourTrend:true,positiveLongTrendSlope:true,breakoutVotes:true,pullbackReclaim:false,entryTrigger:true,liquidity:true,volatility:true},
