@@ -76,7 +76,7 @@ async function authenticate(request, env, ctx) {
   if (ctx?.access) {
     const identity = await ctx.access.getIdentity();
     const subject = identity?.id || identity?.sub;
-    if (subject) return { sub: String(subject) };
+    if (subject) return { sub: String(subject), email: typeof identity.email === "string" ? identity.email : "" };
   }
   const teamDomain = String(env.CF_ACCESS_TEAM_DOMAIN || "").trim().toLowerCase();
   const audience = String(env.CF_ACCESS_AUD || "").trim();
@@ -96,10 +96,18 @@ async function authenticate(request, env, ctx) {
     const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     const verified = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, decodeBase64Url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
     if (!verified) throw new HttpError(401, "Authentication required.");
-    return { sub: claims.sub };
+    return { sub: claims.sub, email: typeof claims.email === "string" ? claims.email : "" };
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(401, "Authentication required.");
+  }
+}
+
+function requireCoinSpotOperator(principal, env) {
+  const allowedEmail = String(env.COINSPOT_MTF_OPERATOR_EMAIL || "").trim().toLowerCase();
+  const actualEmail = String(principal?.email || "").trim().toLowerCase();
+  if (!allowedEmail || !actualEmail || actualEmail !== allowedEmail) {
+    throw new HttpError(403, "This deployment-wide CoinSpot account is restricted to its configured operator.");
   }
 }
 
@@ -2292,10 +2300,12 @@ async function handle(request, env, ctx) {
   }
 
   if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "GET") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.DATA_LIMITER, principal.sub, "coinspot-mtf-paper-account");
     return reply(await getCoinSpotMtfPaper(env));
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/mtf-paper" && request.method === "POST") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.WRITE_LIMITER, principal.sub, "coinspot-mtf-paper-run");
     try { return reply(await runCoinSpotMtfPaper(env)); }
     catch (error) {
@@ -2364,6 +2374,7 @@ async function handle(request, env, ctx) {
     return reply(payload, result.status);
   }
   if (requestUrl.pathname === "/api/coinspot/account" && request.method === "GET") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-readonly-account");
     const [balances,orders]=await Promise.all([coinSpotReadOnly(env,"/my/balances"),coinSpotReadOnly(env,"/my/orders/market/open",{markettype:"AUD"})]);
     if(!Array.isArray(balances.balances))throw new HttpError(502,"CoinSpot balance response was malformed.");
@@ -2386,6 +2397,7 @@ async function handle(request, env, ctx) {
     return reply({provider:"CoinSpot",markets,retrievedAt:isoNow(),strategyStatus:"WAITING_FOR_VALIDATED_HISTORICAL_CANDLES",disclaimer:"CoinSpot public API provides current bid/ask/last prices and recent completed trades here, not a documented hourly OHLC candle feed. EDGE will not manufacture candles or generate trade signals from incomplete data."});
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/readonly/status" && request.method === "GET") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.DATA_LIMITER, principal.sub, "coinspot-readonly-status");
     if (!env.COINSPOT_READONLY_KEY || !env.COINSPOT_READONLY_SECRET) throw new HttpError(503, "CoinSpot read-only API credentials are not configured.");
     const status = await coinSpotReadOnly(env, "/status");
@@ -2393,10 +2405,12 @@ async function handle(request, env, ctx) {
     return reply({ provider: "CoinSpot", access: "READ_ONLY", status: "AUTHENTICATED", retrievedAt: isoNow(), paperOnly: true, liveTradingEnabled: false });
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/strategy" && request.method === "GET") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.DATA_LIMITER,principal.sub,"coinspot-mtf-strategy");
     return reply(await getCoinSpotMtfStrategy(env));
   }
   if (requestUrl.pathname === "/api/crypto/coinspot/strategy/sync" && request.method === "POST") {
+    requireCoinSpotOperator(principal, env);
     await routeLimit(env.WRITE_LIMITER,principal.sub,"coinspot-mtf-sync");
     if(!env.COINSPOT_READONLY_KEY||!env.COINSPOT_READONLY_SECRET) throw new HttpError(503,"CoinSpot Read Only API credentials are not configured.");
     try { return reply(await syncCoinSpotMtfHistory(env)); }
@@ -2666,5 +2680,5 @@ export default {
   }
 };
 
-export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate, validateCoinSpotMtfMarketHistory };
+export const __test = { parseLimit, normalizeManifoldMarket, screenOpportunity, marketSearch, readJson, decodeJwtPart, runAutomatedCryptoPaper, runScheduledCryptoPaper, isCoinSpotMtfScheduleSlot, coinSpotReadOnly, coinSpotReadOnlyNow, syncCoinSpotMtfHistory, persistCoinSpotMtfHistory, getCoinSpotMtfStrategy, runCoinSpotMtfPaper, getCoinSpotMtfPaper, probeCoinSpotHistory, reviewCoinSpotMtfCandidate, isValidCoinSpotMtfAiReview, applyCoinSpotMtfAiGate, validateCoinSpotMtfMarketHistory, requireCoinSpotOperator };
 export { CoinSpotExecutionCoordinator } from "./coinspot-execution-coordinator.js";

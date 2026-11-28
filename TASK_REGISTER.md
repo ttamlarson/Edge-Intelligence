@@ -400,3 +400,12 @@ Updated after local implementation and automated verification on `edge-productio
 - [x] Correct README: the scheduled MTF paper account is deployment-wide/global, not partitioned by Cloudflare Access subject.
 - [x] Add an operational smoke-check item to prevent accidental multi-user assumptions.
 - [ ] If multi-user access is required, design and test subject-scoped paper ledgers and locks before widening the Cloudflare Access policy. Keep the scheduled paper engine and every account paper-only.
+
+
+## 2026-11-28 — CoinSpot global-ledger operator isolation
+
+- [x] Confirmed the scheduled MTF ledger and authenticated history/status are deployment-wide global KV records, not per-Access-user accounts.
+- [x] Added a fail-closed Worker operator gate requiring verified Access email to match the `COINSPOT_MTF_OPERATOR_EMAIL` secret for global MTF ledger, shared strategy/history, and private CoinSpot account routes.
+- [x] Added regression coverage for missing configuration, missing/mismatched identities, operator access, and paper-only ledger preservation.
+- [ ] Verify the production Worker secret, Access policy scope, CI, deployment and live route behaviour after deployment.
+- Paper-only execution, read-only CoinSpot credentials, fee/slippage, sizing, stops, loss limits and live-trading safety flags are unchanged.

@@ -283,3 +283,10 @@
 ## CoinSpot MTF ledger tenancy boundary
 - [x] Confirm the automated MTF paper account uses deployment-wide global KV keys; do not describe it as per-Access-user isolated.
 - [ ] Before admitting multiple unrelated Access users, implement subject-scoped ledgers and concurrency locks or explicitly restrict Access to the single intended operator.
+
+
+## CoinSpot MTF global-ledger operator isolation
+- [x] Confirm the scheduled MTF account is one deployment-wide ledger.
+- [x] Confirm Worker routes serving that ledger, shared MTF history/strategy and private CoinSpot read-only account data require a verified Access email matching `COINSPOT_MTF_OPERATOR_EMAIL`.
+- [ ] Verify missing or mismatched operator email receives HTTP 403 in production and the configured operator can read the paper ledger.
+- [ ] Keep the Worker Access application policy limited to the same operator; do not use broad account-member access for the global ledger.
