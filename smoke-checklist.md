@@ -147,7 +147,7 @@
 
 - [ ] Verify the scheduled runner processes up to four historical UTC dates per five-minute MTF slot and stays below Cloudflare's per-invocation subrequest limit; :00 must not start an MTF scan.
 - [ ] Verify provider diagnostics are sampled no more than once per 24 hours.
-- [ ] Verify recursive completed-order history requests stop at the 15-request per-market/day safety budget and do not advance incomplete dates.
+- [ ] Verify recursive completed-order history requests stop at 18 per market/date sync chunk and the normal scan stays within 36 total history-backfill requests per scan. A provider-probe scan must preserve its separate bounded probe allowance and limit follow-on backfill to two requests. Incomplete dates must not advance the cursor.
 - [ ] Inject non-empty but malformed CoinSpot completed-order rows; verify `COINSPOT_HISTORY_SCHEMA_MISMATCH`, persisted cursor remains unchanged, and no candle is written.
 - [ ] Confirm dense-day history partitions return accepted normalized trades before a date is marked complete; never accept a capped partial daily response.
 
@@ -267,7 +267,7 @@
 
 ## CoinSpot MTF stale-cache and backfill-budget regression
 
-- [ ] Confirm a normal paper scan reports a maximum history request budget of 30, with no more than 15 requests per AUD market.
+- [ ] Confirm a normal paper scan reports a 36-request history-backfill budget, with no more than 18 requests per market/date sync chunk.
 - [ ] Confirm a provider-probe scan applies its reduced history budget and preserves quote/position-management headroom.
 - [ ] Confirm unverified cached daily/four-hour candles remain excluded from signal calculations and remain visible in diagnostics.
 - [ ] Confirm 110 validated daily candles and 210 validated four-hour candles can pass warm-up despite stale unverified cache tails.
