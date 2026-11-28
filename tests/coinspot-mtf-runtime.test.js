@@ -125,6 +125,21 @@ test("CoinSpot MTF public quote accepts decimal strings but rejects coercible no
  } finally { globalThis.fetch=originalFetch; }
 });
 
+test("shared CoinSpot public quote parser rejects malformed prices and crossed books", () => {
+ assert.deepEqual(__test.parseCoinSpotPublicQuote({bid:"100.00",ask:"101.00",last:"100.50"}),{
+  bid:100,ask:101,last:100.5
+ });
+ for (const prices of [
+  {bid:true,ask:"101",last:"100.5"},
+  {bid:["100"],ask:"101",last:"100.5"},
+  {bid:"0x64",ask:"101",last:"100.5"},
+  {bid:"0",ask:"101",last:"100.5"},
+  {bid:"100",ask:"101",last:[]},
+  {bid:"101",ask:"100",last:"100.5"},
+  ["100","101","100.5"]
+ ]) assert.equal(__test.parseCoinSpotPublicQuote(prices),null);
+});
+
 test("CoinSpot MTF paper runner backfills after a validated provider probe and creates a paper-only AUD ledger",async()=>{
  const kv=kvStore(),originalFetch=globalThis.fetch,calls=[];
  const now="2026-11-25T08:00:00.000Z";
