@@ -89,3 +89,35 @@ test("does not classify a truncated leading day as a retention exclusion below t
   assert.ok(result.unverifiedFourHourDays >= 1);
   assert.deepEqual(result.retentionBoundaryExcludedFourHourDays, []);
 });
+
+
+test("rejects coercible or inconsistent persisted four-hour OHLCV even when trade counts reconcile", () => {
+  const day = "2026-08-01";
+  const corruptions = [
+    ["boolean close", candle => { candle.close = true; }],
+    ["array volume", candle => { candle.volume = [1]; }],
+    ["inconsistent high", candle => { candle.high = 98; }]
+  ];
+
+  for (const [label, corrupt] of corruptions) {
+    const history = makeHistoryFixture();
+    corrupt(history.fourHourCandles.find(candle => candle.timestamp.startsWith(day)));
+    const result = __test.validateCoinSpotMtfMarketHistory(history);
+
+    assert.equal(result.status, "BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS", label);
+    assert.equal(result.unverifiedFourHourDays, 1, label);
+    assert.equal(result.fourHourCandles.some(candle => candle.timestamp.startsWith(day)), false, label);
+  }
+});
+
+test("rejects coercible daily OHLCV values before a date is marked validated", () => {
+  const history = makeHistoryFixture();
+  const day = "2026-08-01";
+  history.dailyCandles.find(candle => candle.timestamp.startsWith(day)).close = "100";
+
+  const result = __test.validateCoinSpotMtfMarketHistory(history);
+
+  assert.equal(result.status, "BACKFILLING_WITH_UNVERIFIED_CACHED_DAYS");
+  assert.equal(result.unverifiedDailyDays, 1);
+  assert.equal(result.dailyCandles.some(candle => candle.timestamp.startsWith(day)), false);
+});
